@@ -58,18 +58,16 @@ public class StylistService : IStylistService
     var chatOptions = new ChatCompletionsOptions
     {
       Temperature = 0.7f,
+      DeploymentName = _deploymentName,
     };
 
     chatOptions.Messages.Add(new ChatRequestSystemMessage(systemPrompt));
     chatOptions.Messages.Add(new ChatRequestUserMessage(userPrompt));
 
     Response<ChatCompletions> response =
-      await _client.GetChatCompletionsAsync(
-        _deploymentName,
-        chatOptions,
-        cancellationToken);
+      await _client.GetChatCompletionsAsync(chatOptions);
 
-    var content = response.Value.Choices[0].Message.Content[0].Text;
+    var content = response.Value.Choices[0].Message.Content;
 
     try
     {
@@ -80,7 +78,7 @@ public class StylistService : IStylistService
           PropertyNameCaseInsensitive = true
         });
 
-      return outfits ?? Array.Empty<OutfitRecommendation>();
+      return (IReadOnlyCollection<OutfitRecommendation>)(outfits ?? new List<OutfitRecommendation>());
     }
     catch
     {

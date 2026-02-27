@@ -1,5 +1,6 @@
 import { Component } from '@angular/core';
 import { NgFor, NgIf } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { WardrobeService, OutfitRecommendation, StylistRequest } from '../../core/wardrobe.service';
 
 interface ChatMessage {
@@ -10,7 +11,7 @@ interface ChatMessage {
 @Component({
   selector: 'app-stylist-chat',
   standalone: true,
-  imports: [NgFor, NgIf],
+  imports: [NgFor, NgIf, FormsModule],
   templateUrl: './stylist-chat.component.html',
 })
 export class StylistChatComponent {

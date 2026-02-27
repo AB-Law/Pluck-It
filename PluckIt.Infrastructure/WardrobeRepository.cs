@@ -90,9 +90,9 @@ public class WardrobeRepository : IWardrobeRepository
         id,
         new PartitionKey(id),
         cancellationToken: cancellationToken);
-      return response.Value;
+      return response.Resource;
     }
-    catch (CosmosException ex) when (ex.Status == (int)HttpStatusCode.NotFound)
+    catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
     {
       return null;
     }
