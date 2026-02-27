@@ -33,7 +33,13 @@ var cosmosKey = builder.Configuration["Cosmos:Key"]
 var cosmosDatabase = builder.Configuration["Cosmos:Database"] ?? "PluckIt";
 var cosmosContainer = builder.Configuration["Cosmos:Container"] ?? "Wardrobe";
 
-builder.Services.AddSingleton(_ => new CosmosClient(cosmosEndpoint, cosmosKey));
+builder.Services.AddSingleton(_ => new CosmosClient(cosmosEndpoint, cosmosKey, new CosmosClientOptions
+{
+  SerializerOptions = new CosmosSerializationOptions
+  {
+    PropertyNamingPolicy = CosmosPropertyNamingPolicy.CamelCase
+  }
+}));
 builder.Services.AddSingleton<IWardrobeRepository>(sp =>
   new WardrobeRepository(
     sp.GetRequiredService<CosmosClient>(),
@@ -69,6 +75,13 @@ if (string.IsNullOrWhiteSpace(processorBaseUrl))
 builder.Services.AddHttpClient("processor", client =>
   client.BaseAddress = new Uri(processorBaseUrl));
 
+// SAS URL generator for private archive blobs
+var blobAccountName = builder.Configuration["BlobStorage:AccountName"] ?? "";
+var blobAccountKey = builder.Configuration["BlobStorage:AccountKey"] ?? "";
+var blobArchiveContainer = builder.Configuration["BlobStorage:ArchiveContainer"] ?? "archive";
+builder.Services.AddSingleton<IBlobSasService>(
+  new BlobSasService(blobAccountName, blobAccountKey, blobArchiveContainer));
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -87,6 +100,7 @@ app.MapGet("/", () => Results.Ok(new { status = "healthy", service = "PluckIt AP
 
 app.MapGet("/api/wardrobe", async (
   [FromServices] IWardrobeRepository repo,
+  [FromServices] IBlobSasService sasService,
   [FromQuery] string? category,
   [FromQuery] string[]? tags,
   [FromQuery] int page,
@@ -103,16 +117,20 @@ app.MapGet("/api/wardrobe", async (
     normalizedSize,
     cancellationToken);
 
-  return Results.Ok(items);
+  var result = items.Select(i => { i.ImageUrl = sasService.GenerateSasUrl(i.ImageUrl); return i; }).ToList();
+  return Results.Ok(result);
 });
 
 app.MapGet("/api/wardrobe/{id}", async (
   [FromServices] IWardrobeRepository repo,
+  [FromServices] IBlobSasService sasService,
   string id,
   CancellationToken cancellationToken) =>
 {
   var item = await repo.GetByIdAsync(id, cancellationToken);
-  return item is null ? Results.NotFound() : Results.Ok(item);
+  if (item is null) return Results.NotFound();
+  item.ImageUrl = sasService.GenerateSasUrl(item.ImageUrl);
+  return Results.Ok(item);
 });
 
 app.MapPut("/api/wardrobe/{id}", async (
@@ -159,16 +177,26 @@ app.MapPost("/api/wardrobe/upload", async (
   IFormFile image,
   [FromServices] IHttpClientFactory httpClientFactory,
   [FromServices] IClothingMetadataService metadataService,
+  [FromServices] IBlobSasService sasService,
   CancellationToken cancellationToken) =>
 {
   if (image is null || image.Length == 0)
     return Results.BadRequest(new { error = "No image provided." });
 
+  // Read image bytes once — reused for both the processor call and AI metadata
+  var mediaType = image.ContentType ?? "image/png";
+  byte[] imageBytes;
+  using (var ms = new System.IO.MemoryStream())
+  {
+    await image.CopyToAsync(ms, cancellationToken);
+    imageBytes = ms.ToArray();
+  }
+
   // Forward to the Function App for background removal + blob upload
   using var form = new MultipartFormDataContent();
-  var streamContent = new StreamContent(image.OpenReadStream());
+  var streamContent = new StreamContent(new System.IO.MemoryStream(imageBytes));
   streamContent.Headers.ContentType =
-    new System.Net.Http.Headers.MediaTypeHeaderValue(image.ContentType ?? "image/png");
+    new System.Net.Http.Headers.MediaTypeHeaderValue(mediaType);
   form.Add(streamContent, "image", image.FileName ?? "upload.png");
 
   var processorClient = httpClientFactory.CreateClient("processor");
@@ -186,14 +214,15 @@ app.MapPost("/api/wardrobe/upload", async (
   if (processed is null || string.IsNullOrEmpty(processed.ImageUrl))
     return Results.Problem("Image processor returned an unexpected response.");
 
-  // Extract AI metadata from the processed image URL
-  var metadata = await metadataService.ExtractMetadataAsync(processed.ImageUrl, cancellationToken);
+  // Extract AI metadata using the original image bytes (blob URL is private)
+  var imageData = BinaryData.FromBytes(imageBytes);
+  var metadata = await metadataService.ExtractMetadataAsync(imageData, mediaType, cancellationToken);
 
   // Return draft — NOT saved to Cosmos yet; client must confirm via POST /api/wardrobe
   var draft = new ClothingItem
   {
     Id = processed.Id,
-    ImageUrl = processed.ImageUrl,
+    ImageUrl = sasService.GenerateSasUrl(processed.ImageUrl),
     Brand = metadata.Brand,
     Category = metadata.Category,
     Tags = metadata.Tags,

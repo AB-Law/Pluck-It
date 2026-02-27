@@ -3,6 +3,7 @@ import {
   EventEmitter,
   Input,
   OnChanges,
+  OnInit,
   Output,
   SimpleChanges,
 } from '@angular/core';
@@ -45,7 +46,7 @@ import { ClothingColour, ClothingItem } from '../../core/models/clothing-item.mo
             </div>
 
             <div class="field">
-              <label>Price <span class="required">*</span></label>
+              <label>Price</label>
               <div class="price-input">
                 <span class="currency">£</span>
                 <input
@@ -104,7 +105,6 @@ import { ClothingColour, ClothingItem } from '../../core/models/clothing-item.mo
           <button
             class="btn-primary"
             (click)="onSave()"
-            [disabled]="!draft?.price || draft?.price! <= 0"
           >Save to Wardrobe</button>
         </div>
 
@@ -346,7 +346,7 @@ import { ClothingColour, ClothingItem } from '../../core/models/clothing-item.mo
     .btn-secondary:hover { background: #e0e0e0; }
   `]
 })
-export class ReviewItemModalComponent implements OnChanges {
+export class ReviewItemModalComponent implements OnChanges, OnInit {
   @Input() item: ClothingItem | null = null;
   @Output() saved = new EventEmitter<ClothingItem>();
   @Output() cancelled = new EventEmitter<void>();
@@ -354,14 +354,21 @@ export class ReviewItemModalComponent implements OnChanges {
   draft: ClothingItem | null = null;
   newTag = '';
 
+  ngOnInit(): void {
+    console.log('[ReviewModal] component instantiated, item:', this.item);
+  }
+
   ngOnChanges(changes: SimpleChanges): void {
+    console.log('[ReviewModal] ngOnChanges', changes);
     if (changes['item'] && this.item) {
+      console.log('[ReviewModal] item received, building draft:', this.item);
       // Deep copy so edits don't mutate the original until confirmed
       this.draft = {
         ...this.item,
         tags: [...(this.item.tags ?? [])],
         colours: (this.item.colours ?? []).map(c => ({ ...c })),
       };
+      console.log('[ReviewModal] draft built:', this.draft);
     }
   }
 
@@ -397,7 +404,7 @@ export class ReviewItemModalComponent implements OnChanges {
   }
 
   onSave(): void {
-    if (this.draft && this.draft.price && this.draft.price > 0) {
+    if (this.draft) {
       this.saved.emit({ ...this.draft });
     }
   }

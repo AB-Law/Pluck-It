@@ -132,6 +132,9 @@ resource "azurerm_linux_web_app" "pluckit_api" {
       "AI__ApiKey"                           = var.ai_api_key
       "AI__Deployment"                       = "gpt-4.1-mini"
       "Processor__BaseUrl"                   = "https://${local.base_name}-processor-func.azurewebsites.net"
+      "BlobStorage__AccountName"             = azurerm_storage_account.sa_pluckit.name
+      "BlobStorage__AccountKey"              = azurerm_storage_account.sa_pluckit.primary_access_key
+      "BlobStorage__ArchiveContainer"        = azurerm_storage_container.archive.name
     },
     {
       for idx, origin in var.cors_allowed_origins :

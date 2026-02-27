@@ -1,5 +1,5 @@
-import { Component, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, OnInit, signal } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
 import { WardrobeService } from '../../core/services/wardrobe.service';
 import { ClothingItem } from '../../core/models/clothing-item.model';
 import { UploadItemComponent } from './upload-item.component';
@@ -8,67 +8,85 @@ import { ReviewItemModalComponent } from './review-item-modal.component';
 @Component({
   selector: 'app-closet',
   standalone: true,
-  imports: [CommonModule, UploadItemComponent, ReviewItemModalComponent],
+  imports: [DecimalPipe, UploadItemComponent, ReviewItemModalComponent],
   template: `
     <div class="closet-container">
 
       <div class="closet-header">
         <h2>Your Closet</h2>
-        <p>{{ items.length }} item{{ items.length !== 1 ? 's' : '' }}</p>
+        <p>{{ items().length }} item{{ items().length !== 1 ? 's' : '' }}</p>
       </div>
 
       <app-upload-item (fileSelected)="onFileSelected($event)" />
 
       <!-- Upload loading state -->
-      <div class="upload-status" *ngIf="uploading">
-        <div class="spinner"></div>
-        <span>Processing image &amp; extracting metadata…</span>
-      </div>
-      <div class="upload-error" *ngIf="uploadError">
-        ⚠️ {{ uploadError }}
-        <button (click)="uploadError = null">Dismiss</button>
-      </div>
+      @if (uploading()) {
+        <div class="upload-status">
+          <div class="spinner"></div>
+          <span>Processing image &amp; extracting metadata…</span>
+        </div>
+      }
+      @if (uploadError()) {
+        <div class="upload-error">
+          ⚠️ {{ uploadError() }}
+          <button (click)="uploadError.set(null)">Dismiss</button>
+        </div>
+      }
 
       <!-- Items grid -->
-      <div class="items-grid" *ngIf="items.length > 0">
-        <div class="item-card" *ngFor="let item of items">
-          <div class="item-image">
-            <img [src]="item.imageUrl" [alt]="item.category ?? 'Clothing item'" loading="lazy" />
-          </div>
-          <div class="item-info">
-            <p class="item-category">{{ item.category ?? 'Unknown' }}</p>
-            <p class="item-brand" *ngIf="item.brand">{{ item.brand }}</p>
-            <div class="item-footer">
-              <span class="item-price" *ngIf="item.price">£{{ item.price | number:'1.2-2' }}</span>
-              <div class="colour-dots">
-                <span
-                  class="colour-dot"
-                  *ngFor="let colour of item.colours.slice(0, 3)"
-                  [style.background]="colour.hex"
-                  [title]="colour.name"
-                ></span>
+      @if (items().length > 0) {
+        <div class="items-grid">
+          @for (item of items(); track item.id) {
+            <div class="item-card">
+              <div class="item-image">
+                <img [src]="item.imageUrl" [alt]="item.category ?? 'Clothing item'" loading="lazy" />
+              </div>
+              <div class="item-info">
+                <p class="item-category">{{ item.category ?? 'Unknown' }}</p>
+                @if (item.brand) {
+                  <p class="item-brand">{{ item.brand }}</p>
+                }
+                <div class="item-footer">
+                  @if (item.price) {
+                    <span class="item-price">£{{ item.price | number:'1.2-2' }}</span>
+                  }
+                  <div class="colour-dots">
+                    @for (colour of item.colours.slice(0, 3); track colour.hex) {
+                      <span
+                        class="colour-dot"
+                        [style.background]="colour.hex"
+                        [title]="colour.name"
+                      ></span>
+                    }
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
+          }
         </div>
-      </div>
+      }
 
-      <div class="empty-state" *ngIf="!loading && items.length === 0">
-        <p>Your closet is empty. Upload your first item above.</p>
-      </div>
-      <div class="loading-state" *ngIf="loading">
-        <div class="spinner"></div>
-      </div>
+      @if (!loading() && items().length === 0) {
+        <div class="empty-state">
+          <p>Your closet is empty. Upload your first item above.</p>
+        </div>
+      }
+      @if (loading()) {
+        <div class="loading-state">
+          <div class="spinner"></div>
+        </div>
+      }
 
     </div>
 
     <!-- Review modal -->
-    <app-review-item-modal
-      *ngIf="draftItem"
-      [item]="draftItem"
-      (saved)="onItemSaved($event)"
-      (cancelled)="draftItem = null"
-    />
+    @if (draftItem()) {
+      <app-review-item-modal
+        [item]="draftItem()"
+        (saved)="onItemSaved($event)"
+        (cancelled)="draftItem.set(null)"
+      />
+    }
   `,
   styles: [`
     .closet-container {
@@ -214,11 +232,11 @@ import { ReviewItemModalComponent } from './review-item-modal.component';
   `]
 })
 export class ClosetComponent implements OnInit {
-  items: ClothingItem[] = [];
-  draftItem: ClothingItem | null = null;
-  loading = false;
-  uploading = false;
-  uploadError: string | null = null;
+  items = signal<ClothingItem[]>([]);
+  draftItem = signal<ClothingItem | null>(null);
+  loading = signal(false);
+  uploading = signal(false);
+  uploadError = signal<string | null>(null);
 
   constructor(private wardrobe: WardrobeService) {}
 
@@ -227,24 +245,28 @@ export class ClosetComponent implements OnInit {
   }
 
   loadItems(): void {
-    this.loading = true;
+    this.loading.set(true);
     this.wardrobe.getAll().subscribe({
-      next: items => { this.items = items; this.loading = false; },
-      error: () => { this.loading = false; }
+      next: items => { this.items.set(items); this.loading.set(false); },
+      error: () => { this.loading.set(false); }
     });
   }
 
   onFileSelected(file: File): void {
-    this.uploading = true;
-    this.uploadError = null;
+    console.log('[Closet] onFileSelected', file.name);
+    this.uploading.set(true);
+    this.uploadError.set(null);
     this.wardrobe.uploadForDraft(file).subscribe({
       next: draft => {
-        this.uploading = false;
-        this.draftItem = draft;
+        console.log('[Closet] uploadForDraft success, draft:', draft);
+        this.uploading.set(false);
+        this.draftItem.set(draft);
+        console.log('[Closet] draftItem set:', this.draftItem());
       },
       error: err => {
-        this.uploading = false;
-        this.uploadError = err?.error?.detail ?? err?.message ?? 'Upload failed. Please try again.';
+        console.error('[Closet] uploadForDraft error:', err);
+        this.uploading.set(false);
+        this.uploadError.set(err?.error?.detail ?? err?.message ?? 'Upload failed. Please try again.');
       }
     });
   }
@@ -252,12 +274,12 @@ export class ClosetComponent implements OnInit {
   onItemSaved(item: ClothingItem): void {
     this.wardrobe.save(item).subscribe({
       next: saved => {
-        this.draftItem = null;
-        this.items = [saved, ...this.items];
+        this.draftItem.set(null);
+        this.items.update(current => [saved, ...current]);
       },
       error: err => {
-        this.uploadError = err?.error?.detail ?? err?.message ?? 'Save failed. Please try again.';
-        this.draftItem = null;
+        this.uploadError.set(err?.error?.detail ?? err?.message ?? 'Save failed. Please try again.');
+        this.draftItem.set(null);
       }
     });
   }

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,5 +13,5 @@ public record ClothingMetadata(
 
 public interface IClothingMetadataService
 {
-  Task<ClothingMetadata> ExtractMetadataAsync(string imageUrl, CancellationToken cancellationToken = default);
+  Task<ClothingMetadata> ExtractMetadataAsync(BinaryData imageData, string mediaType, CancellationToken cancellationToken = default);
 }
