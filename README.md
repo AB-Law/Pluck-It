@@ -84,6 +84,44 @@ Navigate to `http://localhost:5180/swagger` to explore the API.
 - ✅ Basic API service and environment config
 - ✅ GitHub Actions CI/CD pipelines (backend & frontend)
 - ✅ Comprehensive .gitignore for .NET and Angular
+- ✅ **Azure Infrastructure Deployed**
+  - Cosmos DB (Free Tier): pluckit-prod-cosmos
+  - Blob Storage: pluckitprodsa8dedj4
+  - App Service: pluckit-prod-api.azurewebsites.net
+  - Function App: pluckit-prod-processor-func
+- ⏳ Configure connection strings in App Service
+- ⏳ Deploy .NET API to Azure
+- ⏳ Deploy Angular app
+- ⏳ Feature implementations (pending)
+
+## Azure Infrastructure
+
+### Deployed Resources
+- **API URL**: https://pluckit-prod-api.azurewebsites.net
+- **Cosmos DB**: https://pluckit-prod-cosmos.documents.azure.com:443/
+  - Database: PluckIt
+  - Container: Wardrobe
+- **Storage Account**: pluckitprodsa8dedj4
+  - uploads container
+  - archive container
+- **Function App**: pluckit-prod-processor-func
+
+### Get Connection Strings
+```powershell
+# Cosmos DB
+az cosmosdb keys list --name pluckit-prod-cosmos --resource-group PluckIt-RG --type connection-strings --query "connectionStrings[0].connectionString" -o tsv
+
+# Blob Storage
+az storage account show-connection-string --name pluckitprodsa8dedj4 --resource-group PluckIt-RG --query "connectionString" -o tsv
+```
+
+See `PluckIt.Server/AZURE_CONFIG.md` for detailed configuration instructions.
+- ✅ Swagger/OpenAPI documentation enabled
+- ✅ Frontend Angular 19 project initialized
+- ✅ Standalone components with signals
+- ✅ Basic API service and environment config
+- ✅ GitHub Actions CI/CD pipelines (backend & frontend)
+- ✅ Comprehensive .gitignore for .NET and Angular
 - ⏳ Azure service integration (pending)
 - ⏳ Database configuration (pending)
 - ⏳ Feature implementations (pending)

@@ -1,0 +1,17 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "UPLOADS_CONTAINER_NAME": "uploads",
+    "ARCHIVE_CONTAINER_NAME": "archive",
+    "STORAGE_ACCOUNT_NAME": "",
+    "FLORENCE_ENDPOINT": "",
+    "FLORENCE_API_KEY": "",
+    "COSMOS_DB_ENDPOINT": "",
+    "COSMOS_DB_KEY": "",
+    "COSMOS_DB_DATABASE": "PluckIt",
+    "COSMOS_DB_CONTAINER": "Wardrobe"
+  }
+}
+
