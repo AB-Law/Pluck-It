@@ -4,12 +4,16 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'PluckIt.Server/**'
+      - 'PluckIt.Api/**'
+      - 'PluckIt.Core/**'
+      - 'PluckIt.Infrastructure/**'
       - '.github/workflows/backend-ci.yml'
   pull_request:
     branches: [ main ]
     paths:
-      - 'PluckIt.Server/**'
+      - 'PluckIt.Api/**'
+      - 'PluckIt.Core/**'
+      - 'PluckIt.Infrastructure/**'
       - '.github/workflows/backend-ci.yml'
 
 jobs:

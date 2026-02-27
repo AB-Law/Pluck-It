@@ -31,3 +31,9 @@ variable "ai_api_key" {
   sensitive   = true
 }
 
+variable "cors_allowed_origins" {
+  description = "Array of allowed CORS origins for the API."
+  type        = list(string)
+  default     = []
+}
+
