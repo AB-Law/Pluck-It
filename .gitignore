@@ -57,6 +57,23 @@ dlldata.c
 # Benchmark Results
 BenchmarkDotNet.Artifacts/
 
+# Terraform
+infra/terraform.tfvars
+infra/.terraform/
+infra/.terraform.lock.hcl
+infra/terraform.tfstate
+infra/terraform.tfstate.backup
+infra/*.tfplan
+infra/*.tfplan.json
+infra/.terraform.tfstate.lock.info
+
+# Azure secrets - DO NOT COMMIT
+**/appsettings.Production.json
+**/appsettings.Staging.json
+**/appsettings.*.json
+!**/appsettings.json
+!**/appsettings.Development.json
+
 # .NET
 project.lock.json
 project.fragment.lock.json

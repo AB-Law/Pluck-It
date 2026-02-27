@@ -1,0 +1,144 @@
+import io
+import logging
+import os
+from typing import Any, Dict
+
+import azure.functions as func
+from azure.storage.blob import BlobClient, BlobServiceClient
+from azure.cosmos import CosmosClient, PartitionKey
+from PIL import Image
+from rembg import remove
+
+
+app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
+
+
+def _get_env(name: str, default: str | None = None) -> str:
+  value = os.getenv(name, default)
+  if value is None:
+    raise RuntimeError(f"Missing required environment variable: {name}")
+  return value
+
+
+def _get_blob_service() -> BlobServiceClient:
+  account_name = _get_env("STORAGE_ACCOUNT_NAME")
+  connection_string = os.getenv(
+    "AzureWebJobsStorage",
+    f"DefaultEndpointsProtocol=https;AccountName={account_name};EndpointSuffix=core.windows.net",
+  )
+  return BlobServiceClient.from_connection_string(connection_string)
+
+
+def _get_cosmos_container():
+  endpoint = _get_env("COSMOS_DB_ENDPOINT")
+  key = _get_env("COSMOS_DB_KEY")
+  database_name = _get_env("COSMOS_DB_DATABASE")
+  container_name = _get_env("COSMOS_DB_CONTAINER")
+
+  client = CosmosClient(endpoint, key)
+  database = client.create_database_if_not_exists(database_name)
+  container = database.create_container_if_not_exists(
+    id=container_name,
+    partition_key=PartitionKey(path="/id"),
+  )
+  return container
+
+
+def _infer_basic_tags(image: Image.Image) -> Dict[str, Any]:
+  """
+  Very simple heuristic tags: dominant color and a generic category placeholder.
+  You can replace this later with a GPT-4o or Florence call for richer tags.
+  """
+  small = image.resize((32, 32))
+  result = small.convert("P", palette=Image.ADAPTIVE, colors=4)
+  palette = result.getpalette()
+  color_counts = sorted(result.getcolors(), reverse=True)
+  if not color_counts:
+    return {"color": "unknown", "category": "unknown"}
+
+  dominant_color_index = color_counts[0][1]
+  palette_index = dominant_color_index * 3
+  r = palette[palette_index]
+  g = palette[palette_index + 1]
+  b = palette[palette_index + 2]
+
+  color_hex = f"#{r:02x}{g:02x}{b:02x}"
+
+  return {
+    "color": color_hex,
+    "category": "unknown",
+  }
+
+
+@app.function_name(name="PluckItBlobProcessor")
+@app.blob_trigger(
+  arg_name="input_blob",
+  path="%UPLOADS_CONTAINER_NAME%/{name}",
+  connection="AzureWebJobsStorage",
+)
+def pluck_it_blob_processor(input_blob: func.InputStream) -> None:
+  logging.info(
+    "PluckItBlobProcessor: Processing blob %s (%d bytes)",
+    input_blob.name,
+    input_blob.length,
+  )
+
+  blob_bytes = input_blob.read()
+
+  # Use rembg to remove the background and produce a transparent PNG directly.
+  try:
+    transparent_png = remove(blob_bytes)
+  except Exception as ex:
+    logging.exception("Error removing background with rembg: %s", ex)
+    return
+
+  # Upload transparent PNG to archive container.
+  archive_container_name = _get_env("ARCHIVE_CONTAINER_NAME")
+  storage_account_name = _get_env("STORAGE_ACCOUNT_NAME")
+  blob_service = _get_blob_service()
+
+  # Derive output blob name from input (e.g. "item.png" -> "item-transparent.png").
+  original_name = input_blob.name.split("/")[-1]
+  if "." in original_name:
+    base, _ext = original_name.rsplit(".", 1)
+  else:
+    base = original_name
+  output_blob_name = f"{base}-transparent.png"
+
+  archive_blob: BlobClient = blob_service.get_blob_client(
+    container=archive_container_name,
+    blob=output_blob_name,
+  )
+  archive_blob.upload_blob(transparent_png, overwrite=True, content_type="image/png")
+
+  archive_url = archive_blob.url
+
+  # Very basic tags from the transparent image.
+  try:
+    img = Image.open(io.BytesIO(transparent_png))
+    tags = _infer_basic_tags(img)
+  except Exception:
+    logging.exception("Failed to infer basic tags; defaulting.")
+    tags = {"color": "unknown", "category": "unknown"}
+
+  # Upsert ClothingItem into Cosmos DB.
+  container = _get_cosmos_container()
+  item_id = base
+  clothing_item = {
+    "id": item_id,
+    "imageUrl": archive_url,
+    "tags": [tags.get("color"), tags.get("category")],
+    "brand": None,
+    "category": tags.get("category"),
+    "dateAdded": input_blob.properties.get("last_modified").isoformat()
+    if hasattr(input_blob, "properties") and input_blob.properties.get("last_modified")
+    else None,
+  }
+
+  container.upsert_item(clothing_item)
+  logging.info(
+    "PluckItBlobProcessor: Wrote ClothingItem %s to Cosmos with imageUrl=%s",
+    item_id,
+    archive_url,
+  )
+

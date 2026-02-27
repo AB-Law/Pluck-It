@@ -2,12 +2,12 @@ name: Backend CI/CD
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main ]
     paths:
       - 'PluckIt.Server/**'
       - '.github/workflows/backend-ci.yml'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main ]
     paths:
       - 'PluckIt.Server/**'
       - '.github/workflows/backend-ci.yml'
@@ -15,10 +15,6 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-    
-    defaults:
-      run:
-        working-directory: PluckIt.Server
 
     steps:
     - uses: actions/checkout@v4
@@ -29,13 +25,13 @@ jobs:
         dotnet-version: '10.0.x'
     
     - name: Restore dependencies
-      run: dotnet restore
+      run: dotnet restore PluckIt.sln
     
     - name: Build
-      run: dotnet build --no-restore --configuration Release
+      run: dotnet build PluckIt.sln --no-restore --configuration Release
     
     - name: Test
-      run: dotnet test --no-build --configuration Release --verbosity normal
+      run: dotnet test PluckIt.sln --no-build --configuration Release --verbosity normal
     
     - name: Publish
       run: dotnet publish PluckIt.Api/PluckIt.Api.csproj --configuration Release --output ./publish
@@ -44,4 +40,24 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: pluckit-api
-        path: PluckIt.Server/publish/
+        path: ./publish/
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production
+    
+    steps:
+    - name: Download artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: pluckit-api
+        path: ./publish
+    
+    - name: Deploy to Azure Web App
+      uses: azure/webapps-deploy@v3
+      with:
+        app-name: 'pluckit-prod-api'
+        publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+        package: ./publish
