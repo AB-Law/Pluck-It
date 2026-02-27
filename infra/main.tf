@@ -158,7 +158,7 @@ resource "azurerm_linux_function_app" "pluckit_processor" {
 
   site_config {
     application_stack {
-      python_version = "3.13"
+      python_version = "3.12"
     }
   }
 
