@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/PluckIt.Server/">
+    <Project Path="PluckIt.Server/PluckIt.Api/PluckIt.Api.csproj" />
+    <Project Path="PluckIt.Server/PluckIt.Core/PluckIt.Core.csproj" />
+    <Project Path="PluckIt.Server/PluckIt.Infrastructure/PluckIt.Infrastructure.csproj" />
+  </Folder>
+</Solution>
