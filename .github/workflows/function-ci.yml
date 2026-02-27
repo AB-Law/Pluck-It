@@ -28,10 +28,11 @@ jobs:
       with:
         python-version: '3.13'
     
-    - name: Create deployment package
+    - name: Create requirements.txt and install dependencies
       run: |
+        python -c "import tomllib; print('\\n'.join(tomllib.load(open('pyproject.toml','rb'))['project']['dependencies']))" > requirements.txt
         python -m pip install --upgrade pip
-        pip install --target="./.python_packages/lib/site-packages" -r <(python -c "import tomllib; print('\\n'.join(tomllib.load(open('pyproject.toml','rb'))['project']['dependencies']))")
+        pip install -r requirements.txt --target=".python_packages/lib/site-packages"
     
     - name: Upload artifact
       uses: actions/upload-artifact@v4
@@ -66,6 +67,13 @@ jobs:
     - name: Deploy to Azure Functions
       run: |
         cd ./function-app
+        ls -la
+        if [ -d ".python_packages" ]; then
+          echo "Python packages found"
+          ls -la .python_packages/lib/site-packages/ | head -20
+        else
+          echo "WARNING: No .python_packages directory found"
+        fi
         zip -r ../function-app.zip .
         az functionapp deployment source config-zip \
           --resource-group PluckIt-RG \
