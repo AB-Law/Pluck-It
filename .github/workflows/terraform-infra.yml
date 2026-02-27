@@ -36,11 +36,6 @@ jobs:
         working-directory: infra
         run: terraform init
 
-      - name: Import Existing Resource Group
-        working-directory: infra
-        run: terraform import azurerm_resource_group.rg_pluckit_archive /subscriptions/${{ secrets.AZURE_SUBSCRIPTION_ID }}/resourceGroups/PluckIt-RG || true
-        continue-on-error: true
-
       - name: Terraform Fmt
         working-directory: infra
         run: terraform fmt -check

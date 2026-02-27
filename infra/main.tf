@@ -2,6 +2,11 @@ locals {
   base_name = "${var.project_name}-${var.environment}"
 }
 
+import {
+  to = azurerm_resource_group.rg_pluckit_archive
+  id = "/subscriptions/72101efc-f7f6-42bd-a6f6-f892771aacbf/resourceGroups/PluckIt-RG"
+}
+
 resource "azurerm_resource_group" "rg_pluckit_archive" {
   name     = "PluckIt-RG"
   location = var.location
