@@ -3,21 +3,21 @@ using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Azure;
 using Azure.AI.OpenAI;
+using OpenAI.Chat;
 using PluckIt.Core;
 
 namespace PluckIt.Infrastructure;
 
 public class StylistService : IStylistService
 {
-  private readonly OpenAIClient _client;
-  private readonly string _deploymentName;
+  private readonly ChatClient _chatClient;
 
-  public StylistService(OpenAIClient client, string deploymentName)
+  public StylistService(AzureOpenAIClient client, string deploymentName)
   {
-    _client = client ?? throw new ArgumentNullException(nameof(client));
-    _deploymentName = deploymentName ?? throw new ArgumentNullException(nameof(deploymentName));
+    if (client is null) throw new ArgumentNullException(nameof(client));
+    if (deploymentName is null) throw new ArgumentNullException(nameof(deploymentName));
+    _chatClient = client.GetChatClient(deploymentName);
   }
 
   public async Task<IReadOnlyCollection<OutfitRecommendation>> GetRecommendationsAsync(
@@ -55,35 +55,33 @@ public class StylistService : IStylistService
       Return ONLY a JSON array of outfit objects as described, with no extra commentary.
       """;
 
-    var chatOptions = new ChatCompletionsOptions
+    var messages = new ChatMessage[]
     {
-      Temperature = 0.7f,
-      DeploymentName = _deploymentName,
+      new SystemChatMessage(systemPrompt),
+      new UserChatMessage(userPrompt),
     };
 
-    chatOptions.Messages.Add(new ChatRequestSystemMessage(systemPrompt));
-    chatOptions.Messages.Add(new ChatRequestUserMessage(userPrompt));
+    var options = new ChatCompletionOptions { Temperature = 0.7f };
 
-    Response<ChatCompletions> response =
-      await _client.GetChatCompletionsAsync(chatOptions);
+    ChatCompletion result = await _chatClient.CompleteChatAsync(messages, options, cancellationToken);
 
-    var content = response.Value.Choices[0].Message.Content;
+    var content = result.Content[0].Text;
 
-    try
+    // GPT often wraps JSON in a markdown code fence — strip it
+    var json = content.Trim();
+    if (json.StartsWith("```"))
     {
-      var outfits = JsonSerializer.Deserialize<List<OutfitRecommendation>>(
-        content,
-        new JsonSerializerOptions
-        {
-          PropertyNameCaseInsensitive = true
-        });
+      var firstNewline = json.IndexOf('\n');
+      var lastFence = json.LastIndexOf("```");
+      if (firstNewline >= 0 && lastFence > firstNewline)
+        json = json[(firstNewline + 1)..lastFence].Trim();
+    }
 
-      return (IReadOnlyCollection<OutfitRecommendation>)(outfits ?? new List<OutfitRecommendation>());
-    }
-    catch
-    {
-      return Array.Empty<OutfitRecommendation>();
-    }
+    var outfits = JsonSerializer.Deserialize<List<OutfitRecommendation>>(
+      json,
+      new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+    return outfits ?? new List<OutfitRecommendation>();
   }
 }
 

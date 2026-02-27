@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Azure;
 using Azure.AI.OpenAI;
+using OpenAI.Chat;
 using Microsoft.Azure.Cosmos;
 using Microsoft.AspNetCore.Mvc;
 using PluckIt.Core;
@@ -24,39 +25,34 @@ builder.Services.AddCors(options =>
 });
 
 // Cosmos
-var cosmosEndpoint = builder.Configuration["Cosmos:Endpoint"];
-var cosmosKey = builder.Configuration["Cosmos:Key"];
+var cosmosEndpoint = builder.Configuration["Cosmos:Endpoint"]
+  ?? throw new InvalidOperationException("Required config 'Cosmos:Endpoint' (env: Cosmos__Endpoint) is not set.");
+var cosmosKey = builder.Configuration["Cosmos:Key"]
+  ?? throw new InvalidOperationException("Required config 'Cosmos:Key' (env: Cosmos__Key) is not set.");
 var cosmosDatabase = builder.Configuration["Cosmos:Database"] ?? "PluckIt";
 var cosmosContainer = builder.Configuration["Cosmos:Container"] ?? "Wardrobe";
 
-if (!string.IsNullOrWhiteSpace(cosmosEndpoint) && !string.IsNullOrWhiteSpace(cosmosKey))
-{
-  builder.Services.AddSingleton(_ => new CosmosClient(cosmosEndpoint, cosmosKey));
-  builder.Services.AddSingleton<IWardrobeRepository>(sp =>
-    new WardrobeRepository(
-      sp.GetRequiredService<CosmosClient>(),
-      cosmosDatabase,
-      cosmosContainer));
-}
+builder.Services.AddSingleton(_ => new CosmosClient(cosmosEndpoint, cosmosKey));
+builder.Services.AddSingleton<IWardrobeRepository>(sp =>
+  new WardrobeRepository(
+    sp.GetRequiredService<CosmosClient>(),
+    cosmosDatabase,
+    cosmosContainer));
 
 // OpenAI / GPT-4.1-mini
-var aiEndpoint = builder.Configuration["AI:Endpoint"];
-var aiKey = builder.Configuration["AI:ApiKey"];
+var aiEndpoint = builder.Configuration["AI:Endpoint"]
+  ?? throw new InvalidOperationException("Required config 'AI:Endpoint' (env: AI__Endpoint) is not set.");
+var aiKey = builder.Configuration["AI:ApiKey"]
+  ?? throw new InvalidOperationException("Required config 'AI:ApiKey' (env: AI__ApiKey) is not set.");
 var aiDeployment = builder.Configuration["AI:Deployment"] ?? "gpt-4.1-mini";
 
-if (!string.IsNullOrWhiteSpace(aiEndpoint) && !string.IsNullOrWhiteSpace(aiKey))
-{
-  builder.Services.AddSingleton(sp =>
-  {
-    var endpoint = new Uri(aiEndpoint);
-    return new OpenAIClient(endpoint, new AzureKeyCredential(aiKey));
-  });
+builder.Services.AddSingleton(sp =>
+  new AzureOpenAIClient(new Uri(aiEndpoint), new AzureKeyCredential(aiKey)));
 
-  builder.Services.AddSingleton<IStylistService>(sp =>
-    new StylistService(
-      sp.GetRequiredService<OpenAIClient>(),
-      aiDeployment));
-}
+builder.Services.AddSingleton<IStylistService>(sp =>
+  new StylistService(
+    sp.GetRequiredService<AzureOpenAIClient>(),
+    aiDeployment));
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -131,6 +127,9 @@ app.MapPost("/api/stylist/recommendations", async (
     page: 0,
     pageSize: 200,
     cancellationToken);
+
+  if (!wardrobe.Any())
+    return Results.BadRequest(new { error = "Your wardrobe is empty. Add some clothing items first." });
 
   var recommendations = await stylist.GetRecommendationsAsync(
     wardrobe,

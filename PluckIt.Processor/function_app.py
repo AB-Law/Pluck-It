@@ -142,3 +142,89 @@ def pluck_it_blob_processor(input_blob: func.InputStream) -> None:
     archive_url,
   )
 
+
+@app.function_name(name="PluckItProcessImage")
+@app.route(route="process-image", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+def pluck_it_process_image(req: func.HttpRequest) -> func.HttpResponse:
+  """
+  HTTP POST /api/process-image
+  Accepts an image as multipart/form-data (field "image") or raw bytes in the body.
+  Removes the background, archives the result, and upserts a ClothingItem in Cosmos.
+  Returns: JSON with the ClothingItem.
+  """
+  import json
+  import uuid
+
+  logging.info("PluckItProcessImage: received request")
+
+  # Try multipart first, then fall back to raw body.
+  image_bytes: bytes | None = None
+  filename: str = f"{uuid.uuid4()}.png"
+
+  if req.files and "image" in req.files:
+    file = req.files["image"]
+    image_bytes = file.read()
+    filename = file.filename or filename
+  elif req.get_body():
+    image_bytes = req.get_body()
+  
+  if not image_bytes:
+    return func.HttpResponse("No image provided. Send a multipart/form-data request with an 'image' field, or a raw image body.", status_code=400)
+
+  # Remove background.
+  try:
+    transparent_png = remove(image_bytes)
+  except Exception as ex:
+    logging.exception("Error removing background: %s", ex)
+    return func.HttpResponse(f"Failed to process image: {ex}", status_code=500)
+
+  # Derive item ID from filename.
+  base = filename.rsplit(".", 1)[0] if "." in filename else filename
+  item_id = f"{base}-{uuid.uuid4().hex[:8]}"
+  output_blob_name = f"{item_id}-transparent.png"
+
+  # Upload to archive container.
+  try:
+    blob_service = _get_blob_service()
+    archive_container_name = _get_env("ARCHIVE_CONTAINER_NAME")
+    archive_blob: BlobClient = blob_service.get_blob_client(
+      container=archive_container_name,
+      blob=output_blob_name,
+    )
+    archive_blob.upload_blob(transparent_png, overwrite=True, content_type="image/png")
+    archive_url = archive_blob.url
+  except Exception as ex:
+    logging.exception("Error uploading to blob storage: %s", ex)
+    return func.HttpResponse(f"Failed to upload processed image: {ex}", status_code=500)
+
+  # Infer basic tags.
+  try:
+    img = Image.open(io.BytesIO(transparent_png))
+    tags = _infer_basic_tags(img)
+  except Exception:
+    logging.exception("Failed to infer basic tags; defaulting.")
+    tags = {"color": "unknown", "category": "unknown"}
+
+  # Upsert to Cosmos.
+  try:
+    cosmos_container = _get_cosmos_container()
+    clothing_item = {
+      "id": item_id,
+      "imageUrl": archive_url,
+      "tags": [tags.get("color"), tags.get("category")],
+      "brand": None,
+      "category": tags.get("category"),
+      "dateAdded": None,
+    }
+    cosmos_container.upsert_item(clothing_item)
+  except Exception as ex:
+    logging.exception("Error writing to Cosmos: %s", ex)
+    return func.HttpResponse(f"Processed image but failed to save item: {ex}", status_code=500)
+
+  logging.info("PluckItProcessImage: saved ClothingItem %s", item_id)
+  return func.HttpResponse(
+    json.dumps(clothing_item),
+    status_code=201,
+    mimetype="application/json",
+  )
+

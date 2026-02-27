@@ -3,6 +3,12 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/main/VisualStudio.gitignore
 
+# Python Function App local packages
+.python_packages/
+
+# Azure Functions local settings (contains secrets)
+local.settings.json
+
 # User-specific files
 *.rsuser
 *.suo

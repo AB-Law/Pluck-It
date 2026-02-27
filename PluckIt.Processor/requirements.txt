@@ -1,0 +1,6 @@
+azure-functions
+azure-storage-blob>=12.20.0
+azure-cosmos>=4.7.0
+pillow>=10.0.0
+rembg>=2.0.0
+onnxruntime>=1.16.0

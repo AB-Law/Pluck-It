@@ -17,36 +17,28 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment: production
-    
+
     defaults:
       run:
         working-directory: PluckIt.Processor
 
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Setup Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.12'
-    
-    - name: Create requirements.txt and install dependencies
+
+    - name: Install dependencies
       run: |
-        python -c "import tomllib; print('\\n'.join(tomllib.load(open('pyproject.toml','rb'))['project']['dependencies']))" > requirements.txt
         python -m pip install --upgrade pip
         pip install -r requirements.txt --target=".python_packages/lib/site-packages"
-        echo "Contents of current directory:"
-        ls -la
-        if [ -d ".python_packages" ]; then
-          echo "✓ Python packages directory created successfully"
-          du -sh .python_packages
-        else
-          echo "✗ ERROR: Python packages directory not created"
-          exit 1
-        fi
-    
+        echo "✓ Packages installed"
+        du -sh .python_packages
+
     - name: Azure Login
-      uses: azure/login@v1
+      uses: azure/login@v2
       with:
         creds: |
           {
@@ -55,22 +47,14 @@ jobs:
             "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
             "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
           }
-    
+
     - name: Deploy to Azure Functions
       run: |
-        echo "Creating deployment package..."
-        ls -la
-        if [ -d ".python_packages" ]; then
-          echo "✓ Python packages found before zipping"
-          du -sh .python_packages
-        else
-          echo "✗ ERROR: No .python_packages directory"
-          exit 1
-        fi
-        zip -r ../function-app.zip .
-        echo "Deploying to Azure..."
+        zip -r ../function-app.zip . --exclude "*.pyc" --exclude "__pycache__/*" --exclude "local.settings.json"
+        echo "Zip size: $(du -sh ../function-app.zip)"
         az functionapp deployment source config-zip \
           --resource-group PluckIt-RG \
           --name pluckit-prod-processor-func \
           --src ../function-app.zip \
-          --timeout 300
+          --timeout 600
+        echo "✓ Deployed successfully"
