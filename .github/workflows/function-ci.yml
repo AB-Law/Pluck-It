@@ -38,23 +38,18 @@ jobs:
 
     - name: Deploy to Azure Functions
       run: |
-        # Zip only source files — no bundled packages.
-        # Azure will install requirements.txt server-side via remote build
-        # (SCM_DO_BUILD_DURING_DEPLOYMENT=true must be set on the Function App).
+        # Zip only source files — Azure remote build installs requirements.txt server-side
         zip -r ../function-app.zip . \
           --exclude "*.pyc" \
           --exclude "__pycache__/*" \
           --exclude "local.settings.json" \
           --exclude ".python_packages/*"
         echo "Zip size: $(du -sh ../function-app.zip)"
-        # Enable remote build so Azure installs dependencies from requirements.txt
-        az functionapp config appsettings set \
+        # Use az functionapp deploy (v2 API) which supports --build-remote on Linux Consumption
+        az functionapp deploy \
           --resource-group PluckIt-RG \
           --name pluckit-prod-processor-func \
-          --settings SCM_DO_BUILD_DURING_DEPLOYMENT=true ENABLE_ORYX_BUILD=true
-        az functionapp deployment source config-zip \
-          --resource-group PluckIt-RG \
-          --name pluckit-prod-processor-func \
-          --src ../function-app.zip \
-          --timeout 600
+          --src-path ../function-app.zip \
+          --type zip \
+          --build-remote true
         echo "✓ Deployed successfully"

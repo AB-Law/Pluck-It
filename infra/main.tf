@@ -172,16 +172,18 @@ resource "azurerm_linux_function_app" "pluckit_processor" {
   }
 
   app_settings = {
-    "AzureWebJobsStorage"         = azurerm_storage_account.sa_functions.primary_connection_string
-    "FUNCTIONS_EXTENSION_VERSION" = "~4"
-    "FUNCTIONS_WORKER_RUNTIME"    = "python"
-    "UPLOADS_CONTAINER_NAME"      = azurerm_storage_container.uploads.name
-    "ARCHIVE_CONTAINER_NAME"      = azurerm_storage_container.archive.name
-    "STORAGE_ACCOUNT_NAME"        = azurerm_storage_account.sa_pluckit.name
-    "COSMOS_DB_ENDPOINT"          = azurerm_cosmosdb_account.pluckit.endpoint
-    "COSMOS_DB_KEY"               = azurerm_cosmosdb_account.pluckit.primary_key
-    "COSMOS_DB_DATABASE"          = azurerm_cosmosdb_sql_database.pluckit.name
-    "COSMOS_DB_CONTAINER"         = azurerm_cosmosdb_sql_container.wardrobe.name
+    "AzureWebJobsStorage"             = azurerm_storage_account.sa_functions.primary_connection_string
+    "FUNCTIONS_EXTENSION_VERSION"     = "~4"
+    "FUNCTIONS_WORKER_RUNTIME"        = "python"
+    "SCM_DO_BUILD_DURING_DEPLOYMENT"  = "true"
+    "ENABLE_ORYX_BUILD"               = "true"
+    "UPLOADS_CONTAINER_NAME"          = azurerm_storage_container.uploads.name
+    "ARCHIVE_CONTAINER_NAME"          = azurerm_storage_container.archive.name
+    "STORAGE_ACCOUNT_NAME"            = azurerm_storage_account.sa_pluckit.name
+    "COSMOS_DB_ENDPOINT"              = azurerm_cosmosdb_account.pluckit.endpoint
+    "COSMOS_DB_KEY"                   = azurerm_cosmosdb_account.pluckit.primary_key
+    "COSMOS_DB_DATABASE"              = azurerm_cosmosdb_sql_database.pluckit.name
+    "COSMOS_DB_CONTAINER"             = azurerm_cosmosdb_sql_container.wardrobe.name
   }
 }
 
