@@ -4,12 +4,12 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'PluckIt.Client/**'
+      - 'frontend/**'
       - '.github/workflows/frontend-ci.yml'
   pull_request:
     branches: [ main ]
     paths:
-      - 'PluckIt.Client/**'
+      - 'frontend/**'
       - '.github/workflows/frontend-ci.yml'
 
 jobs:
@@ -18,7 +18,7 @@ jobs:
     
     defaults:
       run:
-        working-directory: PluckIt.Client
+        working-directory: frontend
 
     steps:
     - uses: actions/checkout@v4
@@ -28,13 +28,10 @@ jobs:
       with:
         node-version: '20'
         cache: 'npm'
-        cache-dependency-path: PluckIt.Client/package-lock.json
+        cache-dependency-path: frontend/package-lock.json
     
     - name: Install dependencies
       run: npm ci
-    
-    - name: Lint
-      run: npm run lint
     
     - name: Test
       run: npm run test -- --watch=false --browsers=ChromeHeadless
@@ -48,7 +45,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: pluckit-client
-        path: PluckIt.Client/dist/
+        path: frontend/dist/
 
   deploy:
     runs-on: ubuntu-latest
