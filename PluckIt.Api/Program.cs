@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using System.Text.Json;
 using Azure;
 using Azure.AI.OpenAI;
@@ -53,6 +54,18 @@ builder.Services.AddSingleton<IStylistService>(sp =>
   new StylistService(
     sp.GetRequiredService<AzureOpenAIClient>(),
     aiDeployment));
+
+// Vision / metadata service (uses same OpenAI client; optionally a different deployment)
+var visionDeployment = builder.Configuration["AI:VisionDeployment"] ?? aiDeployment;
+builder.Services.AddSingleton<IClothingMetadataService>(sp =>
+  new ClothingMetadataService(
+    sp.GetRequiredService<AzureOpenAIClient>(),
+    visionDeployment));
+
+// HttpClient for forwarding uploads to the Python Function App
+var processorBaseUrl = builder.Configuration["Processor:BaseUrl"] ?? "http://localhost:7071";
+builder.Services.AddHttpClient("processor", client =>
+  client.BaseAddress = new Uri(processorBaseUrl));
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -139,5 +152,71 @@ app.MapPost("/api/stylist/recommendations", async (
   return Results.Ok(recommendations);
 });
 
+// Upload an image → background removal (Function App) → AI metadata extraction → return draft (not yet saved)
+app.MapPost("/api/wardrobe/upload", async (
+  IFormFile image,
+  [FromServices] IHttpClientFactory httpClientFactory,
+  [FromServices] IClothingMetadataService metadataService,
+  CancellationToken cancellationToken) =>
+{
+  if (image is null || image.Length == 0)
+    return Results.BadRequest(new { error = "No image provided." });
+
+  // Forward to the Function App for background removal + blob upload
+  using var form = new MultipartFormDataContent();
+  var streamContent = new StreamContent(image.OpenReadStream());
+  streamContent.Headers.ContentType =
+    new System.Net.Http.Headers.MediaTypeHeaderValue(image.ContentType ?? "image/png");
+  form.Add(streamContent, "image", image.FileName ?? "upload.png");
+
+  var processorClient = httpClientFactory.CreateClient("processor");
+  var processorResponse = await processorClient.PostAsync("/api/process-image", form, cancellationToken);
+
+  if (!processorResponse.IsSuccessStatusCode)
+  {
+    var err = await processorResponse.Content.ReadAsStringAsync(cancellationToken);
+    return Results.Problem($"Image processor returned {(int)processorResponse.StatusCode}: {err}");
+  }
+
+  var processed = await processorResponse.Content
+    .ReadFromJsonAsync<ProcessorResult>(cancellationToken: cancellationToken);
+
+  if (processed is null || string.IsNullOrEmpty(processed.ImageUrl))
+    return Results.Problem("Image processor returned an unexpected response.");
+
+  // Extract AI metadata from the processed image URL
+  var metadata = await metadataService.ExtractMetadataAsync(processed.ImageUrl, cancellationToken);
+
+  // Return draft — NOT saved to Cosmos yet; client must confirm via POST /api/wardrobe
+  var draft = new ClothingItem
+  {
+    Id = processed.Id,
+    ImageUrl = processed.ImageUrl,
+    Brand = metadata.Brand,
+    Category = metadata.Category,
+    Tags = metadata.Tags,
+    Colours = metadata.Colours,
+  };
+
+  return Results.Ok(draft);
+}).DisableAntiforgery();
+
+// Save a confirmed (user-reviewed) clothing item to Cosmos
+app.MapPost("/api/wardrobe", async (
+  [FromServices] IWardrobeRepository repo,
+  [FromBody] ClothingItem item,
+  CancellationToken cancellationToken) =>
+{
+  if (string.IsNullOrWhiteSpace(item.Id))
+    item.Id = Guid.NewGuid().ToString("N");
+
+  if (item.DateAdded == default)
+    item.DateAdded = DateTimeOffset.UtcNow;
+
+  await repo.UpsertAsync(item, cancellationToken);
+  return Results.Created($"/api/wardrobe/{item.Id}", item);
+});
+
 app.Run();
 
+record ProcessorResult(string Id, string ImageUrl);

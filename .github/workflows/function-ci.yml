@@ -25,18 +25,6 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Setup Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt --target=".python_packages/lib/site-packages"
-        echo "✓ Packages installed"
-        du -sh .python_packages
-
     - name: Azure Login
       uses: azure/login@v2
       with:
@@ -50,8 +38,20 @@ jobs:
 
     - name: Deploy to Azure Functions
       run: |
-        zip -r ../function-app.zip . --exclude "*.pyc" --exclude "__pycache__/*" --exclude "local.settings.json"
+        # Zip only source files — no bundled packages.
+        # Azure will install requirements.txt server-side via remote build
+        # (SCM_DO_BUILD_DURING_DEPLOYMENT=true must be set on the Function App).
+        zip -r ../function-app.zip . \
+          --exclude "*.pyc" \
+          --exclude "__pycache__/*" \
+          --exclude "local.settings.json" \
+          --exclude ".python_packages/*"
         echo "Zip size: $(du -sh ../function-app.zip)"
+        # Enable remote build so Azure installs dependencies from requirements.txt
+        az functionapp config appsettings set \
+          --resource-group PluckIt-RG \
+          --name pluckit-prod-processor-func \
+          --settings SCM_DO_BUILD_DURING_DEPLOYMENT=true ENABLE_ORYX_BUILD=true
         az functionapp deployment source config-zip \
           --resource-group PluckIt-RG \
           --name pluckit-prod-processor-func \

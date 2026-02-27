@@ -197,33 +197,9 @@ def pluck_it_process_image(req: func.HttpRequest) -> func.HttpResponse:
     logging.exception("Error uploading to blob storage: %s", ex)
     return func.HttpResponse(f"Failed to upload processed image: {ex}", status_code=500)
 
-  # Infer basic tags.
-  try:
-    img = Image.open(io.BytesIO(transparent_png))
-    tags = _infer_basic_tags(img)
-  except Exception:
-    logging.exception("Failed to infer basic tags; defaulting.")
-    tags = {"color": "unknown", "category": "unknown"}
-
-  # Upsert to Cosmos.
-  try:
-    cosmos_container = _get_cosmos_container()
-    clothing_item = {
-      "id": item_id,
-      "imageUrl": archive_url,
-      "tags": [tags.get("color"), tags.get("category")],
-      "brand": None,
-      "category": tags.get("category"),
-      "dateAdded": None,
-    }
-    cosmos_container.upsert_item(clothing_item)
-  except Exception as ex:
-    logging.exception("Error writing to Cosmos: %s", ex)
-    return func.HttpResponse(f"Processed image but failed to save item: {ex}", status_code=500)
-
-  logging.info("PluckItProcessImage: saved ClothingItem %s", item_id)
+  logging.info("PluckItProcessImage: processed image %s, blob at %s", item_id, archive_url)
   return func.HttpResponse(
-    json.dumps(clothing_item),
+    json.dumps({"id": item_id, "imageUrl": archive_url}),
     status_code=201,
     mimetype="application/json",
   )
