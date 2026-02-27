@@ -20,7 +20,7 @@ public class ClothingMetadataService : IClothingMetadataService
     _chatClient = client.GetChatClient(deploymentName);
   }
 
-  public async Task<ClothingMetadata> ExtractMetadataAsync(string imageUrl, CancellationToken cancellationToken = default)
+  public async Task<ClothingMetadata> ExtractMetadataAsync(BinaryData imageData, string mediaType, CancellationToken cancellationToken = default)
   {
     var systemPrompt =
       """
@@ -41,7 +41,7 @@ public class ClothingMetadataService : IClothingMetadataService
       new SystemChatMessage(systemPrompt),
       new UserChatMessage(
         ChatMessageContentPart.CreateTextPart("Analyze this clothing item:"),
-        ChatMessageContentPart.CreateImagePart(new Uri(imageUrl), ChatImageDetailLevel.Auto)),
+        ChatMessageContentPart.CreateImagePart(imageData, mediaType)),
     };
 
     var options = new ChatCompletionOptions { Temperature = 0.2f };
