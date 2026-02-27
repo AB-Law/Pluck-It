@@ -12,6 +12,10 @@ on:
       - 'PluckIt.Processor/**'
       - '.github/workflows/function-ci.yml'
 
+concurrency:
+  group: azure-production
+  cancel-in-progress: false
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -45,11 +49,15 @@ jobs:
           --exclude "local.settings.json" \
           --exclude ".python_packages/*"
         echo "Zip size: $(du -sh ../function-app.zip)"
-        # Use az functionapp deploy (v2 API) which supports --build-remote on Linux Consumption
-        az functionapp deploy \
+        # Ensure remote build is enabled (Terraform sets these too, but guard here in case infra hasn't run yet)
+        az functionapp config appsettings set \
           --resource-group PluckIt-RG \
           --name pluckit-prod-processor-func \
-          --src-path ../function-app.zip \
-          --type zip \
-          --build-remote true
+          --settings SCM_DO_BUILD_DURING_DEPLOYMENT=true ENABLE_ORYX_BUILD=true \
+          --output none
+        az functionapp deployment source config-zip \
+          --resource-group PluckIt-RG \
+          --name pluckit-prod-processor-func \
+          --src ../function-app.zip \
+          --timeout 600
         echo "✓ Deployed successfully"

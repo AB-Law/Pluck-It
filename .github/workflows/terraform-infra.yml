@@ -11,6 +11,10 @@ on:
     paths:
       - "infra/**"
 
+concurrency:
+  group: azure-production
+  cancel-in-progress: false
+
 jobs:
   terraform:
     runs-on: ubuntu-latest

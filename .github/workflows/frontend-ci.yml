@@ -12,6 +12,10 @@ on:
       - 'PluckIt.Client/**'
       - '.github/workflows/frontend-ci.yml'
 
+concurrency:
+  group: azure-production
+  cancel-in-progress: false
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
