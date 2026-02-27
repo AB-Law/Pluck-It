@@ -25,13 +25,13 @@ jobs:
         dotnet-version: '10.0.x'
     
     - name: Restore dependencies
-      run: dotnet restore
+      run: dotnet restore PluckIt.sln
     
     - name: Build
-      run: dotnet build --no-restore --configuration Release
+      run: dotnet build PluckIt.sln --no-restore --configuration Release
     
     - name: Test
-      run: dotnet test --no-build --configuration Release --verbosity normal
+      run: dotnet test PluckIt.sln --no-build --configuration Release --verbosity normal
     
     - name: Publish
       run: dotnet publish PluckIt.Api/PluckIt.Api.csproj --configuration Release --output ./publish
