@@ -24,6 +24,7 @@ jobs:
       TF_VAR_location: "centralindia"
       TF_VAR_ai_gpt4o_endpoint: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
       TF_VAR_ai_api_key: ${{ secrets.AZURE_OPENAI_API_KEY }}
+      TF_VAR_cors_allowed_origins: ${{ secrets.CORS_ALLOWED_ORIGINS }}
 
     steps:
       - name: Checkout
