@@ -71,6 +71,9 @@ if (app.Environment.IsDevelopment())
   app.UseSwaggerUI();
 }
 
+// Health-check / root probe so Azure "always on" pings return 200
+app.MapGet("/", () => Results.Ok(new { status = "healthy", service = "PluckIt API" }));
+
 app.MapGet("/api/wardrobe", async (
   [FromServices] IWardrobeRepository repo,
   [FromQuery] string? category,
