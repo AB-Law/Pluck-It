@@ -38,7 +38,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: pluckit-client
-        path: dist/pluck-it.client/
+        path: PluckIt.Client/dist/
 
   deploy:
     runs-on: ubuntu-latest
