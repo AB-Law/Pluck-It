@@ -38,14 +38,7 @@ jobs:
       run: |
         pip install \
           --target .python_packages/lib/site-packages \
-          --platform manylinux2014_x86_64 \
-          --implementation cp \
-          --python-version 3.12 \
-          --only-binary :all: \
-          --upgrade \
-          -r requirements.txt || \
-        pip install \
-          --target .python_packages/lib/site-packages \
+          --no-compile \
           -r requirements.txt
 
     - name: Azure Login
