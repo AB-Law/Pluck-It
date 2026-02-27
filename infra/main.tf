@@ -86,7 +86,7 @@ resource "azurerm_cosmosdb_sql_container" "wardrobe" {
 
   indexing_policy {
     indexing_mode = "consistent"
-    
+
     included_path {
       path = "/*"
     }
@@ -113,20 +113,20 @@ resource "azurerm_linux_web_app" "pluckit_api" {
   }
 
   app_settings = {
-    "ASPNETCORE_ENVIRONMENT"                 = var.environment
-    "Azure__CosmosDb__Endpoint"              = azurerm_cosmosdb_account.pluckit.endpoint
-    "Azure__CosmosDb__DatabaseName"          = azurerm_cosmosdb_sql_database.pluckit.name
-    "Azure__CosmosDb__ContainerName"         = azurerm_cosmosdb_sql_container.wardrobe.name
-    "Azure__BlobStorage__AccountName"        = azurerm_storage_account.sa_pluckit.name
-    "Azure__BlobStorage__UploadsContainer"   = azurerm_storage_container.uploads.name
-    "Azure__BlobStorage__ArchiveContainer"   = azurerm_storage_container.archive.name
-    "Cosmos__Endpoint"                       = azurerm_cosmosdb_account.pluckit.endpoint
-    "Cosmos__Key"                            = azurerm_cosmosdb_account.pluckit.primary_key
-    "Cosmos__Database"                       = azurerm_cosmosdb_sql_database.pluckit.name
-    "Cosmos__Container"                      = azurerm_cosmosdb_sql_container.wardrobe.name
-    "AI__Endpoint"                           = var.ai_gpt4o_endpoint
-    "AI__ApiKey"                             = var.ai_api_key
-    "AI__Deployment"                         = "gpt-4.1-mini"
+    "ASPNETCORE_ENVIRONMENT"               = var.environment
+    "Azure__CosmosDb__Endpoint"            = azurerm_cosmosdb_account.pluckit.endpoint
+    "Azure__CosmosDb__DatabaseName"        = azurerm_cosmosdb_sql_database.pluckit.name
+    "Azure__CosmosDb__ContainerName"       = azurerm_cosmosdb_sql_container.wardrobe.name
+    "Azure__BlobStorage__AccountName"      = azurerm_storage_account.sa_pluckit.name
+    "Azure__BlobStorage__UploadsContainer" = azurerm_storage_container.uploads.name
+    "Azure__BlobStorage__ArchiveContainer" = azurerm_storage_container.archive.name
+    "Cosmos__Endpoint"                     = azurerm_cosmosdb_account.pluckit.endpoint
+    "Cosmos__Key"                          = azurerm_cosmosdb_account.pluckit.primary_key
+    "Cosmos__Database"                     = azurerm_cosmosdb_sql_database.pluckit.name
+    "Cosmos__Container"                    = azurerm_cosmosdb_sql_container.wardrobe.name
+    "AI__Endpoint"                         = var.ai_gpt4o_endpoint
+    "AI__ApiKey"                           = var.ai_api_key
+    "AI__Deployment"                       = "gpt-4.1-mini"
   }
 }
 
