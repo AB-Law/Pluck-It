@@ -59,9 +59,19 @@ jobs:
         name: function-app
         path: ./function-app
     
-    - name: Deploy to Azure Functions
-      uses: Azure/functions-action@v1
+    - name: Azure Login
+      uses: azure/login@v1
       with:
-        app-name: 'pluckit-prod-processor-func'
-        package: ./function-app
-        publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
+        creds: |
+          {
+            "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
+            "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+            "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+            "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
+          }
+    
+    - name: Deploy to Azure Functions
+      run: |
+        cd ./function-app
+        zip -r function-app.zip .
+        az functionapp deployment source config-zip --resource-group PluckIt-RG --name pluckit-prod-processor-func --src function-app.zip
