@@ -134,10 +134,10 @@ resource "azurerm_service_plan" "functions_plan" {
 }
 
 resource "azurerm_linux_function_app" "pluckit_processor" {
-  name                = "${local.base_name}-processor-func"
-  resource_group_name = azurerm_resource_group.rg_pluckit_archive.name
-  location            = azurerm_resource_group.rg_pluckit_archive.location
-  service_plan_id     = azurerm_service_plan.functions_plan.id
+  name                       = "${local.base_name}-processor-func"
+  resource_group_name        = azurerm_resource_group.rg_pluckit_archive.name
+  location                   = azurerm_resource_group.rg_pluckit_archive.location
+  service_plan_id            = azurerm_service_plan.functions_plan.id
   storage_account_name       = azurerm_storage_account.sa_functions.name
   storage_account_access_key = azurerm_storage_account.sa_functions.primary_access_key
 
@@ -148,16 +148,16 @@ resource "azurerm_linux_function_app" "pluckit_processor" {
   }
 
   app_settings = {
-    "AzureWebJobsStorage"      = azurerm_storage_account.sa_functions.primary_connection_string
+    "AzureWebJobsStorage"         = azurerm_storage_account.sa_functions.primary_connection_string
     "FUNCTIONS_EXTENSION_VERSION" = "~4"
-    "FUNCTIONS_WORKER_RUNTIME" = "python"
-    "UPLOADS_CONTAINER_NAME"   = azurerm_storage_container.uploads.name
-    "ARCHIVE_CONTAINER_NAME"   = azurerm_storage_container.archive.name
-    "STORAGE_ACCOUNT_NAME"     = azurerm_storage_account.sa_pluckit.name
-    "COSMOS_DB_ENDPOINT"       = azurerm_cosmosdb_account.pluckit.endpoint
-    "COSMOS_DB_KEY"            = azurerm_cosmosdb_account.pluckit.primary_key
-    "COSMOS_DB_DATABASE"       = azurerm_cosmosdb_sql_database.pluckit.name
-    "COSMOS_DB_CONTAINER"      = azurerm_cosmosdb_sql_container.wardrobe.name
+    "FUNCTIONS_WORKER_RUNTIME"    = "python"
+    "UPLOADS_CONTAINER_NAME"      = azurerm_storage_container.uploads.name
+    "ARCHIVE_CONTAINER_NAME"      = azurerm_storage_container.archive.name
+    "STORAGE_ACCOUNT_NAME"        = azurerm_storage_account.sa_pluckit.name
+    "COSMOS_DB_ENDPOINT"          = azurerm_cosmosdb_account.pluckit.endpoint
+    "COSMOS_DB_KEY"               = azurerm_cosmosdb_account.pluckit.primary_key
+    "COSMOS_DB_DATABASE"          = azurerm_cosmosdb_sql_database.pluckit.name
+    "COSMOS_DB_CONTAINER"         = azurerm_cosmosdb_sql_container.wardrobe.name
   }
 }
 

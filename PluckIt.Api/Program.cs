@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Azure;
 using Azure.AI.OpenAI;
-using Azure.Cosmos;
+using Microsoft.Azure.Cosmos;
 using Microsoft.AspNetCore.Mvc;
 using PluckIt.Core;
 using PluckIt.Infrastructure;
