@@ -13,7 +13,7 @@ on:
       - '.github/workflows/frontend-ci.yml'
 
 concurrency:
-  group: azure-production
+  group: azure-production-frontend
   cancel-in-progress: false
 
 jobs:

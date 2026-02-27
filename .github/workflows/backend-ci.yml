@@ -17,7 +17,7 @@ on:
       - '.github/workflows/backend-ci.yml'
 
 concurrency:
-  group: azure-production
+  group: azure-production-api
   cancel-in-progress: false
 
 jobs:

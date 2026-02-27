@@ -175,8 +175,9 @@ resource "azurerm_linux_function_app" "pluckit_processor" {
     "AzureWebJobsStorage"            = azurerm_storage_account.sa_functions.primary_connection_string
     "FUNCTIONS_EXTENSION_VERSION"    = "~4"
     "FUNCTIONS_WORKER_RUNTIME"       = "python"
-    "SCM_DO_BUILD_DURING_DEPLOYMENT" = "true"
-    "ENABLE_ORYX_BUILD"              = "true"
+    "SCM_DO_BUILD_DURING_DEPLOYMENT" = "false"
+    "ENABLE_ORYX_BUILD"              = "false"
+    "WEBSITE_RUN_FROM_PACKAGE"       = "1"
     "UPLOADS_CONTAINER_NAME"         = azurerm_storage_container.uploads.name
     "ARCHIVE_CONTAINER_NAME"         = azurerm_storage_container.archive.name
     "STORAGE_ACCOUNT_NAME"           = azurerm_storage_account.sa_pluckit.name
