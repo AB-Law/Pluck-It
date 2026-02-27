@@ -15,9 +15,9 @@ variable "project_name" {
 }
 
 variable "environment" {
-  description = "Environment name (e.g. Development, Production)."
+  description = "Environment name used in resource naming (e.g. dev, prod)."
   type        = string
-  default     = "Production"
+  default     = "prod"
 }
 
 variable "ai_gpt4o_endpoint" {

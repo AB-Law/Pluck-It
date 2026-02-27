@@ -117,7 +117,7 @@ resource "azurerm_linux_web_app" "pluckit_api" {
 
   app_settings = merge(
     {
-      "ASPNETCORE_ENVIRONMENT"               = var.environment
+      "ASPNETCORE_ENVIRONMENT"               = "Production"
       "Azure__CosmosDb__Endpoint"            = azurerm_cosmosdb_account.pluckit.endpoint
       "Azure__CosmosDb__DatabaseName"        = azurerm_cosmosdb_sql_database.pluckit.name
       "Azure__CosmosDb__ContainerName"       = azurerm_cosmosdb_sql_container.wardrobe.name
