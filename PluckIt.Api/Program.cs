@@ -63,7 +63,9 @@ builder.Services.AddSingleton<IClothingMetadataService>(sp =>
     visionDeployment));
 
 // HttpClient for forwarding uploads to the Python Function App
-var processorBaseUrl = builder.Configuration["Processor:BaseUrl"] ?? "http://localhost:7071";
+var processorBaseUrl = builder.Configuration["Processor:BaseUrl"];
+if (string.IsNullOrWhiteSpace(processorBaseUrl))
+  processorBaseUrl = "http://localhost:7071";
 builder.Services.AddHttpClient("processor", client =>
   client.BaseAddress = new Uri(processorBaseUrl));
 
@@ -210,7 +212,7 @@ app.MapPost("/api/wardrobe", async (
   if (string.IsNullOrWhiteSpace(item.Id))
     item.Id = Guid.NewGuid().ToString("N");
 
-  if (item.DateAdded == default)
+  if (item.DateAdded == null)
     item.DateAdded = DateTimeOffset.UtcNow;
 
   await repo.UpsertAsync(item, cancellationToken);

@@ -15,6 +15,6 @@ public class ClothingItem
   public string? Category { get; set; }
   public decimal? Price { get; set; }
   public string? Notes { get; set; }
-  public DateTimeOffset DateAdded { get; set; }
+  public DateTimeOffset? DateAdded { get; set; }
 }
 

@@ -131,6 +131,7 @@ resource "azurerm_linux_web_app" "pluckit_api" {
       "AI__Endpoint"                         = var.ai_gpt4o_endpoint
       "AI__ApiKey"                           = var.ai_api_key
       "AI__Deployment"                       = "gpt-4.1-mini"
+      "Processor__BaseUrl"                   = "https://${local.base_name}-processor-func.azurewebsites.net"
     },
     {
       for idx, origin in var.cors_allowed_origins :
