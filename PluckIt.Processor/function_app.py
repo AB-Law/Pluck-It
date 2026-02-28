@@ -2,15 +2,20 @@ import io
 import json
 import logging
 import os
-import urllib.request
-import urllib.error
 import uuid
 from typing import Any, Dict
+
+# Point rembg at the bundled model directory so it never downloads at runtime.
+os.environ.setdefault(
+  "U2NET_HOME",
+  os.path.join(os.path.dirname(os.path.abspath(__file__)), "models"),
+)
 
 import azure.functions as func
 from azure.storage.blob import BlobClient, BlobServiceClient
 from azure.cosmos import CosmosClient, PartitionKey
 from PIL import Image
+from rembg import remove as rembg_remove
 
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
@@ -25,24 +30,10 @@ def _get_env(name: str, default: str | None = None) -> str:
 
 def _remove_background(image_bytes: bytes) -> bytes:
   """
-  Calls Azure Computer Vision 4.0 imageanalysis:segment (backgroundRemoval mode).
+  Removes the background from an image using rembg (BiRefNet/U2Net).
   Returns a PNG with transparent background.
   """
-  endpoint = _get_env("VISION_ENDPOINT").rstrip("/")
-  key = _get_env("VISION_API_KEY")
-  url = f"{endpoint}/computervision/imageanalysis:segment?api-version=2023-02-01-preview&mode=backgroundRemoval"
-
-  req = urllib.request.Request(
-    url,
-    data=image_bytes,
-    headers={
-      "Ocp-Apim-Subscription-Key": key,
-      "Content-Type": "application/octet-stream",
-    },
-    method="POST",
-  )
-  with urllib.request.urlopen(req) as resp:
-    return resp.read()
+  return rembg_remove(image_bytes)
 
 
 def _get_blob_service() -> BlobServiceClient:
@@ -113,12 +104,9 @@ def pluck_it_blob_processor(input_blob: func.InputStream) -> None:
 
   blob_bytes = input_blob.read()
 
-  # Use Azure Computer Vision 4.0 Segment API for background removal.
+  # Remove background using rembg.
   try:
     transparent_png = _remove_background(blob_bytes)
-  except urllib.error.HTTPError as ex:
-    logging.exception("Vision API error removing background: %s %s", ex.code, ex.reason)
-    return
   except Exception as ex:
     logging.exception("Error removing background: %s", ex)
     return
@@ -180,7 +168,7 @@ def pluck_it_process_image(req: func.HttpRequest) -> func.HttpResponse:
   """
   HTTP POST /api/process-image
   Accepts an image as multipart/form-data (field "image") or raw bytes in the body.
-  Removes the background via Azure Computer Vision, archives the result, and upserts a ClothingItem in Cosmos.
+  Removes the background using rembg, archives the result, and upserts a ClothingItem in Cosmos.
   Returns: JSON with the ClothingItem.
   """
   logging.info("PluckItProcessImage: received request")
@@ -199,13 +187,9 @@ def pluck_it_process_image(req: func.HttpRequest) -> func.HttpResponse:
   if not image_bytes:
     return func.HttpResponse("No image provided. Send a multipart/form-data request with an 'image' field, or a raw image body.", status_code=400)
 
-  # Remove background via Azure Computer Vision 4.0 Segment API.
+  # Remove background using rembg.
   try:
     transparent_png = _remove_background(image_bytes)
-  except urllib.error.HTTPError as ex:
-    body = ex.read().decode(errors="replace")
-    logging.exception("Vision API returned %s: %s", ex.code, body)
-    return func.HttpResponse(f"Background removal failed: {ex.code} {ex.reason}", status_code=500)
   except Exception as ex:
     logging.exception("Error removing background: %s", ex)
     return func.HttpResponse(f"Failed to process image: {ex}", status_code=500)

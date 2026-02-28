@@ -93,17 +93,6 @@ resource "azurerm_cosmosdb_sql_container" "wardrobe" {
   }
 }
 
-# ── Azure Computer Vision (v4.0 Segment API — background removal) ───────────
-# CV 4.0 imageanalysis:segment is only available in specific regions; eastus is supported.
-
-resource "azurerm_cognitive_account" "vision" {
-  name                = "${local.base_name}-vision"
-  resource_group_name = azurerm_resource_group.rg_pluckit_archive.name
-  location            = "eastus"
-  kind                = "ComputerVision"
-  sku_name            = "S1"
-}
-
 # ── Shared Functions storage account (used for both Function App deployments) ──
 
 resource "azurerm_storage_account" "sa_functions" {
@@ -226,8 +215,6 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
     "COSMOS_DB_KEY"               = azurerm_cosmosdb_account.pluckit.primary_key
     "COSMOS_DB_DATABASE"          = azurerm_cosmosdb_sql_database.pluckit.name
     "COSMOS_DB_CONTAINER"         = azurerm_cosmosdb_sql_container.wardrobe.name
-    "VISION_ENDPOINT"             = azurerm_cognitive_account.vision.endpoint
-    "VISION_API_KEY"              = azurerm_cognitive_account.vision.primary_access_key
   }
 }
 

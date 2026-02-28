@@ -9,6 +9,9 @@
 # Azure Functions local settings (contains secrets)
 local.settings.json
 
+# ML models — too large for GitHub (>100 MB), download via scripts/download-models.ps1
+PluckIt.Processor/models/*.onnx
+
 # User-specific files
 *.rsuser
 *.suo

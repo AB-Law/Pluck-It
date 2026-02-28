@@ -42,6 +42,13 @@ jobs:
           --no-compile \
           -r requirements.txt
 
+    - name: Download ML models
+      run: |
+        mkdir -p models
+        curl -fSL "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx" \
+          -o models/u2net.onnx
+        echo "u2net.onnx: $(du -h models/u2net.onnx | cut -f1)"
+
     - name: Azure Login
       uses: azure/login@v2
       with:
