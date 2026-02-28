@@ -43,5 +43,16 @@ output "function_app_name" {
   value       = azurerm_function_app_flex_consumption.pluckit_processor.name
 }
 
+output "app_insights_connection_string" {
+  description = "Application Insights connection string. Copy into local.settings.json for local debugging."
+  value       = azurerm_application_insights.pluckit.connection_string
+  sensitive   = true
+}
+
+output "app_insights_name" {
+  description = "Name of the Application Insights resource."
+  value       = azurerm_application_insights.pluckit.name
+}
+
 
 

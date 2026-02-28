@@ -93,6 +93,25 @@ resource "azurerm_cosmosdb_sql_container" "wardrobe" {
   }
 }
 
+# ── Logging: Log Analytics Workspace + Application Insights ─────────────────
+# Free tier: 500 MB/day on Log Analytics; first 5 GB/month free on App Insights.
+
+resource "azurerm_log_analytics_workspace" "pluckit" {
+  name                = "${local.base_name}-logs"
+  resource_group_name = azurerm_resource_group.rg_pluckit_archive.name
+  location            = azurerm_resource_group.rg_pluckit_archive.location
+  sku                 = "PerGB2018"
+  retention_in_days   = 30
+}
+
+resource "azurerm_application_insights" "pluckit" {
+  name                = "${local.base_name}-appinsights"
+  resource_group_name = azurerm_resource_group.rg_pluckit_archive.name
+  location            = azurerm_resource_group.rg_pluckit_archive.location
+  workspace_id        = azurerm_log_analytics_workspace.pluckit.id
+  application_type    = "web"
+}
+
 # ── Shared Functions storage account (used for both Function App deployments) ──
 
 resource "azurerm_storage_account" "sa_functions" {
@@ -159,18 +178,19 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
   }
 
   app_settings = {
-    "FUNCTIONS_EXTENSION_VERSION"   = "~4"
-    "Cosmos__Endpoint"              = azurerm_cosmosdb_account.pluckit.endpoint
-    "Cosmos__Key"                   = azurerm_cosmosdb_account.pluckit.primary_key
-    "Cosmos__Database"              = azurerm_cosmosdb_sql_database.pluckit.name
-    "Cosmos__Container"             = azurerm_cosmosdb_sql_container.wardrobe.name
-    "AI__Endpoint"                  = var.ai_gpt4o_endpoint
-    "AI__ApiKey"                    = var.ai_api_key
-    "AI__Deployment"                = "gpt-4.1-mini"
-    "BlobStorage__AccountName"      = azurerm_storage_account.sa_pluckit.name
-    "BlobStorage__AccountKey"       = azurerm_storage_account.sa_pluckit.primary_access_key
-    "BlobStorage__ArchiveContainer" = azurerm_storage_container.archive.name
-    "Processor__BaseUrl"            = "https://${local.base_name}-processor-func.azurewebsites.net"
+    "FUNCTIONS_EXTENSION_VERSION"        = "~4"
+    "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.pluckit.connection_string
+    "Cosmos__Endpoint"                   = azurerm_cosmosdb_account.pluckit.endpoint
+    "Cosmos__Key"                        = azurerm_cosmosdb_account.pluckit.primary_key
+    "Cosmos__Database"                   = azurerm_cosmosdb_sql_database.pluckit.name
+    "Cosmos__Container"                  = azurerm_cosmosdb_sql_container.wardrobe.name
+    "AI__Endpoint"                       = var.ai_gpt4o_endpoint
+    "AI__ApiKey"                         = var.ai_api_key
+    "AI__Deployment"                     = "gpt-4.1-mini"
+    "BlobStorage__AccountName"           = azurerm_storage_account.sa_pluckit.name
+    "BlobStorage__AccountKey"            = azurerm_storage_account.sa_pluckit.primary_access_key
+    "BlobStorage__ArchiveContainer"      = azurerm_storage_container.archive.name
+    "Processor__BaseUrl"                 = "https://${local.base_name}-processor-func.azurewebsites.net"
   }
 }
 
@@ -206,15 +226,16 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
   site_config {}
 
   app_settings = {
-    "FUNCTIONS_EXTENSION_VERSION" = "~4"
-    "UPLOADS_CONTAINER_NAME"      = azurerm_storage_container.uploads.name
-    "ARCHIVE_CONTAINER_NAME"      = azurerm_storage_container.archive.name
-    "STORAGE_ACCOUNT_NAME"        = azurerm_storage_account.sa_pluckit.name
-    "STORAGE_ACCOUNT_KEY"         = azurerm_storage_account.sa_pluckit.primary_access_key
-    "COSMOS_DB_ENDPOINT"          = azurerm_cosmosdb_account.pluckit.endpoint
-    "COSMOS_DB_KEY"               = azurerm_cosmosdb_account.pluckit.primary_key
-    "COSMOS_DB_DATABASE"          = azurerm_cosmosdb_sql_database.pluckit.name
-    "COSMOS_DB_CONTAINER"         = azurerm_cosmosdb_sql_container.wardrobe.name
+    "FUNCTIONS_EXTENSION_VERSION"           = "~4"
+    "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.pluckit.connection_string
+    "UPLOADS_CONTAINER_NAME"                = azurerm_storage_container.uploads.name
+    "ARCHIVE_CONTAINER_NAME"               = azurerm_storage_container.archive.name
+    "STORAGE_ACCOUNT_NAME"                 = azurerm_storage_account.sa_pluckit.name
+    "STORAGE_ACCOUNT_KEY"                  = azurerm_storage_account.sa_pluckit.primary_access_key
+    "COSMOS_DB_ENDPOINT"                   = azurerm_cosmosdb_account.pluckit.endpoint
+    "COSMOS_DB_KEY"                        = azurerm_cosmosdb_account.pluckit.primary_key
+    "COSMOS_DB_DATABASE"                   = azurerm_cosmosdb_sql_database.pluckit.name
+    "COSMOS_DB_CONTAINER"                  = azurerm_cosmosdb_sql_container.wardrobe.name
   }
 }
 
