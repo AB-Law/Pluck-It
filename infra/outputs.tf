@@ -43,3 +43,8 @@ output "function_app_name" {
   value       = azurerm_function_app_flex_consumption.pluckit_processor.name
 }
 
+output "vision_endpoint" {
+  description = "Azure Computer Vision endpoint for background removal."
+  value       = azurerm_cognitive_account.vision.endpoint
+}
+
