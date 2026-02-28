@@ -72,13 +72,7 @@ jobs:
           }
 
     - name: Deploy to Azure Functions
-      run: |
-        cd publish
-        zip -r ../function-app.zip .
-        echo "Zip size: $(du -sh ../function-app.zip)"
-        az functionapp deployment source config-zip \
-          --resource-group PluckIt-RG \
-          --name pluckit-prod-api-func \
-          --src ../function-app.zip \
-          --timeout 600
-        echo "✓ Deployed successfully"
+      uses: azure/functions-action@v1
+      with:
+        app-name: 'pluckit-prod-api-func'
+        package: './publish'
