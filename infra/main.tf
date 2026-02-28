@@ -173,23 +173,12 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
   site_config {
     cors {
       allowed_origins     = var.cors_allowed_origins
-      support_credentials = true
+      support_credentials = false
     }
   }
 
-  auth_settings_v2 {
-    auth_enabled           = true
-    unauthenticated_action = "Return401"
-
-    google_v2 {
-      client_id                  = var.google_oauth_client_id
-      client_secret_setting_name = "GOOGLE_PROVIDER_AUTHENTICATION_SECRET"
-    }
-
-    login {
-      allowed_external_redirect_urls = var.cors_allowed_origins
-    }
-  }
+  # auth_settings_v2 is NOT supported on Flex Consumption (FC1).
+  # Authentication is handled by Azure Static Web Apps on the frontend.
 
   app_settings = {
     "FUNCTIONS_EXTENSION_VERSION"        = "~4"
@@ -205,7 +194,24 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
     "BlobStorage__AccountKey"            = azurerm_storage_account.sa_pluckit.primary_access_key
     "BlobStorage__ArchiveContainer"      = azurerm_storage_container.archive.name
     "Processor__BaseUrl"                 = "https://${local.base_name}-processor-func.azurewebsites.net"
-    "GOOGLE_PROVIDER_AUTHENTICATION_SECRET" = var.google_oauth_client_secret
+  }
+}
+
+# ── Static Web App (frontend) ────────────────────────────────────────────────
+# Import an existing SWA: terraform import azurerm_static_web_app.frontend \
+#   /subscriptions/72101efc-f7f6-42bd-a6f6-f892771aacbf/resourceGroups/PluckIt-RG/providers/Microsoft.Web/staticSites/happy-ocean-0c606bd00
+
+resource "azurerm_static_web_app" "frontend" {
+  name                = "happy-ocean-0c606bd00"
+  resource_group_name = azurerm_resource_group.rg_pluckit_archive.name
+  location            = azurerm_resource_group.rg_pluckit_archive.location
+  sku_tier            = "Free"
+  sku_size            = "Free"
+
+  # These are referenced by staticwebapp.config.json auth.identityProviders.google
+  app_settings = {
+    "GOOGLE_CLIENT_ID"     = var.google_oauth_client_id
+    "GOOGLE_CLIENT_SECRET" = var.google_oauth_client_secret
   }
 }
 

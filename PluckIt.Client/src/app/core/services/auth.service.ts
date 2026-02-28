@@ -40,10 +40,9 @@ export class AuthService {
     }
 
     try {
+      // /.auth/me is served by the Static Web App on the same origin — no CORS or cookie issues.
       const resp = await firstValueFrom(
-        this.http.get<EasyAuthV2Response>(`${environment.apiUrl}/.auth/me`, {
-          withCredentials: true,
-        })
+        this.http.get<EasyAuthV2Response>('/.auth/me')
       );
 
       const principal = resp?.clientPrincipal;
@@ -68,12 +67,13 @@ export class AuthService {
 
   login(): void {
     const redirectUri = encodeURIComponent(window.location.href);
-    window.location.href = `${environment.apiUrl}/.auth/login/google?post_login_redirect_uri=${redirectUri}`;
+    // Use the SWA's own /.auth/login/google endpoint (same origin, no cross-origin cookie issues)
+    window.location.href = `/.auth/login/google?post_login_redirect_uri=${redirectUri}`;
   }
 
   logout(): void {
     this._user.set(null);
     const redirectUri = encodeURIComponent(window.location.origin);
-    window.location.href = `${environment.apiUrl}/.auth/logout?post_logout_redirect_uri=${redirectUri}`;
+    window.location.href = `/.auth/logout?post_logout_redirect_uri=${redirectUri}`;
   }
 }
