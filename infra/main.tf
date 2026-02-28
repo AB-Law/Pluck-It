@@ -207,7 +207,6 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
 
   app_settings = {
     "FUNCTIONS_EXTENSION_VERSION" = "~4"
-    "FUNCTIONS_WORKER_RUNTIME"    = "python"
     "UPLOADS_CONTAINER_NAME"      = azurerm_storage_container.uploads.name
     "ARCHIVE_CONTAINER_NAME"      = azurerm_storage_container.archive.name
     "STORAGE_ACCOUNT_NAME"        = azurerm_storage_account.sa_pluckit.name
