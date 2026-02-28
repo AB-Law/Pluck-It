@@ -34,19 +34,19 @@ resource "azurerm_storage_account" "sa_pluckit" {
 
 resource "azurerm_storage_container" "uploads" {
   name                  = "uploads"
-  storage_account_name  = azurerm_storage_account.sa_pluckit.name
+  storage_account_id    = azurerm_storage_account.sa_pluckit.id
   container_access_type = "private"
 }
 
 resource "azurerm_storage_container" "archive" {
   name                  = "archive"
-  storage_account_name  = azurerm_storage_account.sa_pluckit.name
+  storage_account_id    = azurerm_storage_account.sa_pluckit.id
   container_access_type = "private"
 }
 
 resource "azurerm_storage_container" "tfstate" {
   name                  = "tfstate"
-  storage_account_name  = azurerm_storage_account.sa_pluckit.name
+  storage_account_id    = azurerm_storage_account.sa_pluckit.id
   container_access_type = "private"
 }
 
@@ -108,13 +108,13 @@ resource "azurerm_storage_account" "sa_functions" {
 
 resource "azurerm_storage_container" "api_func_deployment" {
   name                  = "api-func-deploy"
-  storage_account_name  = azurerm_storage_account.sa_functions.name
+  storage_account_id    = azurerm_storage_account.sa_functions.id
   container_access_type = "private"
 }
 
 resource "azurerm_storage_container" "proc_func_deployment" {
   name                  = "proc-func-deploy"
-  storage_account_name  = azurerm_storage_account.sa_functions.name
+  storage_account_id    = azurerm_storage_account.sa_functions.id
   container_access_type = "private"
 }
 
@@ -180,7 +180,7 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
 # The HTTP trigger (PluckItProcessImage) works without changes.
 
 resource "azurerm_service_plan" "functions_plan" {
-  name                = "${local.base_name}-func-plan"
+  name                = "${local.base_name}-proc-flex-plan"
   resource_group_name = azurerm_resource_group.rg_pluckit_archive.name
   location            = azurerm_resource_group.rg_pluckit_archive.location
   os_type             = "Linux"
