@@ -12,6 +12,10 @@ from rembg import remove
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 
+# rembg downloads the u2net ONNX model to U2NET_HOME on first run.
+# /tmp is the only writable directory available in the Flex Consumption sandbox.
+os.environ.setdefault("U2NET_HOME", "/tmp/.u2net")
+
 
 def _get_env(name: str, default: str | None = None) -> str:
   value = os.getenv(name, default)
@@ -22,9 +26,12 @@ def _get_env(name: str, default: str | None = None) -> str:
 
 def _get_blob_service() -> BlobServiceClient:
   account_name = _get_env("STORAGE_ACCOUNT_NAME")
-  connection_string = os.getenv(
-    "AzureWebJobsStorage",
-    f"DefaultEndpointsProtocol=https;AccountName={account_name};EndpointSuffix=core.windows.net",
+  account_key = _get_env("STORAGE_ACCOUNT_KEY")
+  connection_string = (
+    f"DefaultEndpointsProtocol=https;"
+    f"AccountName={account_name};"
+    f"AccountKey={account_key};"
+    f"EndpointSuffix=core.windows.net"
   )
   return BlobServiceClient.from_connection_string(connection_string)
 
