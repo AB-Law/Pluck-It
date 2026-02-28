@@ -181,6 +181,8 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
     auth_enabled           = true
     unauthenticated_action = "Return401"
 
+    allowed_external_redirect_urls = var.cors_allowed_origins
+
     google_v2 {
       client_id                  = var.google_oauth_client_id
       client_secret_setting_name = "GOOGLE_PROVIDER_AUTHENTICATION_SECRET"
