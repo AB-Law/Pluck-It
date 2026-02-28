@@ -14,27 +14,25 @@ interface EasyAuthClaim {
   val: string;
 }
 
-interface EasyAuthProvider {
-  provider_name: string;
-  user_id: string;
-  user_claims: EasyAuthClaim[];
-  authentication_token?: string;
+// EasyAuth v2 (auth_settings_v2) response shape from /.auth/me
+interface EasyAuthV2Response {
+  clientPrincipal: {
+    identityProvider: string;
+    userId: string;
+    userDetails: string;
+    userRoles: string[];
+    claims?: EasyAuthClaim[];
+  } | null;
 }
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private _user = signal<AuthUser | null>(null);
-  private _token = signal<string | null>(null);
 
   readonly user = this._user.asReadonly();
 
   constructor(private http: HttpClient) {}
 
-  /**
-   * Called by APP_INITIALIZER before the app renders.
-   * In development, injects a mock user so the backend Local:DevUserId fallback is used.
-   * In production, calls /.auth/me with credentials to get the EasyAuth session.
-   */
   async initialize(): Promise<void> {
     if (!environment.production) {
       this._user.set({ name: 'Local Dev', email: 'dev@local.test', userId: 'local-dev-user' });
@@ -42,25 +40,21 @@ export class AuthService {
     }
 
     try {
-      const providers = await firstValueFrom(
-        this.http.get<EasyAuthProvider[]>(`${environment.apiUrl}/.auth/me`, {
-          withCredentials: true,
-        })
+      // /.auth/me is served by the Static Web App on the same origin — no CORS or cookie issues.
+      const resp = await firstValueFrom(
+        this.http.get<EasyAuthV2Response>('/.auth/me')
       );
 
-      const provider = providers?.[0];
-      if (provider) {
-        const nameClaim = provider.user_claims.find(
+      const principal = resp?.clientPrincipal;
+      if (principal) {
+        const nameClaim = principal.claims?.find(
           c => c.typ === 'name' || c.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'
         );
         this._user.set({
-          name: nameClaim?.val ?? provider.user_id,
-          email: provider.user_id,
-          userId: provider.user_id,
+          name: nameClaim?.val ?? principal.userDetails,
+          email: principal.userDetails,
+          userId: principal.userId,
         });
-        if (provider.authentication_token) {
-          this._token.set(provider.authentication_token);
-        }
       }
     } catch {
       // Not authenticated — guard will redirect to login
@@ -71,19 +65,15 @@ export class AuthService {
     return this._user() !== null;
   }
 
-  getToken(): string | null {
-    return this._token();
-  }
-
   login(): void {
     const redirectUri = encodeURIComponent(window.location.href);
-    window.location.href = `${environment.apiUrl}/.auth/login/google?post_login_redirect_uri=${redirectUri}`;
+    // Use the SWA's own /.auth/login/google endpoint (same origin, no cross-origin cookie issues)
+    window.location.href = `/.auth/login/google?post_login_redirect_uri=${redirectUri}`;
   }
 
   logout(): void {
     this._user.set(null);
-    this._token.set(null);
     const redirectUri = encodeURIComponent(window.location.origin);
-    window.location.href = `${environment.apiUrl}/.auth/logout?post_logout_redirect_uri=${redirectUri}`;
+    window.location.href = `/.auth/logout?post_logout_redirect_uri=${redirectUri}`;
   }
 }
