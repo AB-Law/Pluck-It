@@ -81,7 +81,7 @@ resource "azurerm_cosmosdb_sql_container" "wardrobe" {
   resource_group_name   = azurerm_resource_group.rg_pluckit_archive.name
   account_name          = azurerm_cosmosdb_account.pluckit.name
   database_name         = azurerm_cosmosdb_sql_database.pluckit.name
-  partition_key_paths   = ["/id"]
+  partition_key_paths   = ["/userId"]
   partition_key_version = 1
 
   indexing_policy {
@@ -173,8 +173,20 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
   site_config {
     cors {
       allowed_origins     = var.cors_allowed_origins
-      support_credentials = false
+      support_credentials = true
     }
+  }
+
+  auth_settings_v2 {
+    auth_enabled           = true
+    unauthenticated_action = "Return401"
+
+    google_v2 {
+      client_id                  = var.google_oauth_client_id
+      client_secret_setting_name = "GOOGLE_PROVIDER_AUTHENTICATION_SECRET"
+    }
+
+    login {}
   }
 
   app_settings = {
@@ -191,6 +203,7 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
     "BlobStorage__AccountKey"            = azurerm_storage_account.sa_pluckit.primary_access_key
     "BlobStorage__ArchiveContainer"      = azurerm_storage_container.archive.name
     "Processor__BaseUrl"                 = "https://${local.base_name}-processor-func.azurewebsites.net"
+    "GOOGLE_PROVIDER_AUTHENTICATION_SECRET" = var.google_oauth_client_secret
   }
 }
 

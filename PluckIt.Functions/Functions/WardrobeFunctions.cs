@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using PluckIt.Core;
 using PluckIt.Functions.Serialization;
@@ -15,6 +16,7 @@ public class WardrobeFunctions(
     IBlobSasService sasService,
     IClothingMetadataService metadataService,
     IHttpClientFactory httpClientFactory,
+    IConfiguration config,
     ILogger<WardrobeFunctions> logger)
 {
     // ── GET /api/wardrobe ───────────────────────────────────────────────────
@@ -24,13 +26,16 @@ public class WardrobeFunctions(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "wardrobe")] HttpRequestData req,
         CancellationToken cancellationToken)
     {
+        if (!TryGetUserId(req, out var userId))
+            return req.CreateResponse(System.Net.HttpStatusCode.Unauthorized);
+
         var query = ParseQueryString(req.Url);
         var category = query.GetValueOrDefault("category");
         var tags = query.TryGetValue("tags", out var t) ? t.Split(',', StringSplitOptions.RemoveEmptyEntries) : null;
         var page = int.TryParse(query.GetValueOrDefault("page"), out var p) ? Math.Max(p, 0) : 0;
         var pageSize = int.TryParse(query.GetValueOrDefault("pageSize"), out var s) ? Math.Clamp(s, 1, 100) : 24;
 
-        var items = await repo.GetAllAsync(category, tags, page, pageSize, cancellationToken);
+        var items = await repo.GetAllAsync(userId!, category, tags, page, pageSize, cancellationToken);
         var result = items.Select(i => { i.ImageUrl = sasService.GenerateSasUrl(i.ImageUrl); return i; }).ToList();
 
         return await JsonOk(req, result, PluckItJsonContext.Default.ListClothingItem);
@@ -44,7 +49,10 @@ public class WardrobeFunctions(
         string id,
         CancellationToken cancellationToken)
     {
-        var item = await repo.GetByIdAsync(id, cancellationToken);
+        if (!TryGetUserId(req, out var userId))
+            return req.CreateResponse(System.Net.HttpStatusCode.Unauthorized);
+
+        var item = await repo.GetByIdAsync(id, userId!, cancellationToken);
         if (item is null) return req.CreateResponse(HttpStatusCode.NotFound);
 
         item.ImageUrl = sasService.GenerateSasUrl(item.ImageUrl);
@@ -59,6 +67,9 @@ public class WardrobeFunctions(
         string id,
         CancellationToken cancellationToken)
     {
+        if (!TryGetUserId(req, out var userId))
+            return req.CreateResponse(System.Net.HttpStatusCode.Unauthorized);
+
         ClothingItem? updated;
         try
         {
@@ -73,6 +84,7 @@ public class WardrobeFunctions(
         if (updated is null || !string.Equals(id, updated.Id, StringComparison.OrdinalIgnoreCase))
             return await JsonError(req, HttpStatusCode.BadRequest, "ID in path and body must match.");
 
+        updated.UserId = userId!;
         await repo.UpsertAsync(updated, cancellationToken);
         return req.CreateResponse(HttpStatusCode.NoContent);
     }
@@ -84,6 +96,9 @@ public class WardrobeFunctions(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "wardrobe/upload")] HttpRequestData req,
         CancellationToken cancellationToken)
     {
+        if (!TryGetUserId(req, out var userId))
+            return req.CreateResponse(System.Net.HttpStatusCode.Unauthorized);
+
         // Extract image bytes from multipart/form-data or raw body
         var contentType = req.Headers.TryGetValues("Content-Type", out var cts)
             ? cts.FirstOrDefault() ?? "application/octet-stream"
@@ -148,6 +163,7 @@ public class WardrobeFunctions(
         var draft = new ClothingItem
         {
             Id = processed.Id,
+            UserId = userId!,
             ImageUrl = sasService.GenerateSasUrl(processed.ImageUrl),
             Brand = metadata.Brand,
             Category = metadata.Category,
@@ -165,6 +181,9 @@ public class WardrobeFunctions(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "wardrobe")] HttpRequestData req,
         CancellationToken cancellationToken)
     {
+        if (!TryGetUserId(req, out var userId))
+            return req.CreateResponse(System.Net.HttpStatusCode.Unauthorized);
+
         ClothingItem? item;
         try
         {
@@ -181,6 +200,7 @@ public class WardrobeFunctions(
 
         if (string.IsNullOrWhiteSpace(item.Id))
             item.Id = Guid.NewGuid().ToString("N");
+        item.UserId = userId!;
         if (item.DateAdded is null)
             item.DateAdded = DateTimeOffset.UtcNow;
 
@@ -195,6 +215,26 @@ public class WardrobeFunctions(
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Resolves the authenticated user ID.
+    /// In Azure (EasyAuth), reads the x-ms-client-principal-id header injected by the platform.
+    /// In local development, falls back to Local:DevUserId in configuration.
+    /// </summary>
+    private bool TryGetUserId(HttpRequestData req, out string? userId)
+    {
+        if (req.Headers.TryGetValues("x-ms-client-principal-id", out var ids))
+        {
+            var id = ids.FirstOrDefault();
+            if (!string.IsNullOrEmpty(id)) { userId = id; return true; }
+        }
+
+        var devId = config["Local:DevUserId"];
+        if (!string.IsNullOrEmpty(devId)) { userId = devId; return true; }
+
+        userId = null;
+        return false;
+    }
 
     private static async Task<HttpResponseData> JsonOk<T>(
         HttpRequestData req, T body, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo)

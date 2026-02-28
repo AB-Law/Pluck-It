@@ -82,6 +82,8 @@ var blobArchiveContainer = builder.Configuration["BlobStorage:ArchiveContainer"]
 builder.Services.AddSingleton<IBlobSasService>(
   new BlobSasService(blobAccountName, blobAccountKey, blobArchiveContainer));
 
+var localDevUserId = builder.Configuration["Local:DevUserId"] ?? "local-dev-user";
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -111,6 +113,7 @@ app.MapGet("/api/wardrobe", async (
   var normalizedSize = pageSize <= 0 ? 24 : Math.Min(pageSize, 100);
 
   var items = await repo.GetAllAsync(
+    userId: localDevUserId,
     category,
     tags,
     normalizedPage,
@@ -127,7 +130,7 @@ app.MapGet("/api/wardrobe/{id}", async (
   string id,
   CancellationToken cancellationToken) =>
 {
-  var item = await repo.GetByIdAsync(id, cancellationToken);
+  var item = await repo.GetByIdAsync(id, localDevUserId, cancellationToken);
   if (item is null) return Results.NotFound();
   item.ImageUrl = sasService.GenerateSasUrl(item.ImageUrl);
   return Results.Ok(item);
@@ -155,6 +158,7 @@ app.MapPost("/api/stylist/recommendations", async (
   CancellationToken cancellationToken) =>
 {
   var wardrobe = await repo.GetAllAsync(
+    userId: localDevUserId,
     category: null,
     tags: null,
     page: 0,

@@ -37,3 +37,14 @@ variable "cors_allowed_origins" {
   default     = []
 }
 
+variable "google_oauth_client_id" {
+  description = "Google OAuth 2.0 Client ID for EasyAuth."
+  type        = string
+}
+
+variable "google_oauth_client_secret" {
+  description = "Google OAuth 2.0 Client Secret for EasyAuth."
+  type        = string
+  sensitive   = true
+}
+

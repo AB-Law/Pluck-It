@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using PluckIt.Core;
 using PluckIt.Functions.Serialization;
@@ -11,6 +12,7 @@ namespace PluckIt.Functions.Functions;
 public class StylistFunctions(
     IWardrobeRepository repo,
     IStylistService stylist,
+    IConfiguration config,
     ILogger<StylistFunctions> logger)
 {
     [Function(nameof(GetRecommendations))]
@@ -18,6 +20,9 @@ public class StylistFunctions(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "stylist/recommendations")] HttpRequestData req,
         CancellationToken cancellationToken)
     {
+        if (!TryGetUserId(req, out var userId))
+            return req.CreateResponse(System.Net.HttpStatusCode.Unauthorized);
+
         StylistRequest? request;
         try
         {
@@ -32,6 +37,7 @@ public class StylistFunctions(
         request ??= new StylistRequest();
 
         var wardrobe = await repo.GetAllAsync(
+            userId: userId!,
             category: null,
             tags: null,
             page: 0,
@@ -71,5 +77,20 @@ public class StylistFunctions(
         await response.WriteStringAsync(
             JsonSerializer.Serialize(new ErrorResponse(message), PluckItJsonContext.Default.ErrorResponse));
         return response;
+    }
+
+    private bool TryGetUserId(HttpRequestData req, out string? userId)
+    {
+        if (req.Headers.TryGetValues("x-ms-client-principal-id", out var ids))
+        {
+            var id = ids.FirstOrDefault();
+            if (!string.IsNullOrEmpty(id)) { userId = id; return true; }
+        }
+
+        var devId = config["Local:DevUserId"];
+        if (!string.IsNullOrEmpty(devId)) { userId = devId; return true; }
+
+        userId = null;
+        return false;
     }
 }

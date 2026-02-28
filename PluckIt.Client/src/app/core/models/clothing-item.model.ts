@@ -5,6 +5,7 @@ export interface ClothingColour {
 
 export interface ClothingItem {
   id: string;
+  userId?: string;
   imageUrl: string;
   tags: string[];
   colours: ClothingColour[];

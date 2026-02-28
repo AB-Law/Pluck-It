@@ -1,9 +1,10 @@
 import { Routes } from '@angular/router';
 import { ClosetComponent } from './features/closet/closet.component';
 import { StylistComponent } from './features/stylist/stylist.component';
+import { authGuard } from './core/guards/auth.guard';
 
 export const routes: Routes = [
-  { path: '', component: ClosetComponent },
-  { path: 'stylist', component: StylistComponent },
+  { path: '', component: ClosetComponent, canActivate: [authGuard] },
+  { path: 'stylist', component: StylistComponent, canActivate: [authGuard] },
   { path: '**', redirectTo: '' }
 ];

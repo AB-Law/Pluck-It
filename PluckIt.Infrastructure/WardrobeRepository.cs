@@ -25,6 +25,7 @@ public class WardrobeRepository : IWardrobeRepository
   private Container Container => _client.GetContainer(_databaseName, _containerName);
 
   public async Task<IReadOnlyCollection<ClothingItem>> GetAllAsync(
+    string userId,
     string? category,
     IReadOnlyCollection<string>? tags,
     int page,
@@ -32,8 +33,8 @@ public class WardrobeRepository : IWardrobeRepository
     CancellationToken cancellationToken = default)
   {
     var query = "SELECT * FROM c";
-    var conditions = new List<string>();
-    var parameters = new Dictionary<string, object>();
+    var conditions = new List<string> { "c.userId = @userId" };
+    var parameters = new Dictionary<string, object> { ["@userId"] = userId };
 
     if (!string.IsNullOrWhiteSpace(category))
     {
@@ -47,10 +48,7 @@ public class WardrobeRepository : IWardrobeRepository
       parameters.Add("@tags", tags);
     }
 
-    if (conditions.Count > 0)
-    {
-      query += " WHERE " + string.Join(" AND ", conditions);
-    }
+    query += " WHERE " + string.Join(" AND ", conditions);
 
     query += " ORDER BY c.dateAdded DESC";
 
@@ -64,7 +62,8 @@ public class WardrobeRepository : IWardrobeRepository
       queryDefinition,
       requestOptions: new QueryRequestOptions
       {
-        MaxItemCount = pageSize
+        MaxItemCount = pageSize,
+        PartitionKey = new PartitionKey(userId)
       });
 
     var results = new List<ClothingItem>();
@@ -82,13 +81,14 @@ public class WardrobeRepository : IWardrobeRepository
 
   public async Task<ClothingItem?> GetByIdAsync(
     string id,
+    string userId,
     CancellationToken cancellationToken = default)
   {
     try
     {
       var response = await Container.ReadItemAsync<ClothingItem>(
         id,
-        new PartitionKey(id),
+        new PartitionKey(userId),
         cancellationToken: cancellationToken);
       return response.Resource;
     }
@@ -104,7 +104,7 @@ public class WardrobeRepository : IWardrobeRepository
   {
     await Container.UpsertItemAsync(
       item,
-      new PartitionKey(item.Id),
+      new PartitionKey(item.UserId),
       cancellationToken: cancellationToken);
   }
 }

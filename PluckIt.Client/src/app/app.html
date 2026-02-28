@@ -6,6 +6,12 @@
       <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Closet</a>
       <a routerLink="/stylist" routerLinkActive="active">Stylist</a>
     </nav>
+    @if (auth.user(); as user) {
+      <div class="user-bar">
+        <span class="user-name">{{ user.name }}</span>
+        <button class="logout-btn" (click)="auth.logout()">Sign out</button>
+      </div>
+    }
   </header>
   
   <main>
