@@ -38,6 +38,46 @@ PluckIt.Api
 - Node.js 20+
 - Angular CLI v19+
 
+### GitHub Codespaces
+
+This repository includes a preconfigured Codespaces/dev container setup in `.devcontainer/`.
+
+- Installs toolchains: .NET 10, Node.js 22, Python 3.12, Azure CLI, Terraform, GitHub CLI
+- Installs dependencies on create via `.devcontainer/scripts/post-create.sh`
+  - `dotnet restore` for the solution
+  - `npm ci` in `PluckIt.Client`
+  - Python virtual environment + `pip install -r requirements.txt` in `PluckIt.Processor`
+  - Installs Azure Functions Core Tools (`func`)
+  - Creates `PluckIt.Functions/local.settings.json` and `PluckIt.Processor/local.settings.json` if missing
+
+To use it, create a new Codespace from the repository. The setup runs automatically during container creation.
+
+#### Secrets in Codespaces vs GitHub Actions
+
+GitHub Actions `secrets.*` are **not** automatically injected into Codespaces runtime.
+
+For Codespaces, add repository/org **Codespaces secrets** (same names is easiest), then rebuild the container.
+
+Recommended secrets for this repo:
+
+- `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (Azure auth / Terraform)
+- `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`
+- `AZURE_WEBJOBS_STORAGE` (required for full local Azure Functions runtime)
+- `COSMOS_ENDPOINT`, `COSMOS_KEY`, `COSMOS_DATABASE`, `COSMOS_CONTAINER`
+- `STORAGE_ACCOUNT_NAME`, `STORAGE_ACCOUNT_KEY`, `UPLOAD_CONTAINER`, `ARCHIVE_CONTAINER`
+
+The post-create script maps these into local Function settings files automatically when they exist.
+
+#### Can Codespaces run Function Apps and Terraform?
+
+Yes.
+
+- .NET Function App: `cd PluckIt.Functions && func start`
+- Python Function App: `cd PluckIt.Processor && source .venv/bin/activate && func start`
+- Terraform: `cd infra && terraform init && terraform plan`
+
+If `AZURE_WEBJOBS_STORAGE` is missing, Functions may start with limited behavior depending on trigger type.
+
 ### Running the Backend
 
 ```powershell
