@@ -93,55 +93,7 @@ resource "azurerm_cosmosdb_sql_container" "wardrobe" {
   }
 }
 
-resource "azurerm_service_plan" "api_plan" {
-  name                = "${local.base_name}-api-plan"
-  resource_group_name = azurerm_resource_group.rg_pluckit_archive.name
-  location            = azurerm_resource_group.rg_pluckit_archive.location
-
-  os_type  = "Linux"
-  sku_name = "B1"
-}
-
-resource "azurerm_linux_web_app" "pluckit_api" {
-  name                = "${local.base_name}-api"
-  resource_group_name = azurerm_resource_group.rg_pluckit_archive.name
-  location            = azurerm_resource_group.rg_pluckit_archive.location
-  service_plan_id     = azurerm_service_plan.api_plan.id
-
-  site_config {
-    always_on = true
-    application_stack {
-      dotnet_version = "10.0"
-    }
-  }
-
-  app_settings = merge(
-    {
-      "ASPNETCORE_ENVIRONMENT"               = "Production"
-      "Azure__CosmosDb__Endpoint"            = azurerm_cosmosdb_account.pluckit.endpoint
-      "Azure__CosmosDb__DatabaseName"        = azurerm_cosmosdb_sql_database.pluckit.name
-      "Azure__CosmosDb__ContainerName"       = azurerm_cosmosdb_sql_container.wardrobe.name
-      "Azure__BlobStorage__AccountName"      = azurerm_storage_account.sa_pluckit.name
-      "Azure__BlobStorage__UploadsContainer" = azurerm_storage_container.uploads.name
-      "Azure__BlobStorage__ArchiveContainer" = azurerm_storage_container.archive.name
-      "Cosmos__Endpoint"                     = azurerm_cosmosdb_account.pluckit.endpoint
-      "Cosmos__Key"                          = azurerm_cosmosdb_account.pluckit.primary_key
-      "Cosmos__Database"                     = azurerm_cosmosdb_sql_database.pluckit.name
-      "Cosmos__Container"                    = azurerm_cosmosdb_sql_container.wardrobe.name
-      "AI__Endpoint"                         = var.ai_gpt4o_endpoint
-      "AI__ApiKey"                           = var.ai_api_key
-      "AI__Deployment"                       = "gpt-4.1-mini"
-      "Processor__BaseUrl"                   = "https://${local.base_name}-processor-func.azurewebsites.net"
-      "BlobStorage__AccountName"             = azurerm_storage_account.sa_pluckit.name
-      "BlobStorage__AccountKey"              = azurerm_storage_account.sa_pluckit.primary_access_key
-      "BlobStorage__ArchiveContainer"        = azurerm_storage_container.archive.name
-    },
-    {
-      for idx, origin in var.cors_allowed_origins :
-      "Cors__AllowedOrigins__${idx}" => origin
-    }
-  )
-}
+# ── Shared Functions storage account (used for both Function App deployments) ──
 
 resource "azurerm_storage_account" "sa_functions" {
   name                     = replace("${local.base_name}func${random_string.storage_suffix.result}", "-", "")
@@ -152,43 +104,112 @@ resource "azurerm_storage_account" "sa_functions" {
   account_kind             = "StorageV2"
 }
 
-resource "azurerm_service_plan" "functions_plan" {
-  name                = "${local.base_name}-func-plan"
-  resource_group_name = azurerm_resource_group.rg_pluckit_archive.name
-  location            = azurerm_resource_group.rg_pluckit_archive.location
+# Deployment package containers — Flex Consumption requires a dedicated blob container per app
 
-  os_type  = "Linux"
-  sku_name = "Y1"
+resource "azurerm_storage_container" "api_func_deployment" {
+  name                  = "api-func-deploy"
+  storage_account_name  = azurerm_storage_account.sa_functions.name
+  container_access_type = "private"
 }
 
-resource "azurerm_linux_function_app" "pluckit_processor" {
-  name                       = "${local.base_name}-processor-func"
-  resource_group_name        = azurerm_resource_group.rg_pluckit_archive.name
-  location                   = azurerm_resource_group.rg_pluckit_archive.location
-  service_plan_id            = azurerm_service_plan.functions_plan.id
-  storage_account_name       = azurerm_storage_account.sa_functions.name
-  storage_account_access_key = azurerm_storage_account.sa_functions.primary_access_key
+resource "azurerm_storage_container" "proc_func_deployment" {
+  name                  = "proc-func-deploy"
+  storage_account_name  = azurerm_storage_account.sa_functions.name
+  container_access_type = "private"
+}
+
+# ── .NET 10 API — Flex Consumption ──────────────────────────────────────────
+
+resource "azurerm_service_plan" "api_func_plan" {
+  name                = "${local.base_name}-api-func-plan"
+  resource_group_name = azurerm_resource_group.rg_pluckit_archive.name
+  location            = azurerm_resource_group.rg_pluckit_archive.location
+  os_type             = "Linux"
+  sku_name            = "FC1"
+}
+
+resource "azurerm_function_app_flex_consumption" "pluckit_api" {
+  name                = "${local.base_name}-api-func"
+  resource_group_name = azurerm_resource_group.rg_pluckit_archive.name
+  location            = azurerm_resource_group.rg_pluckit_archive.location
+  service_plan_id     = azurerm_service_plan.api_func_plan.id
+
+  # Deployment package storage (Flex Consumption uses blob-based deployment, not WEBSITE_RUN_FROM_PACKAGE)
+  storage_container_endpoint  = "${azurerm_storage_account.sa_functions.primary_blob_endpoint}${azurerm_storage_container.api_func_deployment.name}"
+  storage_authentication_type = "StorageAccountConnectionString"
+  storage_access_key          = azurerm_storage_account.sa_functions.primary_access_key
+
+  runtime_name    = "dotnet-isolated"
+  runtime_version = "10.0"
+
+  instance_memory_in_mb  = 2048
+  # 1 always-ready instance prevents cold starts; ~$8-9/month
+  minimum_instance_count = 1
 
   site_config {
-    application_stack {
-      python_version = "3.12"
+    cors {
+      allowed_origins    = var.cors_allowed_origins
+      support_credentials = false
     }
   }
 
   app_settings = {
-    "AzureWebJobsStorage"            = azurerm_storage_account.sa_functions.primary_connection_string
-    "FUNCTIONS_EXTENSION_VERSION"    = "~4"
-    "FUNCTIONS_WORKER_RUNTIME"       = "python"
-    "SCM_DO_BUILD_DURING_DEPLOYMENT" = "false"
-    "ENABLE_ORYX_BUILD"              = "false"
-    "WEBSITE_RUN_FROM_PACKAGE"       = "1"
-    "UPLOADS_CONTAINER_NAME"         = azurerm_storage_container.uploads.name
-    "ARCHIVE_CONTAINER_NAME"         = azurerm_storage_container.archive.name
-    "STORAGE_ACCOUNT_NAME"           = azurerm_storage_account.sa_pluckit.name
-    "COSMOS_DB_ENDPOINT"             = azurerm_cosmosdb_account.pluckit.endpoint
-    "COSMOS_DB_KEY"                  = azurerm_cosmosdb_account.pluckit.primary_key
-    "COSMOS_DB_DATABASE"             = azurerm_cosmosdb_sql_database.pluckit.name
-    "COSMOS_DB_CONTAINER"            = azurerm_cosmosdb_sql_container.wardrobe.name
+    "FUNCTIONS_EXTENSION_VERSION"   = "~4"
+    "Cosmos__Endpoint"              = azurerm_cosmosdb_account.pluckit.endpoint
+    "Cosmos__Key"                   = azurerm_cosmosdb_account.pluckit.primary_key
+    "Cosmos__Database"              = azurerm_cosmosdb_sql_database.pluckit.name
+    "Cosmos__Container"             = azurerm_cosmosdb_sql_container.wardrobe.name
+    "AI__Endpoint"                  = var.ai_gpt4o_endpoint
+    "AI__ApiKey"                    = var.ai_api_key
+    "AI__Deployment"                = "gpt-4.1-mini"
+    "BlobStorage__AccountName"      = azurerm_storage_account.sa_pluckit.name
+    "BlobStorage__AccountKey"       = azurerm_storage_account.sa_pluckit.primary_access_key
+    "BlobStorage__ArchiveContainer" = azurerm_storage_container.archive.name
+    "Processor__BaseUrl"            = "https://${local.base_name}-processor-func.azurewebsites.net"
+  }
+}
+
+# ── Python Processor — Flex Consumption ─────────────────────────────────────
+# NOTE: The blob trigger (PluckItBlobProcessor) must be migrated to an Event Grid
+# source trigger for Flex Consumption — polling blob triggers are not supported.
+# The HTTP trigger (PluckItProcessImage) works without changes.
+
+resource "azurerm_service_plan" "functions_plan" {
+  name                = "${local.base_name}-func-plan"
+  resource_group_name = azurerm_resource_group.rg_pluckit_archive.name
+  location            = azurerm_resource_group.rg_pluckit_archive.location
+  os_type             = "Linux"
+  sku_name            = "FC1"
+}
+
+resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
+  name                = "${local.base_name}-processor-func"
+  resource_group_name = azurerm_resource_group.rg_pluckit_archive.name
+  location            = azurerm_resource_group.rg_pluckit_archive.location
+  service_plan_id     = azurerm_service_plan.functions_plan.id
+
+  storage_container_endpoint  = "${azurerm_storage_account.sa_functions.primary_blob_endpoint}${azurerm_storage_container.proc_func_deployment.name}"
+  storage_authentication_type = "StorageAccountConnectionString"
+  storage_access_key          = azurerm_storage_account.sa_functions.primary_access_key
+
+  runtime_name    = "python"
+  runtime_version = "3.12"
+
+  instance_memory_in_mb = 2048
+
+  site_config {}
+
+  app_settings = {
+    "FUNCTIONS_EXTENSION_VERSION" = "~4"
+    "FUNCTIONS_WORKER_RUNTIME"    = "python"
+    "UPLOADS_CONTAINER_NAME"      = azurerm_storage_container.uploads.name
+    "ARCHIVE_CONTAINER_NAME"      = azurerm_storage_container.archive.name
+    "STORAGE_ACCOUNT_NAME"        = azurerm_storage_account.sa_pluckit.name
+    "STORAGE_ACCOUNT_KEY"         = azurerm_storage_account.sa_pluckit.primary_access_key
+    "COSMOS_DB_ENDPOINT"          = azurerm_cosmosdb_account.pluckit.endpoint
+    "COSMOS_DB_KEY"               = azurerm_cosmosdb_account.pluckit.primary_key
+    "COSMOS_DB_DATABASE"          = azurerm_cosmosdb_sql_database.pluckit.name
+    "COSMOS_DB_CONTAINER"         = azurerm_cosmosdb_sql_container.wardrobe.name
   }
 }
 

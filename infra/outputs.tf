@@ -33,9 +33,9 @@ output "cosmos_container_name" {
   value       = azurerm_cosmosdb_sql_container.wardrobe.name
 }
 
-output "api_app_url" {
-  description = "Default hostname for the Pluck-It API web app."
-  value       = azurerm_linux_web_app.pluckit_api.default_hostname
+output "api_func_url" {
+  description = "Default hostname for the PluckIt .NET Functions API."
+  value       = azurerm_function_app_flex_consumption.pluckit_api.default_hostname
 }
 
 output "function_app_name" {

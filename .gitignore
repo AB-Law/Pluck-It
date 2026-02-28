@@ -78,7 +78,7 @@ infra/.terraform.tfstate.lock.info
 **/appsettings.Staging.json
 **/appsettings.*.json
 !**/appsettings.json
-!**/appsettings.Development.json
+appsettings.Development.json
 
 # .NET
 project.lock.json
@@ -477,3 +477,4 @@ Thumbs.db
 
 # Angular specific
 /.angular
+PluckIt.Api/appsettings.Development.json

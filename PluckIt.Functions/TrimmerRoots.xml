@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Explicit trimmer roots to preserve types used by the Cosmos SDK via reflection
+  and any Azure SDK internal serialization paths that are not yet AOT-annotated.
+-->
+<linker>
+  <!-- Preserve all PluckIt.Core model types used in Cosmos documents and HTTP bodies -->
+  <assembly fullname="PluckIt.Core">
+    <type fullname="PluckIt.Core.ClothingItem" preserve="all" />
+    <type fullname="PluckIt.Core.ClothingColour" preserve="all" />
+    <type fullname="PluckIt.Core.OutfitRecommendation" preserve="all" />
+    <type fullname="PluckIt.Core.StylistRequest" preserve="all" />
+    <type fullname="PluckIt.Core.ClothingMetadata" preserve="all" />
+  </assembly>
+
+  <!-- Preserve Functions project request/response records -->
+  <assembly fullname="PluckIt.Functions">
+    <type fullname="PluckIt.Functions.ProcessorResult" preserve="all" />
+  </assembly>
+</linker>

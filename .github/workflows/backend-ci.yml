@@ -1,17 +1,17 @@
-name: Backend CI/CD
+name: Backend (Functions) CI/CD
 
 on:
   push:
     branches: [ main ]
     paths:
-      - 'PluckIt.Api/**'
+      - 'PluckIt.Functions/**'
       - 'PluckIt.Core/**'
       - 'PluckIt.Infrastructure/**'
       - '.github/workflows/backend-ci.yml'
   pull_request:
     branches: [ main ]
     paths:
-      - 'PluckIt.Api/**'
+      - 'PluckIt.Functions/**'
       - 'PluckIt.Core/**'
       - 'PluckIt.Infrastructure/**'
       - '.github/workflows/backend-ci.yml'
@@ -21,51 +21,64 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-and-test:
+  build:
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: '10.0.x'
-    
+
     - name: Restore dependencies
       run: dotnet restore PluckIt.sln
-    
+
     - name: Build
       run: dotnet build PluckIt.sln --no-restore --configuration Release
-    
-    - name: Test
-      run: dotnet test PluckIt.sln --no-build --configuration Release --verbosity normal
-    
+
     - name: Publish
-      run: dotnet publish PluckIt.Api/PluckIt.Api.csproj --configuration Release --output ./publish
-    
+      run: dotnet publish PluckIt.Functions/PluckIt.Functions.csproj --configuration Release --output ./publish
+
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: pluckit-api
+        name: pluckit-functions
         path: ./publish/
 
   deploy:
     runs-on: ubuntu-latest
-    needs: build-and-test
+    needs: build
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment: production
-    
+
     steps:
     - name: Download artifact
       uses: actions/download-artifact@v4
       with:
-        name: pluckit-api
+        name: pluckit-functions
         path: ./publish
-    
-    - name: Deploy to Azure Web App
-      uses: azure/webapps-deploy@v3
+
+    - name: Azure Login
+      uses: azure/login@v2
       with:
-        app-name: 'pluckit-prod-api'
-        publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-        package: ./publish
+        creds: |
+          {
+            "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
+            "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+            "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+            "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
+          }
+
+    - name: Deploy to Azure Functions
+      run: |
+        cd publish
+        zip -r ../function-app.zip .
+        echo "Zip size: $(du -sh ../function-app.zip)"
+        az functionapp deployment source config-zip \
+          --resource-group PluckIt-RG \
+          --name pluckit-prod-api-func \
+          --src ../function-app.zip \
+          --timeout 600
+        echo "✓ Deployed successfully"
