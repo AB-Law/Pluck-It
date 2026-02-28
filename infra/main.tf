@@ -135,6 +135,7 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
   service_plan_id     = azurerm_service_plan.api_func_plan.id
 
   # Deployment package storage (Flex Consumption uses blob-based deployment, not WEBSITE_RUN_FROM_PACKAGE)
+  storage_container_type      = "blobContainer"
   storage_container_endpoint  = "${azurerm_storage_account.sa_functions.primary_blob_endpoint}${azurerm_storage_container.api_func_deployment.name}"
   storage_authentication_type = "StorageAccountConnectionString"
   storage_access_key          = azurerm_storage_account.sa_functions.primary_access_key
@@ -142,13 +143,17 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
   runtime_name    = "dotnet-isolated"
   runtime_version = "10.0"
 
-  instance_memory_in_mb  = 2048
+  instance_memory_in_mb = 2048
+
   # 1 always-ready instance prevents cold starts; ~$8-9/month
-  minimum_instance_count = 1
+  always_ready {
+    name           = "http"
+    instance_count = 1
+  }
 
   site_config {
     cors {
-      allowed_origins    = var.cors_allowed_origins
+      allowed_origins     = var.cors_allowed_origins
       support_credentials = false
     }
   }
@@ -188,6 +193,7 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
   location            = azurerm_resource_group.rg_pluckit_archive.location
   service_plan_id     = azurerm_service_plan.functions_plan.id
 
+  storage_container_type      = "blobContainer"
   storage_container_endpoint  = "${azurerm_storage_account.sa_functions.primary_blob_endpoint}${azurerm_storage_container.proc_func_deployment.name}"
   storage_authentication_type = "StorageAccountConnectionString"
   storage_access_key          = azurerm_storage_account.sa_functions.primary_access_key

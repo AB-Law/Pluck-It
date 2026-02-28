@@ -40,6 +40,6 @@ output "api_func_url" {
 
 output "function_app_name" {
   description = "Name of the Pluck-It processor Function App."
-  value       = azurerm_linux_function_app.pluckit_processor.name
+  value       = azurerm_function_app_flex_consumption.pluckit_processor.name
 }
 
