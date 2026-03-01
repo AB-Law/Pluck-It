@@ -7,344 +7,110 @@ import {
   Output,
   SimpleChanges,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ClothingColour, ClothingItem } from '../../core/models/clothing-item.model';
 
 @Component({
   selector: 'app-review-item-modal',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [FormsModule],
   template: `
-    <div class="overlay" (click)="onOverlayClick($event)">
-      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-
-        <div class="modal-header">
-          <h2 id="modal-title">Review Item</h2>
-          <button class="close-btn" (click)="cancelled.emit()" aria-label="Close">✕</button>
-        </div>
-
-        <div class="modal-body" *ngIf="draft">
-
-          <!-- Image preview -->
-          <div class="image-preview">
-            <img [src]="draft.imageUrl" alt="Clothing item" />
-          </div>
-
-          <!-- Fields -->
-          <div class="fields">
-
-            <div class="field-row">
-              <div class="field">
-                <label>Brand</label>
-                <input type="text" [(ngModel)]="draft.brand" placeholder="e.g. Nike, Zara (optional)" />
-              </div>
-              <div class="field">
-                <label>Category</label>
-                <input type="text" [(ngModel)]="draft.category" placeholder="e.g. T-Shirt, Jeans" />
-              </div>
-            </div>
-
-            <div class="field">
-              <label>Price</label>
-              <div class="price-input">
-                <span class="currency">£</span>
-                <input
-                  type="number"
-                  [(ngModel)]="draft.price"
-                  placeholder="0.00"
-                  min="0"
-                  step="0.01"
-                />
-              </div>
-            </div>
-
-            <!-- Tags -->
-            <div class="field">
-              <label>Tags</label>
-              <div class="chip-container">
-                <span class="chip" *ngFor="let tag of draft.tags; let i = index">
-                  {{ tag }}
-                  <button class="chip-remove" (click)="removeTag(i)" aria-label="Remove tag">×</button>
-                </span>
-                <input
-                  class="chip-input"
-                  type="text"
-                  [(ngModel)]="newTag"
-                  placeholder="Add tag..."
-                  (keydown.enter)="addTag()"
-                  (keydown.comma)="addTagFromComma($event)"
-                />
-              </div>
-            </div>
-
-            <!-- Colours -->
-            <div class="field">
-              <label>Colours</label>
-              <div class="colours-list">
-                <div class="colour-row" *ngFor="let colour of draft.colours; let i = index">
-                  <span class="colour-swatch" [style.background]="colour.hex"></span>
-                  <input type="text" [(ngModel)]="colour.name" class="colour-name" placeholder="Colour name" />
-                  <input type="color" [(ngModel)]="colour.hex" class="colour-picker" [title]="colour.hex" />
-                  <button class="chip-remove" (click)="removeColour(i)" aria-label="Remove colour">×</button>
-                </div>
-                <button class="add-colour-btn" (click)="addColour()">+ Add colour</button>
-              </div>
-            </div>
-
-            <div class="field">
-              <label>Notes</label>
-              <textarea [(ngModel)]="draft.notes" placeholder="Any notes about this item..." rows="2"></textarea>
-            </div>
-
-          </div>
-        </div>
-
-        <div class="modal-footer">
-          <button class="btn-secondary" (click)="cancelled.emit()">Cancel</button>
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+      (click)="onOverlayClick($event)"
+    >
+      <div
+        class="bg-card-dark border border-border-subtle rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto custom-scrollbar shadow-2xl"
+        role="dialog" aria-modal="true" aria-labelledby="modal-title"
+        (click)="$event.stopPropagation()"
+      >
+        <!-- Header -->
+        <div class="flex items-center justify-between px-6 py-4 border-b border-border-subtle sticky top-0 bg-card-dark z-10">
+          <h2 id="modal-title" class="text-white font-semibold text-lg">Review Item</h2>
           <button
-            class="btn-primary"
-            (click)="onSave()"
-          >Save to Wardrobe</button>
+            class="p-2 text-slate-text hover:text-white hover:bg-[#333] rounded-lg transition-colors"
+            (click)="cancelled.emit()" aria-label="Close"
+          >
+            <span class="material-symbols-outlined" style="font-size:20px">close</span>
+          </button>
         </div>
 
+        @if (draft) {
+          <div class="flex flex-col md:flex-row gap-6 p-6">
+            <!-- Image -->
+            <div class="md:w-44 shrink-0">
+              <div class="aspect-[3/4] bg-[#111] rounded-xl overflow-hidden flex items-center justify-center">
+                <img [src]="draft.imageUrl" alt="Clothing item" class="object-contain h-full w-full" />
+              </div>
+            </div>
+
+            <!-- Fields -->
+            <div class="flex-1 flex flex-col gap-4">
+              <div class="grid grid-cols-2 gap-3">
+                <div class="flex flex-col gap-1.5">
+                  <label class="text-[10px] font-medium text-slate-text uppercase tracking-wider">Brand</label>
+                  <input type="text" [(ngModel)]="draft.brand" placeholder="e.g. Nike, Zara"
+                    class="bg-[#111] border border-[#333] text-white rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-primary focus:border-primary placeholder-slate-500 outline-none" />
+                </div>
+                <div class="flex flex-col gap-1.5">
+                  <label class="text-[10px] font-medium text-slate-text uppercase tracking-wider">Category</label>
+                  <input type="text" [(ngModel)]="draft.category" placeholder="e.g. T-Shirt, Jeans"
+                    class="bg-[#111] border border-[#333] text-white rounded-lg px-3 py-2 text-sm focus:ring-1 focus:ring-primary focus:border-primary placeholder-slate-500 outline-none" />
+                </div>
+              </div>
+
+              <div class="flex flex-col gap-1.5">
+                <label class="text-[10px] font-medium text-slate-text uppercase tracking-wider">Tags</label>
+                <div class="bg-[#111] border border-[#333] rounded-lg p-2 flex flex-wrap gap-1.5 min-h-[40px]">
+                  @for (tag of draft.tags; track tag; let i = $index) {
+                    <span class="flex items-center gap-1 px-2 py-0.5 bg-primary/10 text-primary border border-primary/20 rounded text-xs font-mono">
+                      {{ tag }}
+                      <button type="button" class="text-primary/60 hover:text-primary" (click)="removeTag(i)">&times;</button>
+                    </span>
+                  }
+                  <input type="text" [(ngModel)]="newTag" placeholder="Add tag…"
+                    class="bg-transparent text-white text-sm placeholder-slate-500 outline-none min-w-[80px] py-0.5 px-1"
+                    (keydown.enter)="$event.preventDefault(); addTag()"
+                    (keydown.comma)="addTagFromComma($event)" />
+                </div>
+              </div>
+
+              <div class="flex flex-col gap-1.5">
+                <div class="flex items-center justify-between">
+                  <label class="text-[10px] font-medium text-slate-text uppercase tracking-wider">Colours</label>
+                  <button type="button" class="text-xs text-primary hover:text-blue-400 font-medium" (click)="addColour()">+ Add</button>
+                </div>
+                <div class="flex flex-col gap-2">
+                  @for (colour of draft.colours; track $index; let i = $index) {
+                    <div class="flex items-center gap-2">
+                      <span class="w-5 h-5 rounded-full border border-[#444] shrink-0" [style.background]="colour.hex"></span>
+                      <input type="text" [(ngModel)]="colour.name" placeholder="Name"
+                        class="flex-1 bg-[#111] border border-[#333] text-white rounded-lg px-3 py-1.5 text-sm outline-none placeholder-slate-500 focus:ring-1 focus:ring-primary" />
+                      <input type="color" [(ngModel)]="colour.hex" class="w-8 h-8 rounded cursor-pointer bg-transparent border-0" [title]="colour.hex" />
+                      <button type="button" class="text-slate-text hover:text-red-400" (click)="removeColour(i)">
+                        <span class="material-symbols-outlined" style="font-size:18px">delete</span>
+                      </button>
+                    </div>
+                  }
+                </div>
+              </div>
+
+              <div class="flex flex-col gap-1.5">
+                <label class="text-[10px] font-medium text-slate-text uppercase tracking-wider">Notes (optional)</label>
+                <textarea [(ngModel)]="draft.notes" placeholder="Any additional notes…" rows="2"
+                  class="bg-[#111] border border-[#333] text-white rounded-lg px-3 py-2 text-sm outline-none resize-none placeholder-slate-500 focus:ring-1 focus:ring-primary"></textarea>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex justify-end gap-3 px-6 py-4 border-t border-border-subtle">
+            <button type="button" class="px-5 py-2 rounded-lg border border-[#333] text-slate-text hover:text-white text-sm font-medium transition-colors" (click)="cancelled.emit()">Cancel</button>
+            <button type="button" class="px-5 py-2 rounded-lg bg-primary hover:bg-blue-500 text-white text-sm font-semibold transition-colors" (click)="onSave()">Save to Wardrobe</button>
+          </div>
+        }
       </div>
     </div>
   `,
-  styles: [`
-    .overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.5);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-      padding: 1rem;
-    }
-    .modal {
-      background: #fff;
-      border-radius: 16px;
-      width: 100%;
-      max-width: 680px;
-      max-height: 90vh;
-      display: flex;
-      flex-direction: column;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-    }
-    .modal-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 1.25rem 1.5rem;
-      border-bottom: 1px solid #eee;
-    }
-    .modal-header h2 {
-      margin: 0;
-      font-size: 1.1rem;
-      font-weight: 600;
-    }
-    .close-btn {
-      background: none;
-      border: none;
-      font-size: 1.1rem;
-      cursor: pointer;
-      color: #666;
-      padding: 0.25rem 0.5rem;
-      border-radius: 4px;
-    }
-    .close-btn:hover { background: #f0f0f0; }
-    .modal-body {
-      display: flex;
-      gap: 1.5rem;
-      padding: 1.5rem;
-      overflow-y: auto;
-      flex: 1;
-    }
-    .image-preview {
-      width: 180px;
-      flex-shrink: 0;
-      border-radius: 12px;
-      overflow: hidden;
-      background: #f5f5f5;
-      display: flex;
-      align-items: flex-start;
-      justify-content: center;
-    }
-    .image-preview img {
-      width: 100%;
-      object-fit: contain;
-    }
-    .fields {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-    }
-    .field-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-    }
-    .field {
-      display: flex;
-      flex-direction: column;
-      gap: 0.35rem;
-    }
-    label {
-      font-size: 0.8rem;
-      font-weight: 600;
-      color: #444;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-    .required { color: #c00; }
-    input[type=text], input[type=number], textarea {
-      border: 1px solid #ddd;
-      border-radius: 8px;
-      padding: 0.5rem 0.75rem;
-      font-size: 0.9rem;
-      outline: none;
-      transition: border-color 0.15s;
-      font-family: inherit;
-    }
-    input[type=text]:focus, input[type=number]:focus, textarea:focus {
-      border-color: #888;
-    }
-    textarea { resize: vertical; }
-    .price-input {
-      display: flex;
-      align-items: center;
-      border: 1px solid #ddd;
-      border-radius: 8px;
-      overflow: hidden;
-      transition: border-color 0.15s;
-    }
-    .price-input:focus-within { border-color: #888; }
-    .currency {
-      padding: 0.5rem 0.6rem;
-      background: #f5f5f5;
-      font-size: 0.9rem;
-      color: #555;
-      border-right: 1px solid #ddd;
-    }
-    .price-input input {
-      border: none;
-      flex: 1;
-      padding: 0.5rem 0.75rem;
-      font-size: 0.9rem;
-      outline: none;
-    }
-    /* Tags / chips */
-    .chip-container {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.4rem;
-      border: 1px solid #ddd;
-      border-radius: 8px;
-      padding: 0.4rem 0.6rem;
-      min-height: 2.5rem;
-      align-items: center;
-    }
-    .chip {
-      background: #f0f0f0;
-      border-radius: 20px;
-      padding: 0.2rem 0.6rem;
-      font-size: 0.8rem;
-      display: flex;
-      align-items: center;
-      gap: 0.3rem;
-    }
-    .chip-remove {
-      background: none;
-      border: none;
-      font-size: 1rem;
-      line-height: 1;
-      cursor: pointer;
-      color: #888;
-      padding: 0;
-    }
-    .chip-remove:hover { color: #333; }
-    .chip-input {
-      border: none !important;
-      padding: 0.2rem 0.4rem !important;
-      font-size: 0.85rem;
-      outline: none;
-      min-width: 80px;
-      flex: 1;
-    }
-    /* Colours */
-    .colours-list {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-    }
-    .colour-row {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-    .colour-swatch {
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      border: 1px solid #ccc;
-      flex-shrink: 0;
-    }
-    .colour-name {
-      flex: 1;
-    }
-    .colour-picker {
-      width: 36px;
-      height: 30px;
-      padding: 2px;
-      border: 1px solid #ddd;
-      border-radius: 6px;
-      cursor: pointer;
-    }
-    .add-colour-btn {
-      background: none;
-      border: 1px dashed #bbb;
-      border-radius: 8px;
-      padding: 0.35rem 0.75rem;
-      font-size: 0.8rem;
-      color: #666;
-      cursor: pointer;
-      text-align: left;
-    }
-    .add-colour-btn:hover { border-color: #888; color: #333; }
-    /* Footer */
-    .modal-footer {
-      display: flex;
-      justify-content: flex-end;
-      gap: 0.75rem;
-      padding: 1rem 1.5rem;
-      border-top: 1px solid #eee;
-    }
-    .btn-primary, .btn-secondary {
-      padding: 0.6rem 1.4rem;
-      border-radius: 8px;
-      font-size: 0.9rem;
-      font-weight: 600;
-      cursor: pointer;
-      border: none;
-      transition: opacity 0.15s, background 0.15s;
-    }
-    .btn-primary {
-      background: #111;
-      color: #fff;
-    }
-    .btn-primary:disabled {
-      opacity: 0.4;
-      cursor: not-allowed;
-    }
-    .btn-primary:not(:disabled):hover { background: #333; }
-    .btn-secondary {
-      background: #f0f0f0;
-      color: #333;
-    }
-    .btn-secondary:hover { background: #e0e0e0; }
-  `]
 })
 export class ReviewItemModalComponent implements OnChanges, OnInit {
   @Input() item: ClothingItem | null = null;
@@ -354,21 +120,15 @@ export class ReviewItemModalComponent implements OnChanges, OnInit {
   draft: ClothingItem | null = null;
   newTag = '';
 
-  ngOnInit(): void {
-    console.log('[ReviewModal] component instantiated, item:', this.item);
-  }
+  ngOnInit(): void {}
 
   ngOnChanges(changes: SimpleChanges): void {
-    console.log('[ReviewModal] ngOnChanges', changes);
     if (changes['item'] && this.item) {
-      console.log('[ReviewModal] item received, building draft:', this.item);
-      // Deep copy so edits don't mutate the original until confirmed
       this.draft = {
         ...this.item,
         tags: [...(this.item.tags ?? [])],
         colours: (this.item.colours ?? []).map(c => ({ ...c })),
       };
-      console.log('[ReviewModal] draft built:', this.draft);
     }
   }
 
@@ -410,7 +170,7 @@ export class ReviewItemModalComponent implements OnChanges, OnInit {
   }
 
   onOverlayClick(event: MouseEvent): void {
-    if ((event.target as HTMLElement).classList.contains('overlay')) {
+    if ((event.target as HTMLElement).classList.contains('backdrop-blur-sm')) {
       this.cancelled.emit();
     }
   }

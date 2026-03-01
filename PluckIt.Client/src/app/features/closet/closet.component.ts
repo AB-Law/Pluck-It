@@ -1,83 +1,108 @@
-import { Component, OnInit, signal } from '@angular/core';
-import { DecimalPipe } from '@angular/common';
+import { Component, computed, input, OnInit, signal, ViewChild } from '@angular/core';
 import { WardrobeService } from '../../core/services/wardrobe.service';
 import { ClothingItem } from '../../core/models/clothing-item.model';
 import { UploadItemComponent } from './upload-item.component';
+import { ClothingCardComponent } from './clothing-card.component';
 import { ReviewItemModalComponent } from './review-item-modal.component';
 
 @Component({
-  selector: 'app-closet',
+  selector: 'app-wardrobe',
   standalone: true,
-  imports: [DecimalPipe, UploadItemComponent, ReviewItemModalComponent],
+  imports: [UploadItemComponent, ClothingCardComponent, ReviewItemModalComponent],
   template: `
-    <div class="closet-container">
-
-      <div class="closet-header">
-        <h2>Your Closet</h2>
-        <p>{{ items().length }} item{{ items().length !== 1 ? 's' : '' }}</p>
+    <!-- ─── Extraction Hub ──────────────────────────────────────────── -->
+    <section class="p-6 md:p-8 border-b border-border-subtle bg-gradient-to-b from-[#0a0a0a] to-background-dark">
+      <div class="flex items-center justify-between mb-4">
+        <h1 class="text-2xl font-bold text-white tracking-tight">The Extraction Hub</h1>
+        <span class="text-[10px] font-mono text-primary bg-primary/10 px-2 py-1 rounded border border-primary/20 tracking-wider">
+          SYSTEM ACTIVE
+        </span>
       </div>
 
-      <app-upload-item (fileSelected)="onFileSelected($event)" />
+      <app-upload-item
+        #uploadRef
+        [uploading]="uploading()"
+        (fileSelected)="onFileSelected($event)"
+      />
 
-      <!-- Upload loading state -->
-      @if (uploading()) {
-        <div class="upload-status">
-          <div class="spinner"></div>
-          <span>Processing image &amp; extracting metadata…</span>
-        </div>
-      }
       @if (uploadError()) {
-        <div class="upload-error">
-          ⚠️ {{ uploadError() }}
-          <button (click)="uploadError.set(null)">Dismiss</button>
+        <div class="mt-3 flex items-center gap-3 px-4 py-3 bg-red-950/40 border border-red-800/50 rounded-lg text-sm text-red-300">
+          <span class="material-symbols-outlined text-red-400" style="font-size:18px">error</span>
+          <span class="flex-1">{{ uploadError() }}</span>
+          <button class="text-red-400 hover:text-red-200 transition-colors" (click)="uploadError.set(null)" aria-label="Dismiss">
+            <span class="material-symbols-outlined" style="font-size:18px">close</span>
+          </button>
         </div>
       }
+    </section>
 
-      <!-- Items grid -->
-      @if (items().length > 0) {
-        <div class="items-grid">
-          @for (item of items(); track item.id) {
-            <div class="item-card">
-              <div class="item-image">
-                <img [src]="item.imageUrl" [alt]="item.category ?? 'Clothing item'" loading="lazy" />
-              </div>
-              <div class="item-info">
-                <p class="item-category">{{ item.category ?? 'Unknown' }}</p>
-                @if (item.brand) {
-                  <p class="item-brand">{{ item.brand }}</p>
-                }
-                <div class="item-footer">
-                  @if (item.price) {
-                    <span class="item-price">£{{ item.price | number:'1.2-2' }}</span>
-                  }
-                  <div class="colour-dots">
-                    @for (colour of item.colours.slice(0, 3); track colour.hex) {
-                      <span
-                        class="colour-dot"
-                        [style.background]="colour.hex"
-                        [title]="colour.name"
-                      ></span>
-                    }
-                  </div>
-                </div>
+    <!-- ─── Digital Archive ────────────────────────────────────────── -->
+    <section class="p-6 md:p-8 flex-1">
+
+      <!-- Header + filters -->
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+        <div>
+          <h2 class="text-xl font-bold text-white">Digital Archive</h2>
+          <p class="text-sm text-slate-text font-mono mt-1">{{ allItems().length }} ITEMS INDEXED</p>
+        </div>
+
+        <!-- Category pills -->
+        <div class="flex flex-wrap gap-2">
+          <button
+            class="px-4 py-1.5 rounded-full text-sm font-medium transition-colors"
+            [class]="selectedCategory() === 'all'
+              ? 'bg-white text-black'
+              : 'bg-card-dark border border-[#333] text-slate-text hover:text-white hover:border-slate-500'"
+            (click)="selectedCategory.set('all')"
+          >All Items</button>
+
+          @for (cat of allCategories(); track cat) {
+            <button
+              class="px-4 py-1.5 rounded-full text-sm font-medium transition-colors capitalize"
+              [class]="selectedCategory() === cat
+                ? 'bg-white text-black'
+                : 'bg-card-dark border border-[#333] text-slate-text hover:text-white hover:border-slate-500'"
+              (click)="selectedCategory.set(cat)"
+            >{{ cat }}</button>
+          }
+        </div>
+      </div>
+
+      <!-- Loading skeleton -->
+      @if (loading()) {
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-10">
+          @for (n of [1,2,3,4,5,6,7,8]; track n) {
+            <div class="bg-card-dark rounded-xl overflow-hidden animate-pulse">
+              <div class="aspect-[4/5] bg-[#222]"></div>
+              <div class="p-4 space-y-2">
+                <div class="h-3 bg-[#2a2a2a] rounded w-3/4"></div>
+                <div class="h-3 bg-[#2a2a2a] rounded w-1/2"></div>
               </div>
             </div>
           }
         </div>
       }
 
-      @if (!loading() && items().length === 0) {
-        <div class="empty-state">
-          <p>Your closet is empty. Upload your first item above.</p>
-        </div>
-      }
-      @if (loading()) {
-        <div class="loading-state">
-          <div class="spinner"></div>
+      <!-- Empty state -->
+      @if (!loading() && filteredItems().length === 0) {
+        <div class="flex flex-col items-center justify-center py-20 text-center gap-4">
+          <span class="material-symbols-outlined text-[#333]" style="font-size:64px">checkroom</span>
+          <p class="text-chrome font-medium">
+            @if (allItems().length === 0) { Your wardrobe is empty. Upload your first item above. }
+            @else { No items match the selected filter. }
+          </p>
         </div>
       }
 
-    </div>
+      <!-- Items grid -->
+      @if (!loading() && filteredItems().length > 0) {
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-10">
+          @for (item of filteredItems(); track item.id) {
+            <app-clothing-card [item]="item" />
+          }
+        </div>
+      }
+    </section>
 
     <!-- Review modal -->
     @if (draftItem()) {
@@ -88,155 +113,40 @@ import { ReviewItemModalComponent } from './review-item-modal.component';
       />
     }
   `,
-  styles: [`
-    .closet-container {
-      padding: 2rem;
-      max-width: 1100px;
-      margin: 0 auto;
-    }
-    .closet-header {
-      display: flex;
-      align-items: baseline;
-      gap: 1rem;
-      margin-bottom: 1.5rem;
-    }
-    .closet-header h2 { margin: 0; }
-    .closet-header p { margin: 0; color: #888; font-size: 0.9rem; }
-
-    app-upload-item { display: block; margin-bottom: 1rem; }
-
-    .upload-status {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      padding: 0.75rem 1rem;
-      background: #f5f5f5;
-      border-radius: 8px;
-      font-size: 0.9rem;
-      color: #555;
-      margin-bottom: 1rem;
-    }
-    .upload-error {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      padding: 0.75rem 1rem;
-      background: #fff3f3;
-      border: 1px solid #f5c6c6;
-      border-radius: 8px;
-      font-size: 0.9rem;
-      color: #c00;
-      margin-bottom: 1rem;
-    }
-    .upload-error button {
-      margin-left: auto;
-      background: none;
-      border: none;
-      color: #c00;
-      cursor: pointer;
-      font-size: 0.8rem;
-      text-decoration: underline;
-      padding: 0;
-    }
-
-    .items-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-      gap: 1.25rem;
-      margin-top: 1.5rem;
-    }
-    .item-card {
-      border: 1px solid #e8e8e8;
-      border-radius: 12px;
-      overflow: hidden;
-      transition: box-shadow 0.2s, transform 0.15s;
-      cursor: pointer;
-      background: #fff;
-    }
-    .item-card:hover {
-      box-shadow: 0 4px 16px rgba(0,0,0,0.1);
-      transform: translateY(-2px);
-    }
-    .item-image {
-      aspect-ratio: 3/4;
-      background: #f5f5f5;
-      overflow: hidden;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .item-image img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-    .item-info {
-      padding: 0.65rem 0.75rem 0.75rem;
-    }
-    .item-category {
-      font-size: 0.85rem;
-      font-weight: 600;
-      margin: 0 0 0.15rem;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .item-brand {
-      font-size: 0.75rem;
-      color: #888;
-      margin: 0 0 0.4rem;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .item-footer {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .item-price {
-      font-size: 0.85rem;
-      font-weight: 700;
-      color: #111;
-    }
-    .colour-dots {
-      display: flex;
-      gap: 3px;
-    }
-    .colour-dot {
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      border: 1px solid #ddd;
-    }
-
-    .empty-state, .loading-state {
-      text-align: center;
-      padding: 3rem;
-      color: #aaa;
-    }
-    .spinner {
-      width: 20px;
-      height: 20px;
-      border: 2px solid #ddd;
-      border-top-color: #555;
-      border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-    }
-    .loading-state .spinner {
-      width: 32px;
-      height: 32px;
-      margin: 0 auto;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-  `]
 })
-export class ClosetComponent implements OnInit {
-  items = signal<ClothingItem[]>([]);
-  draftItem = signal<ClothingItem | null>(null);
-  loading = signal(false);
-  uploading = signal(false);
-  uploadError = signal<string | null>(null);
+export class WardrobeComponent implements OnInit {
+  /** Forwarded from the dashboard search bar */
+  readonly searchQuery = input('');
+
+  @ViewChild('uploadRef') private uploadRef!: UploadItemComponent;
+
+  readonly allItems    = signal<ClothingItem[]>([]);
+  readonly draftItem   = signal<ClothingItem | null>(null);
+  readonly loading     = signal(false);
+  readonly uploading   = signal(false);
+  readonly uploadError = signal<string | null>(null);
+  readonly selectedCategory = signal<string>('all');
+
+  readonly allCategories = computed<string[]>(() =>
+    [...new Set(
+      this.allItems()
+        .map(i => i.category)
+        .filter((c): c is string => !!c)
+    )]
+  );
+
+  readonly filteredItems = computed<ClothingItem[]>(() => {
+    const cat = this.selectedCategory();
+    const q   = this.searchQuery().toLowerCase().trim();
+    return this.allItems().filter(item => {
+      const matchesCat    = cat === 'all' || item.category?.toLowerCase() === cat.toLowerCase();
+      const matchesSearch = !q
+        || item.category?.toLowerCase().includes(q)
+        || item.brand?.toLowerCase().includes(q)
+        || item.tags.some(t => t.toLowerCase().includes(q));
+      return matchesCat && matchesSearch;
+    });
+  });
 
   constructor(private wardrobe: WardrobeService) {}
 
@@ -244,27 +154,25 @@ export class ClosetComponent implements OnInit {
     this.loadItems();
   }
 
-  loadItems(): void {
+  /** Called by DashboardComponent header Upload button */
+  triggerUpload(): void {
+    this.uploadRef.openFilePicker();
+  }
+
+  private loadItems(): void {
     this.loading.set(true);
-    this.wardrobe.getAll().subscribe({
-      next: items => { this.items.set(items); this.loading.set(false); },
-      error: () => { this.loading.set(false); }
+    this.wardrobe.getAll({ pageSize: 100 }).subscribe({
+      next: items => { this.allItems.set(items); this.loading.set(false); },
+      error: ()    => { this.loading.set(false); }
     });
   }
 
   onFileSelected(file: File): void {
-    console.log('[Closet] onFileSelected', file.name);
     this.uploading.set(true);
     this.uploadError.set(null);
     this.wardrobe.uploadForDraft(file).subscribe({
-      next: draft => {
-        console.log('[Closet] uploadForDraft success, draft:', draft);
-        this.uploading.set(false);
-        this.draftItem.set(draft);
-        console.log('[Closet] draftItem set:', this.draftItem());
-      },
-      error: err => {
-        console.error('[Closet] uploadForDraft error:', err);
+      next: draft => { this.uploading.set(false); this.draftItem.set(draft); },
+      error: err  => {
         this.uploading.set(false);
         this.uploadError.set(err?.error?.detail ?? err?.message ?? 'Upload failed. Please try again.');
       }
@@ -273,11 +181,8 @@ export class ClosetComponent implements OnInit {
 
   onItemSaved(item: ClothingItem): void {
     this.wardrobe.save(item).subscribe({
-      next: saved => {
-        this.draftItem.set(null);
-        this.items.update(current => [saved, ...current]);
-      },
-      error: err => {
+      next: saved => { this.draftItem.set(null); this.allItems.update(curr => [saved, ...curr]); },
+      error: err  => {
         this.uploadError.set(err?.error?.detail ?? err?.message ?? 'Save failed. Please try again.');
         this.draftItem.set(null);
       }

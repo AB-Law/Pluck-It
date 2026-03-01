@@ -1,6 +1,5 @@
 <Solution>
   <Folder Name="/PluckIt.Server/">
-    <Project Path="PluckIt.Api/PluckIt.Api.csproj" />
     <Project Path="PluckIt.Core/PluckIt.Core.csproj" />
     <Project Path="PluckIt.Infrastructure/PluckIt.Infrastructure.csproj" />
     <Project Path="PluckIt.Functions/PluckIt.Functions.csproj" />

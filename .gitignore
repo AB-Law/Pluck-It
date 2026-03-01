@@ -12,6 +12,8 @@ local.settings.json
 # ML models — too large for GitHub (>100 MB), download via scripts/download-models.ps1
 PluckIt.Processor/models/*.onnx
 
+Designs/
+
 # User-specific files
 *.rsuser
 *.suo
