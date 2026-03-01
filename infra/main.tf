@@ -110,6 +110,45 @@ resource "azurerm_cosmosdb_sql_container" "user_profiles" {
   }
 }
 
+# Stores per-user conversation memory: rolling summary + last-digest wardrobe hash.
+# TTL of 30 days auto-expires stale summaries.
+resource "azurerm_cosmosdb_sql_container" "conversations" {
+  name                   = "Conversations"
+  resource_group_name    = azurerm_resource_group.rg_pluckit_archive.name
+  account_name           = azurerm_cosmosdb_account.pluckit.name
+  database_name          = azurerm_cosmosdb_sql_database.pluckit.name
+  partition_key_paths    = ["/userId"]
+  partition_key_version  = 1
+  default_ttl            = 2592000 # 30 days in seconds
+
+  indexing_policy {
+    indexing_mode = "consistent"
+
+    included_path {
+      path = "/*"
+    }
+  }
+}
+
+# Stores weekly/daily wardrobe digest results (purchase suggestions).
+# Subscription gating can be layered on top later.
+resource "azurerm_cosmosdb_sql_container" "digests" {
+  name                  = "Digests"
+  resource_group_name   = azurerm_resource_group.rg_pluckit_archive.name
+  account_name          = azurerm_cosmosdb_account.pluckit.name
+  database_name         = azurerm_cosmosdb_sql_database.pluckit.name
+  partition_key_paths   = ["/userId"]
+  partition_key_version = 1
+
+  indexing_policy {
+    indexing_mode = "consistent"
+
+    included_path {
+      path = "/*"
+    }
+  }
+}
+
 # ── Logging: Log Analytics Workspace + Application Insights ─────────────────
 # Free tier: 500 MB/day on Log Analytics; first 5 GB/month free on App Insights.
 
@@ -274,7 +313,16 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
 
   instance_memory_in_mb = 2048
 
-  site_config {}
+  site_config {
+    cors {
+      allowed_origins     = var.cors_allowed_origins
+      support_credentials = false
+    }
+  }
+
+  lifecycle {
+    ignore_changes = [auth_settings_v2]
+  }
 
   app_settings = {
     "FUNCTIONS_EXTENSION_VERSION"           = "~4"
@@ -287,6 +335,17 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
     "COSMOS_DB_KEY"                        = azurerm_cosmosdb_account.pluckit.primary_key
     "COSMOS_DB_DATABASE"                   = azurerm_cosmosdb_sql_database.pluckit.name
     "COSMOS_DB_CONTAINER"                  = azurerm_cosmosdb_sql_container.wardrobe.name
+    "COSMOS_DB_USER_PROFILES_CONTAINER"    = azurerm_cosmosdb_sql_container.user_profiles.name
+    "COSMOS_DB_CONVERSATIONS_CONTAINER"    = azurerm_cosmosdb_sql_container.conversations.name
+    "COSMOS_DB_DIGESTS_CONTAINER"          = azurerm_cosmosdb_sql_container.digests.name
+    # Azure OpenAI — primary model for chat/agents
+    "AZURE_OPENAI_ENDPOINT"                = var.ai_gpt4o_endpoint
+    "AZURE_OPENAI_API_KEY"                 = var.ai_api_key
+    "AZURE_OPENAI_DEPLOYMENT"              = "gpt-4.1-mini"
+    # Lighter model used only for conversation summarization (~4x cheaper)
+    "AZURE_OPENAI_NANO_DEPLOYMENT"         = var.ai_nano_deployment
+    # Google OAuth client ID — used to validate bearer tokens from Angular
+    "GOOGLE_CLIENT_ID"                     = var.google_oauth_client_id
   }
 }
 

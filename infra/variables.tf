@@ -31,6 +31,12 @@ variable "ai_api_key" {
   sensitive   = true
 }
 
+variable "ai_nano_deployment" {
+  description = "Deployment name for the lightweight summarization model (e.g. gpt-4.1-nano). Used by the digest/memory summarizer to keep costs low."
+  type        = string
+  default     = "gpt-4.1-nano"
+}
+
 variable "cors_allowed_origins" {
   description = "Array of allowed CORS origins for the API."
   type        = list(string)
