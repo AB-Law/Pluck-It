@@ -177,9 +177,14 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
     }
   }
 
-  # EasyAuth (auth_settings_v2) is no longer used — the API now validates Google ID
-  # tokens in-process via GoogleTokenValidator.  Any residual auth_settings_v2 config
-  # in the portal will be cleared by Terraform on the next apply.
+  # EasyAuth (auth_settings_v2) is no longer used — the API validates Google ID
+  # tokens in-process via GoogleTokenValidator.
+  # ignore_changes is required permanently: azurerm_function_app_flex_consumption
+  # unconditionally calls PUT authsettingsV2 on every apply, and FC1 rejects that
+  # API endpoint with 400 regardless of the payload. This is a provider limitation.
+  lifecycle {
+    ignore_changes = [auth_settings_v2]
+  }
 
   app_settings = {
     "FUNCTIONS_EXTENSION_VERSION"        = "~4"
