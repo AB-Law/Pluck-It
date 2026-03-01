@@ -17,5 +17,6 @@ cors_allowed_origins = [
 ]
 
 # Static Web App repo linkage (required for Google OAuth via staticwebapp.config.json)
-swa_repository_url   = "https://github.com/AB-Law/Pluck-It"
-swa_repository_token = "ghp_your_github_pat_with_repo_scope"
+swa_repository_url    = "https://github.com/AB-Law/Pluck-It"
+swa_repository_branch = "main"
+swa_repository_token  = "ghp_your_github_pat_with_repo_scope"

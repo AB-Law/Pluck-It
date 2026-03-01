@@ -177,8 +177,12 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
     }
   }
 
-  # auth_settings_v2 is NOT supported on Flex Consumption (FC1).
-  # Authentication is handled by Azure Static Web Apps on the frontend.
+  # auth_settings_v2 is NOT supported on Flex Consumption (FC1) via Terraform.
+  # It was configured directly in Azure portal; ignore_changes prevents Terraform
+  # from removing it on every apply.
+  lifecycle {
+    ignore_changes = [auth_settings_v2]
+  }
 
   app_settings = {
     "FUNCTIONS_EXTENSION_VERSION"        = "~4"
@@ -194,23 +198,28 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
     "BlobStorage__AccountKey"            = azurerm_storage_account.sa_pluckit.primary_access_key
     "BlobStorage__ArchiveContainer"      = azurerm_storage_container.archive.name
     "Processor__BaseUrl"                 = "https://${local.base_name}-processor-func.azurewebsites.net"
+    # Required by auth_settings_v2 google_v2 EasyAuth for API protection
+    "GOOGLE_PROVIDER_AUTHENTICATION_SECRET" = var.google_oauth_client_secret
   }
 }
 
 # ── Static Web App (frontend) ────────────────────────────────────────────────
-# Import an existing SWA: terraform import azurerm_static_web_app.frontend \
-#   /subscriptions/72101efc-f7f6-42bd-a6f6-f892771aacbf/resourceGroups/PluckIt-RG/providers/Microsoft.Web/staticSites/happy-ocean-0c606bd00
+# Import existing SWA: terraform import azurerm_static_web_app.frontend \
+#   /subscriptions/72101efc-f7f6-42bd-a6f6-f892771aacbf/resourceGroups/PluckIt-RG/providers/Microsoft.Web/staticSites/pluckit-prod-web
 
 resource "azurerm_static_web_app" "frontend" {
-  name                = "happy-ocean-0c606bd00"
+  name                = "pluckit-prod-web"
   resource_group_name = azurerm_resource_group.rg_pluckit_archive.name
-  location            = azurerm_resource_group.rg_pluckit_archive.location
+  # SWA was originally created in eastasia (different from the resource group region).
+  # Hardcoded to prevent destroy+recreate on every plan.
+  location            = "eastasia"
   sku_tier            = "Free"
   sku_size            = "Free"
 
   # Linking the repo allows the portal to show custom auth providers (e.g. Google)
-  repository_url   = var.swa_repository_url
-  repository_token = var.swa_repository_token
+  repository_url    = var.swa_repository_url
+  repository_branch = var.swa_repository_branch
+  repository_token  = var.swa_repository_token
 
   # These are referenced by staticwebapp.config.json auth.identityProviders.google
   app_settings = {

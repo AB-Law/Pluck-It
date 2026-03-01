@@ -53,6 +53,12 @@ variable "swa_repository_url" {
   type        = string
 }
 
+variable "swa_repository_branch" {
+  description = "Branch to watch for Static Web App deployments."
+  type        = string
+  default     = "main"
+}
+
 variable "swa_repository_token" {
   description = "Repository token for the Static Web App (GitHub PAT or deployment token)."
   type        = string
