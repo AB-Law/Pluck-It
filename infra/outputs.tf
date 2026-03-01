@@ -62,6 +62,7 @@ output "swa_default_hostname" {
 output "swa_domain_validation_token" {
   description = "TXT token for custom domain DNS validation — add as _dnsauth.pluckit TXT record in Cloudflare."
   value       = azurerm_static_web_app_custom_domain.pluckit_domain.validation_token
+  sensitive   = true
 }
 
 
