@@ -29,7 +29,7 @@ os.environ.setdefault(
 import azure.functions as func
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from PIL import Image, UnidentifiedImageError
 from pillow_heif import register_heif_opener
@@ -57,6 +57,31 @@ fastapi_app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# ── Global exception handler — ensures all unhandled errors are logged via
+# Python's logging module, which the Azure Functions worker forwards to
+# App Insights. Without this, ASGI-boundary exceptions produce blank 500s
+# with no telemetry.
+
+@fastapi_app.exception_handler(Exception)
+async def _global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.exception(
+        "Unhandled exception on %s %s: %s",
+        request.method,
+        request.url.path,
+        exc,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"{type(exc).__name__}: {exc}"},
+    )
+
+
+@fastapi_app.on_event("startup")
+async def _startup_log() -> None:
+    env = os.getenv("AZURE_FUNCTIONS_ENVIRONMENT", "Production")
+    logger.info("PluckIt Processor started — environment=%s", env)
+
 
 # ── Azure Functions ASGI app (handles HTTP via FastAPI + non-HTTP triggers) ──
 
