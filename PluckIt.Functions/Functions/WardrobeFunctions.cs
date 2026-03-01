@@ -162,9 +162,28 @@ public class WardrobeFunctions(
         if (processed is null || string.IsNullOrEmpty(processed.ImageUrl))
             return await JsonError(req, HttpStatusCode.BadGateway, "Image processor returned an unexpected response.");
 
-        // Extract AI metadata from original image bytes
-        var imageData = BinaryData.FromBytes(imageBytes);
-        var metadata = await metadataService.ExtractMetadataAsync(imageData, mediaType, cancellationToken);
+        // Always use the processed PNG for AI metadata extraction.
+        // The original upload may be HEIC or another format unsupported by OpenAI Vision,
+        // but the processor guarantees output is a valid PNG.
+        // We generate a short-lived SAS URL and download the PNG bytes via HttpClient.
+        BinaryData imageData;
+        string metaMediaType;
+        try
+        {
+            var pngSasUrl = sasService.GenerateSasUrl(processed.ImageUrl, validForMinutes: 5);
+            using var sasClient = httpClientFactory.CreateClient();
+            var pngBytes = await sasClient.GetByteArrayAsync(pngSasUrl, cancellationToken);
+            imageData = BinaryData.FromBytes(pngBytes);
+            metaMediaType = "image/png";
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Could not download processed PNG for metadata extraction; falling back to original bytes.");
+            imageData = BinaryData.FromBytes(imageBytes);
+            metaMediaType = mediaType;
+        }
+
+        var metadata = await metadataService.ExtractMetadataAsync(imageData, metaMediaType, cancellationToken);
 
         var draft = new ClothingItem
         {

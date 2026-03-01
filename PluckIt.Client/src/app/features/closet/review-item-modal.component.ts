@@ -189,6 +189,10 @@ const CATEGORIES = [
                       [(ngModel)]="draft.category"
                       class="w-full bg-black border border-[#1F1F1F] focus:border-primary focus:outline-none text-white h-12 px-4 text-sm appearance-none transition-colors cursor-pointer"
                     >
+                      <!-- Inject AI-suggested value as first option when it doesn't match a preset -->
+                      @if (draft.category && !categories.includes(draft.category)) {
+                        <option [value]="draft.category" class="bg-black">{{ draft.category }}</option>
+                      }
                       @for (cat of categories; track cat) {
                         <option [value]="cat" class="bg-black">{{ cat }}</option>
                       }

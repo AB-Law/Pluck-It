@@ -20,18 +20,33 @@ public class ClothingMetadataService : IClothingMetadataService
     _chatClient = client.GetChatClient(deploymentName);
   }
 
+  // Azure OpenAI vision only accepts these four MIME types.
+  private static readonly HashSet<string> _supportedMediaTypes = new(StringComparer.OrdinalIgnoreCase)
+  {
+    "image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp",
+  };
+
   public async Task<ClothingMetadata> ExtractMetadataAsync(BinaryData imageData, string mediaType, CancellationToken cancellationToken = default)
   {
+    // Return empty metadata rather than letting OpenAI reject formats it can't decode
+    // (e.g. HEIC/HEIF, BMP, TIFF).
+    if (!_supportedMediaTypes.Contains(mediaType))
+      return new ClothingMetadata(null, null, Array.Empty<string>(), Array.Empty<ClothingColour>());
+
     var systemPrompt =
       """
       You are an expert fashion analyst. Analyze the clothing item visible in the image.
       Return ONLY valid JSON — no markdown, no code fences, no extra text — with exactly these fields:
       {
         "brand": "<detected brand name or null>",
-        "category": "<single category, e.g. T-Shirt, Jeans, Sneakers, Jacket, Dress, Hoodie, Shorts>",
+        "category": "<one value from the allowed list>",
         "tags": ["<descriptive tag>", ...],
         "colours": [{ "name": "<colour name>", "hex": "<#rrggbb>" }, ...]
       }
+
+      Allowed category values (pick the single best match, use exact casing):
+      Tops, Bottoms, Outerwear, Footwear, Accessories, Knitwear, Dresses, Activewear, Swimwear, Underwear
+
       For tags, use descriptive style/fit/season words (e.g. "casual", "slim fit", "summer", "streetwear").
       For colours, list the 1-3 main colours visible on the garment itself (ignore background).
       """;
@@ -46,9 +61,18 @@ public class ClothingMetadataService : IClothingMetadataService
 
     var options = new ChatCompletionOptions { Temperature = 0.2f };
 
-    var result = await _chatClient.CompleteChatAsync(messages, options, cancellationToken);
-
-    var raw = result.Value.Content[0].Text?.Trim() ?? "{}";
+    string raw;
+    try
+    {
+      var result = await _chatClient.CompleteChatAsync(messages, options, cancellationToken);
+      raw = result.Value.Content[0].Text?.Trim() ?? "{}";
+    }
+    catch
+    {
+      // OpenAI rejected the request (unsupported image, quota, transient error) —
+      // degrade gracefully so the upload flow still completes.
+      return new ClothingMetadata(null, null, Array.Empty<string>(), Array.Empty<ClothingColour>());
+    }
 
     // Strip markdown code fences if model wraps response
     if (raw.StartsWith("```"))

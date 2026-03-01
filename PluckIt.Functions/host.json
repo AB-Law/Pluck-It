@@ -1,11 +1,5 @@
 {
   "version": "2.0",
-  "cors": {
-    "allowedOrigins": [
-      "http://localhost:4200"
-    ],
-    "supportCredentials": true
-  },
   "logging": {
     "applicationInsights": {
       "samplingSettings": {

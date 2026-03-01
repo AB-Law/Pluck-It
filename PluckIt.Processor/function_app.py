@@ -14,8 +14,12 @@ os.environ.setdefault(
 import azure.functions as func
 from azure.storage.blob import BlobClient, BlobServiceClient
 from azure.cosmos import CosmosClient, PartitionKey
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
+from pillow_heif import register_heif_opener
 from rembg import remove as rembg_remove
+
+# Register HEIC/HEIF support into Pillow so Image.open handles Apple photos.
+register_heif_opener()
 
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
@@ -28,12 +32,33 @@ def _get_env(name: str, default: str | None = None) -> str:
   return value
 
 
+def _normalize_image(image_bytes: bytes) -> bytes:
+  """
+  Converts the image to JPEG bytes that rembg can always identify.
+  Handles HEIC/HEIF (via pillow-heif) and any other format Pillow understands.
+  Falls back to the original bytes if Pillow can't open them (let rembg try).
+  """
+  try:
+    with Image.open(io.BytesIO(image_bytes)) as img:
+      # rembg only needs an RGB input; strip alpha/palette before JPEG encode.
+      if img.mode not in ("RGB",):
+        img = img.convert("RGB")
+      buf = io.BytesIO()
+      img.save(buf, format="JPEG", quality=95)
+      return buf.getvalue()
+  except (UnidentifiedImageError, Exception):
+    # Unknown format — return as-is and let rembg raise a meaningful error.
+    return image_bytes
+
+
 def _remove_background(image_bytes: bytes) -> bytes:
   """
   Removes the background from an image using rembg (BiRefNet/U2Net).
+  Normalizes the input to JPEG first so HEIC and other exotic formats work.
   Returns a PNG with transparent background.
   """
-  return rembg_remove(image_bytes)
+  normalised = _normalize_image(image_bytes)
+  return rembg_remove(normalised)
 
 
 def _get_blob_service() -> BlobServiceClient:
