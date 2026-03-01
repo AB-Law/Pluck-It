@@ -14,7 +14,8 @@ ai_api_key           = "your-api-key-here"
 
 # CORS allowed origins - add your frontend domain(s) here
 cors_allowed_origins = [
-  "https://happy-ocean-0c606bd00.4.azurestaticapps.net",  # Production Static Web App
+  "https://happy-ocean-0c606bd00.4.azurestaticapps.net",  # Production Static Web App (default SWA hostname)
+  "https://pluckit.omakashay.com",                        # Custom domain
   "http://localhost:4200"                                  # Local development (optional)
 ]
 

@@ -284,6 +284,12 @@ resource "azurerm_static_web_app" "frontend" {
   repository_token  = var.swa_repository_token
 }
 
+resource "azurerm_static_web_app_custom_domain" "pluckit_domain" {
+  static_web_app_id = azurerm_static_web_app.frontend.id
+  domain_name       = "pluckit.omakashay.com"
+  validation_type   = "dns-txt-token"
+}
+
 # ── Python Processor — Flex Consumption ─────────────────────────────────────
 # NOTE: The blob trigger (PluckItBlobProcessor) must be migrated to an Event Grid
 # source trigger for Flex Consumption — polling blob triggers are not supported.
