@@ -38,14 +38,15 @@ variable "cors_allowed_origins" {
 }
 
 variable "google_oauth_client_id" {
-  description = "Google OAuth 2.0 Client ID for EasyAuth."
+  description = "Google OAuth 2.0 Client ID (used by GIS on the frontend and GoogleTokenValidator on the API)."
   type        = string
 }
 
 variable "google_oauth_client_secret" {
-  description = "Google OAuth 2.0 Client Secret for EasyAuth."
+  description = "Google OAuth 2.0 Client Secret. No longer required for in-process JWT validation; kept for backwards compatibility."
   type        = string
   sensitive   = true
+  default     = ""
 }
 
 variable "swa_repository_url" {

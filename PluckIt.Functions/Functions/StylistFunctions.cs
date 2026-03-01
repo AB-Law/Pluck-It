@@ -5,6 +5,7 @@ using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using PluckIt.Core;
+using PluckIt.Functions.Auth;
 using PluckIt.Functions.Serialization;
 
 namespace PluckIt.Functions.Functions;
@@ -13,6 +14,7 @@ public class StylistFunctions(
     IWardrobeRepository repo,
     IStylistService stylist,
     IConfiguration config,
+    GoogleTokenValidator tokenValidator,
     ILogger<StylistFunctions> logger)
 {
     [Function(nameof(GetRecommendations))]
@@ -20,7 +22,8 @@ public class StylistFunctions(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "stylist/recommendations")] HttpRequestData req,
         CancellationToken cancellationToken)
     {
-        if (!TryGetUserId(req, out var userId))
+        var (authed, userId) = await TryGetUserIdAsync(req);
+        if (!authed)
             return req.CreateResponse(System.Net.HttpStatusCode.Unauthorized);
 
         StylistRequest? request;
@@ -79,18 +82,22 @@ public class StylistFunctions(
         return response;
     }
 
-    private bool TryGetUserId(HttpRequestData req, out string? userId)
+    private async Task<(bool Authed, string? UserId)> TryGetUserIdAsync(HttpRequestData req)
     {
-        if (req.Headers.TryGetValues("x-ms-client-principal-id", out var ids))
+        if (req.Headers.TryGetValues("Authorization", out var authHeaders))
         {
-            var id = ids.FirstOrDefault();
-            if (!string.IsNullOrEmpty(id)) { userId = id; return true; }
+            var header = authHeaders.FirstOrDefault();
+            if (header?.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                var token = header["Bearer ".Length..];
+                var sub = await tokenValidator.ValidateAsync(token);
+                if (sub is not null) return (true, sub);
+            }
         }
 
         var devId = config["Local:DevUserId"];
-        if (!string.IsNullOrEmpty(devId)) { userId = devId; return true; }
+        if (!string.IsNullOrEmpty(devId)) return (true, devId);
 
-        userId = null;
-        return false;
+        return (false, null);
     }
 }

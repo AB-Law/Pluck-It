@@ -7,6 +7,7 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using PluckIt.Core;
+using PluckIt.Functions.Auth;
 using PluckIt.Functions.Serialization;
 using PluckIt.Infrastructure;
 
@@ -15,6 +16,11 @@ var host = new HostBuilder()
     .ConfigureServices((ctx, services) =>
     {
         var config = ctx.Configuration;
+
+        // ── Google ID token validator (GIS auth) ────────────────────────────────
+        // IHttpClientFactory is already registered by the AddHttpClient("processor") call below.
+        // GoogleTokenValidator is a singleton so the JWKS cache is shared across invocations.
+        services.AddSingleton<GoogleTokenValidator>();
 
         // ── Cosmos ──────────────────────────────────────────────────────────
         var cosmosEndpoint = config["Cosmos:Endpoint"]

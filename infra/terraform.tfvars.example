@@ -20,3 +20,9 @@ cors_allowed_origins = [
 swa_repository_url    = "https://github.com/AB-Law/Pluck-It"
 swa_repository_branch = "main"
 swa_repository_token  = "ghp_your_github_pat_with_repo_scope"
+
+# Google OAuth 2.0 Client ID — used by GIS (frontend) and GoogleTokenValidator (API).
+# Create at console.cloud.google.com → APIs & Services → Credentials.
+google_oauth_client_id = "YOUR_CLIENT_ID.apps.googleusercontent.com"
+# Client secret is no longer used; the variable is kept for backwards compatibility.
+# google_oauth_client_secret = ""

@@ -7,6 +7,7 @@ using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using PluckIt.Core;
+using PluckIt.Functions.Auth;
 using PluckIt.Functions.Serialization;
 
 namespace PluckIt.Functions.Functions;
@@ -17,6 +18,7 @@ public class WardrobeFunctions(
     IClothingMetadataService metadataService,
     IHttpClientFactory httpClientFactory,
     IConfiguration config,
+    GoogleTokenValidator tokenValidator,
     ILogger<WardrobeFunctions> logger)
 {
     // ── GET /api/wardrobe ───────────────────────────────────────────────────
@@ -26,7 +28,8 @@ public class WardrobeFunctions(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "wardrobe")] HttpRequestData req,
         CancellationToken cancellationToken)
     {
-        if (!TryGetUserId(req, out var userId))
+        var (authed0, userId) = await TryGetUserIdAsync(req);
+        if (!authed0)
             return req.CreateResponse(System.Net.HttpStatusCode.Unauthorized);
 
         var query = ParseQueryString(req.Url);
@@ -49,7 +52,8 @@ public class WardrobeFunctions(
         string id,
         CancellationToken cancellationToken)
     {
-        if (!TryGetUserId(req, out var userId))
+        var (authed1, userId) = await TryGetUserIdAsync(req);
+        if (!authed1)
             return req.CreateResponse(System.Net.HttpStatusCode.Unauthorized);
 
         var item = await repo.GetByIdAsync(id, userId!, cancellationToken);
@@ -67,7 +71,8 @@ public class WardrobeFunctions(
         string id,
         CancellationToken cancellationToken)
     {
-        if (!TryGetUserId(req, out var userId))
+        var (authed2, userId) = await TryGetUserIdAsync(req);
+        if (!authed2)
             return req.CreateResponse(System.Net.HttpStatusCode.Unauthorized);
 
         ClothingItem? updated;
@@ -96,7 +101,8 @@ public class WardrobeFunctions(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "wardrobe/upload")] HttpRequestData req,
         CancellationToken cancellationToken)
     {
-        if (!TryGetUserId(req, out var userId))
+        var (authed3, userId) = await TryGetUserIdAsync(req);
+        if (!authed3)
             return req.CreateResponse(System.Net.HttpStatusCode.Unauthorized);
 
         // Extract image bytes from multipart/form-data or raw body
@@ -181,7 +187,8 @@ public class WardrobeFunctions(
         [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "wardrobe")] HttpRequestData req,
         CancellationToken cancellationToken)
     {
-        if (!TryGetUserId(req, out var userId))
+        var (authed4, userId) = await TryGetUserIdAsync(req);
+        if (!authed4)
             return req.CreateResponse(System.Net.HttpStatusCode.Unauthorized);
 
         ClothingItem? item;
@@ -218,22 +225,26 @@ public class WardrobeFunctions(
 
     /// <summary>
     /// Resolves the authenticated user ID.
-    /// In Azure (EasyAuth), reads the x-ms-client-principal-id header injected by the platform.
+    /// In production, validates the Google ID token from the Authorization: Bearer header.
     /// In local development, falls back to Local:DevUserId in configuration.
     /// </summary>
-    private bool TryGetUserId(HttpRequestData req, out string? userId)
+    private async Task<(bool Authed, string? UserId)> TryGetUserIdAsync(HttpRequestData req)
     {
-        if (req.Headers.TryGetValues("x-ms-client-principal-id", out var ids))
+        if (req.Headers.TryGetValues("Authorization", out var authHeaders))
         {
-            var id = ids.FirstOrDefault();
-            if (!string.IsNullOrEmpty(id)) { userId = id; return true; }
+            var header = authHeaders.FirstOrDefault();
+            if (header?.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                var token = header["Bearer ".Length..];
+                var sub = await tokenValidator.ValidateAsync(token);
+                if (sub is not null) return (true, sub);
+            }
         }
 
         var devId = config["Local:DevUserId"];
-        if (!string.IsNullOrEmpty(devId)) { userId = devId; return true; }
+        if (!string.IsNullOrEmpty(devId)) return (true, devId);
 
-        userId = null;
-        return false;
+        return (false, null);
     }
 
     private static async Task<HttpResponseData> JsonOk<T>(

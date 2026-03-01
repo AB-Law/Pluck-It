@@ -1,6 +1,4 @@
 import { Injectable, signal } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
-import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../environments/environment';
 
 export interface AuthUser {
@@ -9,29 +7,40 @@ export interface AuthUser {
   userId: string;
 }
 
-interface EasyAuthClaim {
-  typ: string;
-  val: string;
+// Minimal shape of the GIS credential response
+interface GisCredentialResponse {
+  credential: string;
 }
 
-// EasyAuth v2 (auth_settings_v2) response shape from /.auth/me
-interface EasyAuthV2Response {
-  clientPrincipal: {
-    identityProvider: string;
-    userId: string;
-    userDetails: string;
-    userRoles: string[];
-    claims?: EasyAuthClaim[];
-  } | null;
+// Fields we need from the Google ID token payload
+interface GoogleIdTokenPayload {
+  sub: string;
+  email: string;
+  name?: string;
+  exp: number;
+}
+
+function parseJwtPayload(token: string): GoogleIdTokenPayload {
+  const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+  const json = decodeURIComponent(
+    atob(base64)
+      .split('')
+      .map(c => '%' + c.charCodeAt(0).toString(16).padStart(2, '0'))
+      .join('')
+  );
+  return JSON.parse(json) as GoogleIdTokenPayload;
 }
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private _user = signal<AuthUser | null>(null);
+  private _idToken = signal<string | null>(null);
+  private _tokenExp = signal<number>(0);
 
   readonly user = this._user.asReadonly();
 
-  constructor(private http: HttpClient) {}
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private get gis(): any { return (window as any)['google']?.accounts?.id; }
 
   async initialize(): Promise<void> {
     if (!environment.production) {
@@ -39,42 +48,101 @@ export class AuthService {
       return;
     }
 
-    try {
-      // /.auth/me is served by the Static Web App on the same origin — no CORS or cookie issues.
-      const resp = await firstValueFrom(
-        this.http.get<EasyAuthV2Response>('/.auth/me')
-      );
+    await this.waitForGIS();
 
-      const principal = resp?.clientPrincipal;
-      if (principal) {
-        const nameClaim = principal.claims?.find(
-          c => c.typ === 'name' || c.typ === 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'
-        );
-        this._user.set({
-          name: nameClaim?.val ?? principal.userDetails,
-          email: principal.userDetails,
-          userId: principal.userId,
-        });
-      }
-    } catch {
-      // Not authenticated — guard will redirect to login
+    // Give GIS up to 2 s to silently re-authenticate a returning user before
+    // Angular finishes bootstrapping.  If no active Google session exists, we
+    // resolve immediately and the guard redirects the user to /login.
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const done = () => { if (!settled) { settled = true; resolve(); } };
+
+      this.gis.initialize({
+        client_id: environment.googleClientId,
+        callback: (response: GisCredentialResponse) => {
+          this.handleCredentialResponse(response);
+          done();
+        },
+        auto_select: true,
+        cancel_on_tap_outside: false,
+      });
+
+      // prompt() drives the silent re-auth / One Tap flow.
+      // The moment notification tells us when GIS gives up.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      this.gis.prompt((notification: any) => {
+        if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+          done();
+        }
+      });
+
+      setTimeout(done, 2000); // safety: never block startup indefinitely
+    });
+  }
+
+  private handleCredentialResponse(response: GisCredentialResponse): void {
+    const payload = parseJwtPayload(response.credential);
+    this._idToken.set(response.credential);
+    this._tokenExp.set(payload.exp);
+    this._user.set({
+      name: payload.name ?? payload.email,
+      email: payload.email,
+      userId: payload.sub,
+    });
+  }
+
+  /** Returns the raw Google ID token to be sent as a Bearer token. */
+  getIdToken(): string | null {
+    return this._idToken();
+  }
+
+  /**
+   * Triggers a silent GIS re-auth if the stored token expires within 60 s.
+   * GIS fires the credential callback if the browser session is still live,
+   * updating the stored token transparently.
+   */
+  ensureFreshToken(): void {
+    const now = Math.floor(Date.now() / 1000);
+    if (this.isAuthenticated() && this._tokenExp() - now < 60) {
+      this.gis?.prompt();
     }
+  }
+
+  /** Renders the official "Sign in with Google" button into the given element. */
+  renderButton(element: HTMLElement): void {
+    this.gis?.renderButton(element, {
+      theme: 'outline',
+      size: 'large',
+      width: element.offsetWidth || 300,
+    });
   }
 
   isAuthenticated(): boolean {
     return this._user() !== null;
   }
 
-  login(redirectAfter = '/'): void {
-    // After Google auth completes, SWA redirects back to the app's root.
-    // We pass the intended destination so the login page can forward there.
-    const redirectUri = encodeURIComponent(window.location.origin + redirectAfter);
-    window.location.href = `/.auth/login/google?post_login_redirect_uri=${redirectUri}`;
+  login(): void {
+    this.gis?.prompt();
   }
 
   logout(): void {
+    this.gis?.disableAutoSelect();
     this._user.set(null);
-    const redirectUri = encodeURIComponent(window.location.origin);
-    window.location.href = `/.auth/logout?post_logout_redirect_uri=${redirectUri}`;
+    this._idToken.set(null);
+    this._tokenExp.set(0);
+  }
+
+  private waitForGIS(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const poll = () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        if ((window as any)['google']?.accounts?.id) {
+          resolve();
+        } else {
+          setTimeout(poll, 50);
+        }
+      };
+      poll();
+    });
   }
 }

@@ -177,12 +177,9 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
     }
   }
 
-  # auth_settings_v2 is NOT supported on Flex Consumption (FC1) via Terraform.
-  # It was configured directly in Azure portal; ignore_changes prevents Terraform
-  # from removing it on every apply.
-  lifecycle {
-    ignore_changes = [auth_settings_v2]
-  }
+  # EasyAuth (auth_settings_v2) is no longer used — the API now validates Google ID
+  # tokens in-process via GoogleTokenValidator.  Any residual auth_settings_v2 config
+  # in the portal will be cleared by Terraform on the next apply.
 
   app_settings = {
     "FUNCTIONS_EXTENSION_VERSION"        = "~4"
@@ -198,8 +195,9 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
     "BlobStorage__AccountKey"            = azurerm_storage_account.sa_pluckit.primary_access_key
     "BlobStorage__ArchiveContainer"      = azurerm_storage_container.archive.name
     "Processor__BaseUrl"                 = "https://${local.base_name}-processor-func.azurewebsites.net"
-    # Required by auth_settings_v2 google_v2 EasyAuth for API protection
-    "GOOGLE_PROVIDER_AUTHENTICATION_SECRET" = var.google_oauth_client_secret
+    # Google OAuth Client ID — used by GoogleTokenValidator to verify GIS ID tokens.
+    # The client secret is NOT needed; verification uses Google's public JWKS only.
+    "GoogleAuth__ClientId"               = var.google_oauth_client_id
   }
 }
 
@@ -213,8 +211,8 @@ resource "azurerm_static_web_app" "frontend" {
   # SWA was originally created in eastasia (different from the resource group region).
   # Hardcoded to prevent destroy+recreate on every plan.
   location            = "eastasia"
-  # Free tier uses the SWA managed identity service for built-in Google OAuth.
-  # No custom client ID/secret needed — Microsoft manages the Google OAuth app.
+  # Free tier — the SWA is now a plain static host; Google auth is handled
+  # entirely in the browser via GIS and verified in the API Function App.
   sku_tier            = "Free"
   sku_size            = "Free"
 
