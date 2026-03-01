@@ -31,6 +31,14 @@ function parseJwtPayload(token: string): GoogleIdTokenPayload {
   return JSON.parse(json) as GoogleIdTokenPayload;
 }
 
+const STORAGE_KEY = 'pluckit_auth';
+
+interface StoredAuth {
+  idToken: string;
+  exp: number;
+  user: AuthUser;
+}
+
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private _user = signal<AuthUser | null>(null);
@@ -45,6 +53,20 @@ export class AuthService {
   async initialize(): Promise<void> {
     if (!environment.production) {
       this._user.set({ name: 'Local Dev', email: 'dev@local.test', userId: 'local-dev-user' });
+      return;
+    }
+
+    // Restore persisted session first so the guard doesn't redirect on refresh.
+    if (this.restoreFromStorage()) {
+      // Still initialize GIS in the background so ensureFreshToken() can work.
+      this.waitForGIS().then(() => {
+        this.gis?.initialize({
+          client_id: environment.googleClientId,
+          callback: (response: GisCredentialResponse) => this.handleCredentialResponse(response),
+          auto_select: true,
+          cancel_on_tap_outside: false,
+        });
+      });
       return;
     }
 
@@ -80,15 +102,43 @@ export class AuthService {
     });
   }
 
+  /**
+   * Attempts to restore auth state from localStorage.
+   * Returns true if a valid, non-expired token was found.
+   */
+  private restoreFromStorage(): boolean {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return false;
+      const stored: StoredAuth = JSON.parse(raw);
+      const now = Math.floor(Date.now() / 1000);
+      if (stored.exp - now < 60) {
+        localStorage.removeItem(STORAGE_KEY);
+        return false;
+      }
+      this._idToken.set(stored.idToken);
+      this._tokenExp.set(stored.exp);
+      this._user.set(stored.user);
+      return true;
+    } catch {
+      localStorage.removeItem(STORAGE_KEY);
+      return false;
+    }
+  }
+
   private handleCredentialResponse(response: GisCredentialResponse): void {
     const payload = parseJwtPayload(response.credential);
-    this._idToken.set(response.credential);
-    this._tokenExp.set(payload.exp);
-    this._user.set({
+    const user: AuthUser = {
       name: payload.name ?? payload.email,
       email: payload.email,
       userId: payload.sub,
-    });
+    };
+    this._idToken.set(response.credential);
+    this._tokenExp.set(payload.exp);
+    this._user.set(user);
+    // Persist so the session survives a page refresh.
+    const stored: StoredAuth = { idToken: response.credential, exp: payload.exp, user };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
   }
 
   /** Returns the raw Google ID token to be sent as a Bearer token. */
@@ -130,6 +180,7 @@ export class AuthService {
     this._user.set(null);
     this._idToken.set(null);
     this._tokenExp.set(0);
+    localStorage.removeItem(STORAGE_KEY);
   }
 
   private waitForGIS(): Promise<void> {

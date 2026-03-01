@@ -1,5 +1,6 @@
 import { Component, OnInit, signal, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 import { UserProfileService } from '../../core/services/user-profile.service';
 import { WardrobeComponent } from '../closet/closet.component';
@@ -56,13 +57,36 @@ import { ProfilePanelComponent } from '../profile/profile-panel.component';
             <span class="material-symbols-outlined" style="font-size:20px">settings</span>
           </button>
 
-          <!-- Avatar -->
+          <!-- Avatar dropdown -->
           @if (auth.user(); as user) {
-            <div
-              class="h-9 w-9 rounded-full bg-primary/30 border-2 border-card-dark flex items-center justify-center text-sm font-bold text-white select-none"
-              [title]="user.name"
-            >
-              {{ user.name.charAt(0).toUpperCase() }}
+            <div class="relative">
+              <button
+                class="h-9 w-9 rounded-full bg-primary/30 border-2 border-card-dark flex items-center justify-center text-sm font-bold text-white select-none hover:border-primary transition-colors"
+                [title]="user.name"
+                (click)="avatarMenuOpen.set(!avatarMenuOpen())"
+              >
+                {{ user.name.charAt(0).toUpperCase() }}
+              </button>
+
+              @if (avatarMenuOpen()) {
+                <!-- Backdrop to close on outside click -->
+                <div class="fixed inset-0 z-40" (click)="avatarMenuOpen.set(false)"></div>
+
+                <!-- Menu -->
+                <div class="absolute right-0 top-11 z-50 w-52 rounded-xl bg-[#111] border border-[#1F1F1F] shadow-2xl overflow-hidden">
+                  <div class="px-4 py-3 border-b border-[#1F1F1F]">
+                    <p class="text-white text-sm font-semibold truncate">{{ user.name }}</p>
+                    <p class="text-slate-500 text-xs font-mono truncate">{{ user.email }}</p>
+                  </div>
+                  <button
+                    class="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-300 hover:text-red-400 hover:bg-[#1a1a1a] transition-colors"
+                    (click)="logout()"
+                  >
+                    <span class="material-symbols-outlined" style="font-size:18px">logout</span>
+                    Sign out
+                  </button>
+                </div>
+              }
             </div>
           }
         </div>
@@ -134,6 +158,7 @@ export class DashboardComponent implements OnInit {
 
   protected readonly stylistOpen  = signal(false);
   protected readonly settingsOpen = signal(false);
+  protected readonly avatarMenuOpen = signal(false);
   protected readonly searchQuery  = signal('');
   protected readonly selectedIds  = signal<string[]>([]);
   protected readonly dragOver     = signal(false);
@@ -141,7 +166,14 @@ export class DashboardComponent implements OnInit {
   constructor(
     protected readonly auth: AuthService,
     private readonly profileService: UserProfileService,
+    private readonly router: Router,
   ) {}
+
+  logout(): void {
+    this.avatarMenuOpen.set(false);
+    this.auth.logout();
+    this.router.navigate(['/login']);
+  }
 
   ngOnInit(): void {
     // Pre-load the user profile so the review modal currency/size system is available immediately
