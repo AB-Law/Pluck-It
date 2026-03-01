@@ -93,6 +93,23 @@ resource "azurerm_cosmosdb_sql_container" "wardrobe" {
   }
 }
 
+resource "azurerm_cosmosdb_sql_container" "user_profiles" {
+  name                  = "UserProfiles"
+  resource_group_name   = azurerm_resource_group.rg_pluckit_archive.name
+  account_name          = azurerm_cosmosdb_account.pluckit.name
+  database_name         = azurerm_cosmosdb_sql_database.pluckit.name
+  partition_key_paths   = ["/id"]
+  partition_key_version = 1
+
+  indexing_policy {
+    indexing_mode = "consistent"
+
+    included_path {
+      path = "/*"
+    }
+  }
+}
+
 # ── Logging: Log Analytics Workspace + Application Insights ─────────────────
 # Free tier: 500 MB/day on Log Analytics; first 5 GB/month free on App Insights.
 
@@ -193,6 +210,7 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
     "Cosmos__Key"                        = azurerm_cosmosdb_account.pluckit.primary_key
     "Cosmos__Database"                   = azurerm_cosmosdb_sql_database.pluckit.name
     "Cosmos__Container"                  = azurerm_cosmosdb_sql_container.wardrobe.name
+    "Cosmos__UserProfilesContainer"      = azurerm_cosmosdb_sql_container.user_profiles.name
     "AI__Endpoint"                       = var.ai_gpt4o_endpoint
     "AI__ApiKey"                         = var.ai_api_key
     "AI__Deployment"                     = "gpt-4.1-mini"
