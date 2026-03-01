@@ -23,7 +23,8 @@ export class AuthInterceptor implements HttpInterceptor {
       return next.handle(req);
     }
 
-    if (req.url.startsWith(environment.apiUrl)) {
+    const isApiCall = req.url.startsWith(environment.apiUrl) || req.url.startsWith(environment.chatApiUrl);
+    if (isApiCall) {
       this.auth.ensureFreshToken();
       const token = this.auth.getIdToken();
       if (token) {

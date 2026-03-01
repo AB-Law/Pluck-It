@@ -7,7 +7,8 @@ import {
   SimpleChanges,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ClothingItem } from '../../core/models/clothing-item.model';
+import { ClothingItem, ClothingSize } from '../../core/models/clothing-item.model';
+import { UserProfileService } from '../../core/services/user-profile.service';
 
 interface CareOption {
   key: string;
@@ -29,6 +30,21 @@ const CATEGORIES = [
   'Accessories', 'Knitwear', 'Dresses', 'Activewear',
   'Swimwear', 'Underwear',
 ];
+
+const LETTER_SIZE_CATEGORIES = new Set([
+  'Tops', 'Knitwear', 'Outerwear', 'Dresses', 'Activewear', 'Swimwear', 'Underwear',
+]);
+const LETTER_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
+const WAIST_SIZES = Array.from({ length: 25 }, (_, i) => 24 + i);  // 24–48
+const INSEAM_SIZES = Array.from({ length: 11 }, (_, i) => 26 + i); // 26–36
+
+function sizeType(category: string | null): 'letter' | 'bottoms' | 'shoe' | 'none' {
+  if (!category) return 'none';
+  if (category === 'Bottoms') return 'bottoms';
+  if (category === 'Footwear') return 'shoe';
+  if (LETTER_SIZE_CATEGORIES.has(category)) return 'letter';
+  return 'none';
+}
 
 @Component({
   selector: 'app-review-item-modal',
@@ -88,7 +104,7 @@ const CATEGORIES = [
               <div>
                 <h1 id="enrich-modal-title"
                     class="text-xl font-bold tracking-tight uppercase text-white">
-                  Enrich Your Item
+                  {{ isEditMode ? 'Edit Item' : 'Enrich Your Item' }}
                 </h1>
                 <p class="text-xs text-slate-500 font-mono mt-0.5">
                   ID: {{ draft.id.slice(0, 8).toUpperCase() }}
@@ -169,6 +185,56 @@ const CATEGORIES = [
                   </div>
                 </div>
 
+                <!-- Notes -->
+                <div>
+                  <label class="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
+                    Notes
+                  </label>
+                  <textarea
+                    [(ngModel)]="draft.notes"
+                    rows="3"
+                    placeholder="Any additional notes…"
+                    class="w-full bg-transparent border border-[#1F1F1F] focus:border-primary focus:outline-none text-white font-mono px-4 py-3 text-sm transition-colors placeholder-slate-600 resize-none"
+                  ></textarea>
+                </div>
+
+                <!-- Tags -->
+                <div>
+                  <label class="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
+                    Tags
+                    <span class="ml-2 bg-primary/20 text-primary text-[10px] font-mono px-1.5 py-0.5 tracking-wider">
+                      AI SUGGESTED
+                    </span>
+                  </label>
+                  <!-- Chips -->
+                  <div class="flex flex-wrap gap-2 mb-2">
+                    @for (tag of draft.tags; track tag) {
+                      <span class="inline-flex items-center gap-1 px-2 py-1 bg-[#1a1a1a] border border-[#333] text-slate-300 text-[11px] font-mono uppercase tracking-wide">
+                        {{ tag }}
+                        <button type="button" class="text-slate-500 hover:text-red-400 transition-colors ml-1"
+                                (click)="removeTag(tag)" [attr.aria-label]="'Remove tag ' + tag">
+                          <span class="material-symbols-outlined" style="font-size:13px">close</span>
+                        </button>
+                      </span>
+                    }
+                  </div>
+                  <!-- Add tag input -->
+                  <div class="flex gap-2">
+                    <input
+                      type="text"
+                      [(ngModel)]="newTag"
+                      (keydown.enter)="addTag(); $event.preventDefault()"
+                      placeholder="Add tag…"
+                      class="flex-1 bg-transparent border border-[#1F1F1F] focus:border-primary focus:outline-none text-white font-mono h-9 px-3 text-xs transition-colors placeholder-slate-600"
+                    />
+                    <button type="button"
+                            class="bg-[#1F1F1F] hover:bg-[#2a2a2a] text-slate-300 h-9 px-3 text-xs font-mono border border-[#333] transition-colors"
+                            (click)="addTag()">
+                      ADD
+                    </button>
+                  </div>
+                </div>
+
               </div><!-- /left -->
 
               <!-- ══ Right column ═══════════════════════════════════════════ -->
@@ -179,17 +245,19 @@ const CATEGORIES = [
                   <label class="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
                     <span class="inline-flex items-center gap-2">
                       Category
-                      <span class="bg-primary/20 text-primary text-[10px] font-mono px-1.5 py-0.5 tracking-wider">
-                        AI SUGGESTED
-                      </span>
+                      @if (!isEditMode) {
+                        <span class="bg-primary/20 text-primary text-[10px] font-mono px-1.5 py-0.5 tracking-wider">
+                          AI SUGGESTED
+                        </span>
+                      }
                     </span>
                   </label>
                   <div class="relative">
                     <select
                       [(ngModel)]="draft.category"
+                      (ngModelChange)="onCategoryChange()"
                       class="w-full bg-black border border-[#1F1F1F] focus:border-primary focus:outline-none text-white h-12 px-4 text-sm appearance-none transition-colors cursor-pointer"
                     >
-                      <!-- Inject AI-suggested value as first option when it doesn't match a preset -->
                       @if (draft.category && !categories.includes(draft.category)) {
                         <option [value]="draft.category" class="bg-black">{{ draft.category }}</option>
                       }
@@ -201,6 +269,84 @@ const CATEGORIES = [
                           style="font-size:18px">expand_more</span>
                   </div>
                 </div>
+
+                <!-- ── Size ─────────────────────────────────────────────── -->
+                @if (currentSizeType !== 'none') {
+                  <div>
+                    <label class="block text-xs font-semibold text-slate-400 uppercase tracking-widest mb-3">
+                      Size
+                      @if (sizeSystem) {
+                        <span class="ml-2 text-[10px] font-mono text-slate-500">({{ sizeSystem }})</span>
+                      }
+                    </label>
+
+                    <!-- Letter sizes -->
+                    @if (currentSizeType === 'letter') {
+                      <div class="flex border border-[#1F1F1F] w-full flex-wrap">
+                        @for (s of letterSizes; track s; let last = $last) {
+                          <button
+                            type="button"
+                            [class]="letterSizeBtnClass(s, last)"
+                            (click)="setLetterSize(s)"
+                          >{{ s }}</button>
+                        }
+                      </div>
+                    }
+
+                    <!-- Bottoms: waist × inseam -->
+                    @if (currentSizeType === 'bottoms') {
+                      <div class="flex gap-3">
+                        <div class="flex-1">
+                          <label class="block text-[10px] text-slate-500 font-mono mb-1.5">WAIST (in)</label>
+                          <div class="relative">
+                            <select
+                              [ngModel]="draft.size?.waist ?? null"
+                              (ngModelChange)="setBottomsSize('waist', $event)"
+                              class="w-full bg-black border border-[#1F1F1F] focus:border-primary focus:outline-none text-white h-10 px-3 text-sm appearance-none cursor-pointer"
+                            >
+                              <option [ngValue]="null" class="bg-black">—</option>
+                              @for (w of waistSizes; track w) {
+                                <option [ngValue]="w" class="bg-black">{{ w }}</option>
+                              }
+                            </select>
+                            <span class="material-symbols-outlined absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" style="font-size:16px">expand_more</span>
+                          </div>
+                        </div>
+                        <div class="flex items-end pb-2.5 text-slate-500 font-mono text-sm">×</div>
+                        <div class="flex-1">
+                          <label class="block text-[10px] text-slate-500 font-mono mb-1.5">INSEAM (in)</label>
+                          <div class="relative">
+                            <select
+                              [ngModel]="draft.size?.inseam ?? null"
+                              (ngModelChange)="setBottomsSize('inseam', $event)"
+                              class="w-full bg-black border border-[#1F1F1F] focus:border-primary focus:outline-none text-white h-10 px-3 text-sm appearance-none cursor-pointer"
+                            >
+                              <option [ngValue]="null" class="bg-black">—</option>
+                              @for (i of inseamSizes; track i) {
+                                <option [ngValue]="i" class="bg-black">{{ i }}</option>
+                              }
+                            </select>
+                            <span class="material-symbols-outlined absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" style="font-size:16px">expand_more</span>
+                          </div>
+                        </div>
+                      </div>
+                    }
+
+                    <!-- Shoe size -->
+                    @if (currentSizeType === 'shoe') {
+                      <input
+                        type="number"
+                        [ngModel]="draft.size?.shoeSize ?? null"
+                        (ngModelChange)="setShoeSize($event)"
+                        min="3"
+                        max="18"
+                        step="0.5"
+                        placeholder="e.g. 10.5"
+                        class="w-full bg-transparent border border-[#1F1F1F] focus:border-primary focus:outline-none text-white font-mono h-12 px-4 text-sm transition-colors placeholder-slate-600"
+                      />
+                    }
+                  </div>
+                }
 
                 <!-- Care Info -->
                 <div>
@@ -255,14 +401,14 @@ const CATEGORIES = [
             class="px-8 h-12 text-xs font-bold uppercase tracking-widest text-slate-400 hover:text-white transition-colors"
             (click)="cancelled.emit()"
           >
-            Discard
+            {{ isEditMode ? 'Cancel' : 'Discard' }}
           </button>
           <button
             type="button"
             class="bg-primary hover:bg-blue-500 transition-colors px-8 h-12 text-xs font-bold uppercase tracking-widest text-white shadow-lg shadow-primary/20"
             (click)="onSave()"
           >
-            Add to Wardrobe
+            {{ isEditMode ? 'Save Changes' : 'Add to Wardrobe' }}
           </button>
         </div>
 
@@ -275,19 +421,38 @@ export class ReviewItemModalComponent implements OnChanges {
   /** Brands from the user's existing wardrobe, used for datalist autocomplete. */
   @Input() knownBrands: string[] = [];
   /**
-   * Currency prefix displayed beside the price field.
-   * Defaults to INR; will be driven by user settings (TODO: user locale/settings).
+   * When true, the modal shows "Edit Item" / "Save Changes" language instead of
+   * "Enrich Your Item" / "Add to Wardrobe".
    */
-  @Input() currency = 'INR';
+  @Input() isEditMode = false;
 
-  @Output() saved = new EventEmitter<ClothingItem>();
+  @Output() saved    = new EventEmitter<ClothingItem>();
+  @Output() updated  = new EventEmitter<ClothingItem>();
   @Output() cancelled = new EventEmitter<void>();
 
   draft: ClothingItem | null = null;
+  newTag = '';
 
   readonly careOptions = CARE_OPTIONS;
   readonly conditions  = CONDITIONS;
   readonly categories  = CATEGORIES;
+  readonly letterSizes = LETTER_SIZES;
+  readonly waistSizes  = WAIST_SIZES;
+  readonly inseamSizes = INSEAM_SIZES;
+
+  get currency(): string {
+    return this.profileService.getOrDefault().currencyCode;
+  }
+
+  get sizeSystem(): string {
+    return this.profileService.getOrDefault().preferredSizeSystem;
+  }
+
+  get currentSizeType(): 'letter' | 'bottoms' | 'shoe' | 'none' {
+    return sizeType(this.draft?.category ?? null);
+  }
+
+  constructor(private profileService: UserProfileService) {}
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['item'] && this.item) {
@@ -298,8 +463,67 @@ export class ReviewItemModalComponent implements OnChanges {
         careInfo:     [...(this.item.careInfo  ?? [])],
         condition:    this.item.condition     ?? null,
         purchaseDate: this.item.purchaseDate  ?? null,
+        size: this.item.size ? { ...this.item.size } : null,
       };
     }
+  }
+
+  // ── Tags ─────────────────────────────────────────────────────────────────
+
+  addTag(): void {
+    const tag = this.newTag.trim().toLowerCase();
+    if (!tag || !this.draft) return;
+    if (!this.draft.tags.includes(tag)) {
+      this.draft = { ...this.draft, tags: [...this.draft.tags, tag] };
+    }
+    this.newTag = '';
+  }
+
+  removeTag(tag: string): void {
+    if (!this.draft) return;
+    this.draft = { ...this.draft, tags: this.draft.tags.filter(t => t !== tag) };
+  }
+
+  // ── Size ─────────────────────────────────────────────────────────────────
+
+  onCategoryChange(): void {
+    // Reset size when category changes to avoid stale size data
+    if (this.draft) {
+      this.draft = { ...this.draft, size: null };
+    }
+  }
+
+  setLetterSize(letter: string): void {
+    if (!this.draft) return;
+    const current = this.draft.size?.letter === letter ? null : letter;
+    this.draft = {
+      ...this.draft,
+      size: current ? { letter: current, system: this.sizeSystem } : null,
+    };
+  }
+
+  setBottomsSize(field: 'waist' | 'inseam', value: number | null): void {
+    if (!this.draft) return;
+    this.draft = {
+      ...this.draft,
+      size: { ...(this.draft.size ?? {}), [field]: value, system: this.sizeSystem },
+    };
+  }
+
+  setShoeSize(value: number | null): void {
+    if (!this.draft) return;
+    this.draft = {
+      ...this.draft,
+      size: value != null ? { shoeSize: value, system: this.sizeSystem } : null,
+    };
+  }
+
+  letterSizeBtnClass(size: string, isLast: boolean): string {
+    const active = this.draft?.size?.letter === size
+      ? 'bg-white text-black'
+      : 'text-slate-400 hover:bg-white hover:text-black';
+    const border = isLast ? '' : 'border-r border-[#1F1F1F]';
+    return `flex-1 py-3 text-[10px] font-bold uppercase transition-colors ${active} ${border}`.trim();
   }
 
   // ── Care ─────────────────────────────────────────────────────────────────
@@ -339,7 +563,12 @@ export class ReviewItemModalComponent implements OnChanges {
   // ── Actions ──────────────────────────────────────────────────────────────
 
   onSave(): void {
-    if (this.draft) this.saved.emit({ ...this.draft });
+    if (!this.draft) return;
+    if (this.isEditMode) {
+      this.updated.emit({ ...this.draft });
+    } else {
+      this.saved.emit({ ...this.draft });
+    }
   }
 
   onOverlayClick(event: MouseEvent): void {

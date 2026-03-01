@@ -48,6 +48,13 @@ var host = new HostBuilder()
                 cosmosDatabase,
                 cosmosContainer));
 
+        var cosmosUserProfilesContainer = config["Cosmos:UserProfilesContainer"] ?? "UserProfiles";
+        services.AddSingleton<IUserProfileRepository>(sp =>
+            new UserProfileRepository(
+                sp.GetRequiredService<CosmosClient>(),
+                cosmosDatabase,
+                cosmosUserProfilesContainer));
+
         // ── Azure OpenAI ─────────────────────────────────────────────────────
         var aiEndpoint = config["AI:Endpoint"]
             ?? throw new InvalidOperationException("Required env var 'AI__Endpoint' is not set.");

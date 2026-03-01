@@ -22,5 +22,10 @@ public interface IWardrobeRepository
   Task UpsertAsync(
     ClothingItem item,
     CancellationToken cancellationToken = default);
+
+  Task DeleteAsync(
+    string id,
+    string userId,
+    CancellationToken cancellationToken = default);
 }
 

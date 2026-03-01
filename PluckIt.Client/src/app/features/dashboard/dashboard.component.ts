@@ -1,13 +1,15 @@
-import { Component, signal, ViewChild } from '@angular/core';
+import { Component, OnInit, signal, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { AuthService } from '../../core/services/auth.service';
+import { UserProfileService } from '../../core/services/user-profile.service';
 import { WardrobeComponent } from '../closet/closet.component';
 import { StylistPanelComponent } from '../stylist/stylist.component';
+import { ProfilePanelComponent } from '../profile/profile-panel.component';
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [FormsModule, WardrobeComponent, StylistPanelComponent],
+  imports: [FormsModule, WardrobeComponent, StylistPanelComponent, ProfilePanelComponent],
   template: `
     <div class="flex flex-col h-screen bg-background-dark text-chrome overflow-hidden font-display">
 
@@ -49,7 +51,8 @@ import { StylistPanelComponent } from '../stylist/stylist.component';
             <span class="material-symbols-outlined" style="font-size:20px">notifications</span>
           </button>
 
-          <button class="p-2 rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] transition-colors">
+          <button class="p-2 rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] transition-colors"
+                  (click)="settingsOpen.set(true)" aria-label="Settings">
             <span class="material-symbols-outlined" style="font-size:20px">settings</span>
           </button>
 
@@ -73,11 +76,13 @@ import { StylistPanelComponent } from '../stylist/stylist.component';
           #wardrobeRef
           class="flex-1 min-w-0 overflow-y-auto custom-scrollbar"
           [searchQuery]="searchQuery()"
+          [selectedIds]="selectedIds()"
+          (itemToggled)="toggleItemSelection($event)"
         />
 
         <!-- Stylist sidebar — always visible lg+, overlay on mobile -->
-        <app-stylist-panel
-          class="hidden lg:flex w-96 shrink-0 border-l border-border-subtle"
+        <div
+          class="hidden lg:flex w-96 shrink-0 border-l border-border-subtle flex-col relative"
           [class.!flex]="stylistOpen()"
           [class.fixed]="stylistOpen()"
           [class.inset-y-0]="stylistOpen()"
@@ -85,8 +90,28 @@ import { StylistPanelComponent } from '../stylist/stylist.component';
           [class.z-50]="stylistOpen()"
           [class.w-full]="stylistOpen()"
           [class.sm:w-96]="stylistOpen()"
-          (closed)="stylistOpen.set(false)"
-        />
+          [class.ring-2]="dragOver()"
+          [class.ring-primary]="dragOver()"
+          [class.ring-inset]="dragOver()"
+          (dragover)="onDragOver($event)"
+          (dragleave)="onDragLeave()"
+          (drop)="onDrop($event)"
+        >
+          @if (dragOver()) {
+            <div class="absolute inset-0 z-10 flex items-center justify-center bg-primary/10 pointer-events-none">
+              <div class="flex flex-col items-center gap-2 text-primary">
+                <span class="material-symbols-outlined" style="font-size:40px">style</span>
+                <span class="text-xs font-mono font-bold tracking-wider">DROP TO STYLE</span>
+              </div>
+            </div>
+          }
+          <app-stylist-panel
+            class="flex flex-col h-full"
+            [selectedItemIds]="selectedIds"
+            (closed)="stylistOpen.set(false)"
+            (clearSelected)="selectedIds.set([])"
+          />
+        </div>
       </div>
 
       <!-- Mobile FAB -->
@@ -96,14 +121,55 @@ import { StylistPanelComponent } from '../stylist/stylist.component';
       >
         <span class="material-symbols-outlined">smart_toy</span>
       </button>
+
+      <!-- Profile / Settings panel -->
+      @if (settingsOpen()) {
+        <app-profile-panel (closed)="settingsOpen.set(false)" />
+      }
     </div>
   `,
 })
-export class DashboardComponent {
+export class DashboardComponent implements OnInit {
   @ViewChild('wardrobeRef') wardrobeRef!: WardrobeComponent;
 
-  protected readonly stylistOpen = signal(false);
-  protected readonly searchQuery = signal('');
+  protected readonly stylistOpen  = signal(false);
+  protected readonly settingsOpen = signal(false);
+  protected readonly searchQuery  = signal('');
+  protected readonly selectedIds  = signal<string[]>([]);
+  protected readonly dragOver     = signal(false);
 
-  constructor(protected readonly auth: AuthService) {}
+  constructor(
+    protected readonly auth: AuthService,
+    private readonly profileService: UserProfileService,
+  ) {}
+
+  ngOnInit(): void {
+    // Pre-load the user profile so the review modal currency/size system is available immediately
+    this.profileService.load().subscribe();
+  }
+
+  toggleItemSelection(id: string): void {
+    this.selectedIds.update(ids =>
+      ids.includes(id) ? ids.filter(i => i !== id) : [...ids, id]
+    );
+  }
+
+  onDragOver(event: DragEvent): void {
+    event.preventDefault();
+    this.dragOver.set(true);
+  }
+
+  onDragLeave(): void {
+    this.dragOver.set(false);
+  }
+
+  onDrop(event: DragEvent): void {
+    event.preventDefault();
+    this.dragOver.set(false);
+    const id = event.dataTransfer?.getData('text/plain')
+            ?? event.dataTransfer?.getData('application/pluckit-item');
+    if (id) {
+      this.selectedIds.update(ids => ids.includes(id) ? ids : [...ids, id]);
+    }
+  }
 }

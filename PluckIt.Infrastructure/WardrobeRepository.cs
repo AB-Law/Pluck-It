@@ -107,5 +107,23 @@ public class WardrobeRepository : IWardrobeRepository
       new PartitionKey(item.UserId),
       cancellationToken: cancellationToken);
   }
+
+  public async Task DeleteAsync(
+    string id,
+    string userId,
+    CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      await Container.DeleteItemAsync<ClothingItem>(
+        id,
+        new PartitionKey(userId),
+        cancellationToken: cancellationToken);
+    }
+    catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+    {
+      // Already deleted — treat as success
+    }
+  }
 }
 

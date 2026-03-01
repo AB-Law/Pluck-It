@@ -94,6 +94,32 @@ public class WardrobeFunctions(
         return req.CreateResponse(HttpStatusCode.NoContent);
     }
 
+    // ── DELETE /api/wardrobe/{id} ───────────────────────────────────────────
+
+    [Function(nameof(DeleteWardrobeItem))]
+    public async Task<HttpResponseData> DeleteWardrobeItem(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "wardrobe/{id}")] HttpRequestData req,
+        string id,
+        CancellationToken cancellationToken)
+    {
+        var (authed, userId) = await TryGetUserIdAsync(req);
+        if (!authed)
+            return req.CreateResponse(System.Net.HttpStatusCode.Unauthorized);
+
+        // Fetch first so we can delete the associated blob
+        var existing = await repo.GetByIdAsync(id, userId!, cancellationToken);
+        if (existing is null)
+            return req.CreateResponse(HttpStatusCode.NotFound);
+
+        await repo.DeleteAsync(id, userId!, cancellationToken);
+
+        // Best-effort blob delete — orphan cleanup Function will catch any misses
+        if (!string.IsNullOrEmpty(existing.ImageUrl))
+            await sasService.DeleteBlobAsync(existing.ImageUrl, cancellationToken);
+
+        return req.CreateResponse(HttpStatusCode.NoContent);
+    }
+
     // ── POST /api/wardrobe/upload ────────────────────────────────────────────
 
     [Function(nameof(UploadItem))]

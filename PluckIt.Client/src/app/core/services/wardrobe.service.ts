@@ -38,4 +38,9 @@ export class WardrobeService {
   update(item: ClothingItem): Observable<void> {
     return this.http.put<void>(`${this.base}/api/wardrobe/${item.id}`, item);
   }
+
+  /** Hard-delete an item from Cosmos (blob handled server-side) */
+  delete(id: string): Observable<void> {
+    return this.http.delete<void>(`${this.base}/api/wardrobe/${id}`);
+  }
 }

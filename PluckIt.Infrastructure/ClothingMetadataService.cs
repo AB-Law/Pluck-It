@@ -38,16 +38,31 @@ public class ClothingMetadataService : IClothingMetadataService
       You are an expert fashion analyst. Analyze the clothing item visible in the image.
       Return ONLY valid JSON — no markdown, no code fences, no extra text — with exactly these fields:
       {
-        "brand": "<detected brand name or null>",
+        "brand": "<detected brand name, or null if not visible>",
         "category": "<one value from the allowed list>",
-        "tags": ["<descriptive tag>", ...],
+        "tags": ["<tag>", ...],
         "colours": [{ "name": "<colour name>", "hex": "<#rrggbb>" }, ...]
       }
 
       Allowed category values (pick the single best match, use exact casing):
       Tops, Bottoms, Outerwear, Footwear, Accessories, Knitwear, Dresses, Activewear, Swimwear, Underwear
 
-      For tags, use descriptive style/fit/season words (e.g. "casual", "slim fit", "summer", "streetwear").
+      For tags, be thorough — include ALL of the following that apply (lowercase, concise):
+        • Brand name (e.g. "dior", "nike", "zara") — always include if brand is detected
+        • Category synonym (e.g. "t-shirt", "tee", "jeans", "hoodie", "sneakers")
+        • Material / fabric (e.g. "cotton", "denim", "leather", "mesh", "linen", "polyester")
+        • Pattern / print (e.g. "solid", "striped", "plaid", "graphic", "floral", "logo print",
+          "camo", "tie-dye", "animal print")
+        • Fit / silhouette (e.g. "slim fit", "oversized", "relaxed", "cropped", "baggy", "fitted")
+        • Style / vibe (e.g. "streetwear", "casual", "formal", "smart casual", "workwear",
+          "athletic", "vintage", "preppy", "bohemian", "minimalist")
+        • Occasion (e.g. "everyday", "gym", "office", "evening", "beach", "party")
+        • Season (e.g. "summer", "winter", "all-season") if clearly suited to one season
+        • Notable details (e.g. "short sleeve", "long sleeve", "zip-up", "button-down",
+          "distressed", "embroidered", "mesh panel", "high-top", "low-top")
+        • Any visible text, graphic, or motif (e.g. "band tee", "logo tee", "slogan")
+      Aim for 6–12 tags. More specific tags make the item easier to find later.
+
       For colours, list the 1-3 main colours visible on the garment itself (ignore background).
       """;
 

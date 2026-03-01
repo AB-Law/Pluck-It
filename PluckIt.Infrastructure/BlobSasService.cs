@@ -1,5 +1,10 @@
 using System;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using System.Threading;
+using System.Threading.Tasks;
 using Azure.Storage;
+using Azure.Storage.Blobs;
 using Azure.Storage.Sas;
 using PluckIt.Core;
 
@@ -17,6 +22,11 @@ public class BlobSasService : IBlobSasService
     _credential = new StorageSharedKeyCredential(accountName, accountKey);
     _archiveContainer = archiveContainer ?? throw new ArgumentNullException(nameof(archiveContainer));
   }
+
+  private BlobContainerClient ArchiveContainer =>
+    new BlobContainerClient(
+      new Uri($"https://{_accountName}.blob.core.windows.net/{_archiveContainer}"),
+      _credential);
 
   public string GenerateSasUrl(string blobUrl, int validForMinutes = 120)
   {
@@ -51,6 +61,38 @@ public class BlobSasService : IBlobSasService
     {
       // Never crash the request over a SAS failure — return plain URL as fallback
       return blobUrl;
+    }
+  }
+
+  public async Task DeleteBlobAsync(string blobUrl, CancellationToken cancellationToken = default)
+  {
+    if (string.IsNullOrWhiteSpace(blobUrl))
+      return;
+
+    try
+    {
+      var uri = new Uri(blobUrl.Split('?')[0]); // strip any existing SAS token
+      var segments = uri.AbsolutePath.TrimStart('/').Split('/', 2);
+      if (segments.Length < 2) return;
+
+      var blobName = segments[1];
+      await ArchiveContainer.GetBlobClient(blobName)
+        .DeleteIfExistsAsync(cancellationToken: cancellationToken);
+    }
+    catch
+    {
+      // Best-effort — never crash the caller over a blob delete failure
+    }
+  }
+
+  public async IAsyncEnumerable<string> ListArchiveBlobNamesAsync(
+    [EnumeratorCancellation] CancellationToken cancellationToken = default)
+  {
+    await foreach (var item in ArchiveContainer
+      .GetBlobsAsync(cancellationToken: cancellationToken)
+      .WithCancellation(cancellationToken))
+    {
+      yield return item.Name;
     }
   }
 }

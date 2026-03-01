@@ -6,3 +6,17 @@ pillow-heif>=0.16.0
 urllib3>=2.0.0
 rembg>=2.0.0
 onnxruntime>=1.17.0
+
+# Web framework (ASGI) for SSE streaming
+fastapi
+
+# LangGraph / LangChain for the stylist agent
+langgraph
+langchain-openai
+langchain-core
+aiohttp
+# HTTP client for Open-Meteo weather API (no API key needed)
+httpx
+
+# Google ID token validation (used to authenticate Angular clients directly)
+google-auth
