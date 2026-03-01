@@ -1,4 +1,5 @@
-import { Component, AfterViewInit, ElementRef, ViewChild, inject } from '@angular/core';
+import { Component, AfterViewInit, ElementRef, ViewChild, inject, effect } from '@angular/core';
+import { Router } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 
 @Component({
@@ -94,7 +95,17 @@ import { AuthService } from '../../core/services/auth.service';
 })
 export class LoginComponent implements AfterViewInit {
   protected readonly auth = inject(AuthService);
+  private readonly router = inject(Router);
   @ViewChild('gisBtnContainer') private gisBtnContainer!: ElementRef<HTMLDivElement>;
+
+  constructor() {
+    // Navigate away as soon as GIS callback sets the user signal.
+    effect(() => {
+      if (this.auth.user()) {
+        this.router.navigate(['/']);
+      }
+    });
+  }
 
   ngAfterViewInit(): void {
     this.auth.renderButton(this.gisBtnContainer.nativeElement);
