@@ -43,11 +43,7 @@ jobs:
           google_oauth_client_id = "${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}"
           google_oauth_client_secret = "${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}"
           swa_repository_url = "https://github.com/AB-Law/Pluck-It"
-          swa_branch = "main"
           swa_repository_token = "${{ secrets.SWA_REPOSITORY_TOKEN }}"
-          swa_app_location = "PluckIt.Client"
-          swa_output_location = "dist/PluckIt.Client"
-          swa_api_location = ""
           OUTER
           
           CORS_VALUE='${{ secrets.CORS_ALLOWED_ORIGINS }}'

@@ -208,13 +208,9 @@ resource "azurerm_static_web_app" "frontend" {
   sku_tier            = "Free"
   sku_size            = "Free"
 
+  # Linking the repo allows the portal to show custom auth providers (e.g. Google)
   repository_url   = var.swa_repository_url
-  branch           = var.swa_branch
   repository_token = var.swa_repository_token
-
-  app_location    = var.swa_app_location
-  output_location = var.swa_output_location
-  api_location    = var.swa_api_location
 
   # These are referenced by staticwebapp.config.json auth.identityProviders.google
   app_settings = {
