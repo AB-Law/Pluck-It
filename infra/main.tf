@@ -213,19 +213,15 @@ resource "azurerm_static_web_app" "frontend" {
   # SWA was originally created in eastasia (different from the resource group region).
   # Hardcoded to prevent destroy+recreate on every plan.
   location            = "eastasia"
+  # Free tier uses the SWA managed identity service for built-in Google OAuth.
+  # No custom client ID/secret needed — Microsoft manages the Google OAuth app.
   sku_tier            = "Free"
   sku_size            = "Free"
 
-  # Linking the repo allows the portal to show custom auth providers (e.g. Google)
+  # Linking the repo allows the portal to show deployment history
   repository_url    = var.swa_repository_url
   repository_branch = var.swa_repository_branch
   repository_token  = var.swa_repository_token
-
-  # These are referenced by staticwebapp.config.json auth.identityProviders.google
-  app_settings = {
-    "GOOGLE_CLIENT_ID"     = var.google_oauth_client_id
-    "GOOGLE_CLIENT_SECRET" = var.google_oauth_client_secret
-  }
 }
 
 # ── Python Processor — Flex Consumption ─────────────────────────────────────

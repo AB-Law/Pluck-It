@@ -65,9 +65,10 @@ export class AuthService {
     return this._user() !== null;
   }
 
-  login(): void {
-    const redirectUri = encodeURIComponent(window.location.href);
-    // Use the SWA's own /.auth/login/google endpoint (same origin, no cross-origin cookie issues)
+  login(redirectAfter = '/'): void {
+    // After Google auth completes, SWA redirects back to the app's root.
+    // We pass the intended destination so the login page can forward there.
+    const redirectUri = encodeURIComponent(window.location.origin + redirectAfter);
     window.location.href = `/.auth/login/google?post_login_redirect_uri=${redirectUri}`;
   }
 

@@ -1,24 +1,28 @@
 <div class="app-container">
-  <header>
-    <h1>{{ title() }}</h1>
-    <p>Your Personal Digital Wardrobe</p>
-    <nav>
-      <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Closet</a>
-      <a routerLink="/stylist" routerLinkActive="active">Stylist</a>
-    </nav>
-    @if (auth.user(); as user) {
-      <div class="user-bar">
-        <span class="user-name">{{ user.name }}</span>
-        <button class="logout-btn" (click)="auth.logout()">Sign out</button>
-      </div>
-    }
-  </header>
+  @if (!isLoginPage) {
+    <header>
+      <h1>{{ title() }}</h1>
+      <p>Your Personal Digital Wardrobe</p>
+      <nav>
+        <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Closet</a>
+        <a routerLink="/stylist" routerLinkActive="active">Stylist</a>
+      </nav>
+      @if (auth.user(); as user) {
+        <div class="user-bar">
+          <span class="user-name">{{ user.name }}</span>
+          <button class="logout-btn" (click)="auth.logout()">Sign out</button>
+        </div>
+      }
+    </header>
+  }
   
   <main>
     <router-outlet />
   </main>
   
-  <footer>
-    <p>&copy; 2026 PluckIt - Digital Wardrobe</p>
-  </footer>
+  @if (!isLoginPage) {
+    <footer>
+      <p>&copy; 2026 PluckIt - Digital Wardrobe</p>
+    </footer>
+  }
 </div>
