@@ -17,5 +17,10 @@ public class ClothingItem
   public decimal? Price { get; set; }
   public string? Notes { get; set; }
   public DateTimeOffset? DateAdded { get; set; }
+
+  // User-enriched in the "Enrich Your Item" modal after upload
+  public string? PurchaseDate { get; set; }                          // ISO date, e.g. "2024-11-20"
+  public IReadOnlyCollection<string>? CareInfo { get; set; }         // "dry_clean" | "wash" | "iron" | "bleach"
+  public string? Condition { get; set; }                             // "New" | "Excellent" | "Good" | "Fair"
 }
 

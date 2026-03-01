@@ -108,6 +108,7 @@ import { ReviewItemModalComponent } from './review-item-modal.component';
     @if (draftItem()) {
       <app-review-item-modal
         [item]="draftItem()"
+        [knownBrands]="knownBrands()"
         (saved)="onItemSaved($event)"
         (cancelled)="draftItem.set(null)"
       />
@@ -132,6 +133,14 @@ export class WardrobeComponent implements OnInit {
       this.allItems()
         .map(i => i.category)
         .filter((c): c is string => !!c)
+    )]
+  );
+
+  readonly knownBrands = computed<string[]>(() =>
+    [...new Set(
+      this.allItems()
+        .map(i => i.brand)
+        .filter((b): b is string => !!b)
     )]
   );
 
