@@ -7,11 +7,13 @@ The Terraform backend has been configured to use **local state** initially. Afte
 ## Current Configuration
 
 ### Backend
+
 - **Type**: Local (for initial setup)
 - **State File**: `infra/terraform.tfstate`
 - **Future**: Azure Storage Account (after infrastructure creation)
 
 ### Resources to be Created
+
 - Resource Group: `PluckIt-RG`
 - Storage Account (with blob containers: uploads, archive, tfstate)
 - Cosmos DB Account with PluckIt database
@@ -24,22 +26,26 @@ The Terraform backend has been configured to use **local state** initially. Afte
 ## Terraform Commands
 
 ### 1. Preview Changes
+
 ```powershell
 cd infra
 terraform plan
 ```
 
 ### 2. Apply Infrastructure
+
 ```powershell
 terraform apply
 ```
 
 ### 3. View Outputs
+
 ```powershell
 terraform output
 ```
 
 ### 4. Destroy Infrastructure (when needed)
+
 ```powershell
 terraform destroy
 ```
@@ -51,6 +57,7 @@ Once your infrastructure is created:
 1. **Uncomment the Azure backend** in `backend.tf`
 2. **Update storage account name** (it will be in terraform outputs)
 3. **Migrate state**:
+
    ```powershell
    terraform init -migrate-state
    ```
@@ -58,6 +65,7 @@ Once your infrastructure is created:
 ## Security Notes
 
 ⚠️ **IMPORTANT**: The following files contain sensitive data and are gitignored:
+
 - `terraform.tfvars` - Contains subscription ID, API keys
 - `terraform.tfstate` - Contains resource IDs and connection strings
 - `.terraform/` - Provider plugins
@@ -65,11 +73,18 @@ Once your infrastructure is created:
 ## Variables
 
 Required variables (set in `terraform.tfvars`):
+
 - `subscription_id` - Your Azure subscription ID
 - `location` - Azure region (default: centralindia)
 - `environment` - Environment name (prod/dev)
 - `ai_gpt4o_endpoint` - Azure OpenAI endpoint
 - `ai_api_key` - Azure OpenAI API key
+- `swa_repository_url` - GitHub repo URL for the Static Web App
+- `swa_branch` - Branch for deployments (default: main)
+- `swa_repository_token` - GitHub PAT or deployment token
+- `swa_app_location` - Frontend app folder (default: PluckIt.Client)
+- `swa_output_location` - Build output folder (default: dist/PluckIt.Client)
+- `swa_api_location` - API folder (optional, default: "")
 
 ## Next Steps
 

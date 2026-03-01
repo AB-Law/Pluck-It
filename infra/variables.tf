@@ -48,3 +48,38 @@ variable "google_oauth_client_secret" {
   sensitive   = true
 }
 
+variable "swa_repository_url" {
+  description = "Repository URL for the Static Web App (used to enable custom auth/providers)."
+  type        = string
+}
+
+variable "swa_branch" {
+  description = "Branch for Static Web App deployments."
+  type        = string
+  default     = "main"
+}
+
+variable "swa_repository_token" {
+  description = "Repository token for the Static Web App (GitHub PAT or deployment token)."
+  type        = string
+  sensitive   = true
+}
+
+variable "swa_app_location" {
+  description = "Static Web App source folder relative to repo root."
+  type        = string
+  default     = "PluckIt.Client"
+}
+
+variable "swa_output_location" {
+  description = "Static Web App build output folder relative to app_location."
+  type        = string
+  default     = "dist/PluckIt.Client"
+}
+
+variable "swa_api_location" {
+  description = "Static Web App API folder relative to repo root (optional)."
+  type        = string
+  default     = ""
+}
+

@@ -15,3 +15,11 @@ cors_allowed_origins = [
   "https://happy-ocean-0c606bd00.4.azurestaticapps.net",  # Production Static Web App
   "http://localhost:4200"                                  # Local development (optional)
 ]
+
+# Static Web App deployment (required for custom auth providers like Google)
+swa_repository_url   = "https://github.com/AB-Law/Pluck-It"
+swa_branch           = "main"
+swa_repository_token = "ghp_your_github_pat_or_deployment_token"
+swa_app_location     = "PluckIt.Client"
+swa_output_location  = "dist/PluckIt.Client"
+swa_api_location     = ""
