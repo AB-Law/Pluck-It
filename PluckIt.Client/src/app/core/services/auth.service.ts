@@ -161,7 +161,7 @@ export class AuthService {
   /** Renders the official "Sign in with Google" button into the given element. */
   renderButton(element: HTMLElement): void {
     this.gis?.renderButton(element, {
-      theme: 'outline',
+      theme: 'filled_black',
       size: 'large',
       width: element.offsetWidth || 300,
     });
