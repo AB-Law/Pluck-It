@@ -9,6 +9,7 @@ onnxruntime>=1.17.0
 
 # Web framework (ASGI) for SSE streaming
 fastapi
+python-multipart  # required by FastAPI/Starlette for multipart/form-data parsing
 
 # LangGraph / LangChain for the stylist agent
 langgraph
