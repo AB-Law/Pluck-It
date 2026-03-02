@@ -50,7 +50,7 @@ jobs:
       run: dotnet build PluckIt.sln --no-restore --configuration Release
 
     - name: Run Unit Tests
-      run: dotnet test PluckIt.sln --no-build --configuration Release --filter "Category!=Integration" --logger "github" --logger "console;verbosity=minimal"
+      run: dotnet test PluckIt.sln --no-build --configuration Release --filter "Category!=Integration" --logger "GitHubActions" --logger "console;verbosity=minimal"
 
     - name: Publish
       run: dotnet publish PluckIt.Functions/PluckIt.Functions.csproj --no-build --configuration Release --output ./publish
