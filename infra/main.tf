@@ -74,6 +74,10 @@ resource "azurerm_cosmosdb_sql_database" "pluckit" {
   name                = "PluckIt"
   resource_group_name = azurerm_resource_group.rg_pluckit_archive.name
   account_name        = azurerm_cosmosdb_account.pluckit.name
+
+  # Shared throughput: all containers inherit this pool.
+  # 1000 RU/s is fully covered by the free tier discount, so billed cost = $0.
+  throughput = 1000
 }
 
 resource "azurerm_cosmosdb_sql_container" "wardrobe" {
@@ -268,13 +272,9 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
   runtime_name    = "dotnet-isolated"
   runtime_version = "10.0"
 
-  instance_memory_in_mb = 2048
-
-  # 1 always-ready instance prevents cold starts; ~$8-9/month
-  always_ready {
-    name           = "http"
-    instance_count = 1
-  }
+  # On-demand only — no always-ready instances. Saves ~$50-60/month.
+  # Expect a cold start of ~2-5 s on the first request after idle.
+  instance_memory_in_mb = 1024
 
   site_config {
     cors {
@@ -367,7 +367,7 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
   runtime_name    = "python"
   runtime_version = "3.12"
 
-  instance_memory_in_mb = 2048
+  instance_memory_in_mb = 1024
 
   site_config {
     cors {
