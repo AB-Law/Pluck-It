@@ -274,7 +274,7 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
 
   # On-demand only — no always-ready instances. Saves ~$50-60/month.
   # Expect a cold start of ~2-5 s on the first request after idle.
-  instance_memory_in_mb = 1024
+  instance_memory_in_mb = 2048
 
   site_config {
     cors {
@@ -367,7 +367,7 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
   runtime_name    = "python"
   runtime_version = "3.12"
 
-  instance_memory_in_mb = 1024
+  instance_memory_in_mb = 2048
 
   site_config {
     cors {
