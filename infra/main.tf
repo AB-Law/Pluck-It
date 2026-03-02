@@ -398,9 +398,11 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
     # Azure OpenAI — primary model for chat/agents
     "AZURE_OPENAI_ENDPOINT"   = var.ai_gpt4o_endpoint
     "AZURE_OPENAI_API_KEY"    = var.ai_api_key
-    "AZURE_OPENAI_DEPLOYMENT" = "gpt-4.1-mini"
+    "AZURE_OPENAI_DEPLOYMENT"          = "gpt-4.1-mini"
     # Lighter model used only for conversation summarization (~4x cheaper)
-    "AZURE_OPENAI_NANO_DEPLOYMENT" = var.ai_nano_deployment
+    "AZURE_OPENAI_NANO_DEPLOYMENT"     = var.ai_nano_deployment
+    # Embedding model for mood name canonicalization (cross-run dedup)
+    "AZURE_OPENAI_EMBEDDING_DEPLOYMENT" = "text-embedding-3-small"
     # Google OAuth client ID — used to validate bearer tokens from Angular
     "GOOGLE_CLIENT_ID" = var.google_oauth_client_id
   }

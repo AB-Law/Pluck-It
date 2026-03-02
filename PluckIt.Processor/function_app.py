@@ -242,6 +242,43 @@ def pluck_it_mood_processor(mood_timer: func.TimerRequest) -> None:
         logger.exception("Mood processing failed: %s", exc)
 
 
+# ── HTTP trigger: one-time sitemap seeder (admin use only) ────────────────────
+# Invoke manually to seed the Moods container from publication sitemaps.
+#
+#   POST /api/admin/seed-moods
+#   Body (optional): {"months_back": 3}
+#
+# No auth middleware in the Functions host — protect via network policy or
+# remove the route once the initial seed is complete.
+
+@app.function_name(name="PluckItSeedMoods")
+@app.route(route="moods/seed", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
+def pluck_it_seed_moods(req: func.HttpRequest) -> func.HttpResponse:
+    try:
+        body        = req.get_json() if req.get_body() else {}
+        months_back = int(body.get("months_back", 3))
+        months_back = max(1, min(months_back, 12))  # clamp 1-12
+    except Exception:
+        months_back = 3
+
+    logger.info("PluckItSeedMoods: starting (months_back=%d).", months_back)
+    try:
+        from agents.sitemap_seeder import run_sitemap_seeder
+        result = run_sitemap_seeder(months_back=months_back)
+        return func.HttpResponse(
+            body=json.dumps(result),
+            status_code=200,
+            mimetype="application/json",
+        )
+    except Exception as exc:
+        logger.exception("Sitemap seeder failed: %s", exc)
+        return func.HttpResponse(
+            body=json.dumps({"error": str(exc)}),
+            status_code=500,
+            mimetype="application/json",
+        )
+
+
 # ── FastAPI routes ────────────────────────────────────────────────────────────
 
 @fastapi_app.get("/api/health")
