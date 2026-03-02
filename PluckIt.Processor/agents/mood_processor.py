@@ -144,10 +144,10 @@ def scrape_feeds() -> list[dict]:
             parsed  = feedparser.parse(feed_cfg["url"])
             entries = parsed.entries[:_MAX_ENTRIES_PER_FEED]
             for entry in entries:
-                title     = getattr(entry, "title",     "") or ""
-                summary   = getattr(entry, "summary",   "") or ""
-                url       = getattr(entry, "link",      "") or ""
-                published = getattr(entry, "published", "") or ""
+                title     = str(getattr(entry, "title",     "") or "")
+                summary   = str(getattr(entry, "summary",   "") or "")
+                url       = str(getattr(entry, "link",      "") or "")
+                published = str(getattr(entry, "published", "") or "")
                 if not title.strip():
                     continue
                 snippets.append({
@@ -415,8 +415,11 @@ def upsert_mood(mood_data: dict, name_embedding: list[float], container) -> dict
         existing_score       = existing.get("trendScore", 0)
         existing_sources     = existing.get("sources") or []
         existing_detected_at = existing.get("detectedAt", now_iso)
-    except Exception:
-        pass
+    except Exception as read_exc:
+        from azure.cosmos.exceptions import CosmosResourceNotFoundError
+        if not isinstance(read_exc, CosmosResourceNotFoundError):
+            logger.error("Cosmos read failed for '%s' (non-404): %s — aborting upsert.", doc_id, read_exc)
+            raise
 
     seen_urls      = {s["url"] for s in existing_sources if s.get("url")}
     merged_sources = existing_sources + [s for s in resolved_sources if s.get("url") not in seen_urls]
