@@ -21,3 +21,6 @@ httpx
 
 # Google ID token validation (used to authenticate Angular clients directly)
 google-auth
+
+# Fashion RSS feed scraping for mood processor
+feedparser

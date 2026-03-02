@@ -27,6 +27,7 @@ from .tools.wardrobe import search_wardrobe, get_wardrobe_summary, _compact
 from .tools.weather import get_weather
 from .tools.profile import get_user_profile
 from .tools.gaps import analyze_wardrobe_gaps
+from .tools.mood import get_trending_moods
 from .db import get_wardrobe_container
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,7 @@ def _build_llm() -> AzureChatOpenAI:
     )
 
 
-TOOLS = [search_wardrobe, get_wardrobe_summary, get_weather, get_user_profile, analyze_wardrobe_gaps]
+TOOLS = [search_wardrobe, get_wardrobe_summary, get_weather, get_user_profile, analyze_wardrobe_gaps, get_trending_moods]
 
 _SYSTEM_TEMPLATE = """\
 You are PluckIt AI — a personal stylist with deep knowledge of fashion, colour theory, and personal style.
@@ -62,6 +63,8 @@ Your job:
   have profile details in recent messages or memory — do NOT fetch it again if it was already loaded).
 - Factor in weather when relevant (use get_weather only when the user asks about an outdoor occasion).
 - Identify wardrobe gaps and suggest what to buy (use analyze_wardrobe_gaps).
+- Reference current fashion trends and moods when relevant (use get_trending_moods — especially
+  when the user asks what's trending, describes a vibe, or wants trend-informed outfit ideas).
 - Keep responses concise, warm, and actionable — you're a friend who happens to be a stylist.
 - When showing outfit combinations, reference item categories/colours/brands, not blob URLs.
 - Never make up items — only reference what exists in search results.

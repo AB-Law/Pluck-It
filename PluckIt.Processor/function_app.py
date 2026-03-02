@@ -10,6 +10,9 @@ Endpoints:
   GET  /api/chat/memory     — retrieve user's conversation memory summary
   PUT  /api/chat/memory     — update user's conversation memory summary
   GET  /api/digest/latest   — most recent wardrobe digest suggestions
+  GET  /api/moods           — list all fashion trend moods (filter: ?primaryMood=)
+  GET  /api/moods/{mood_id} — get a single mood by ID
+  POST /api/moods/seed      — one-time sitemap seeder (admin)
   GET  /api/health          — processor health check
 """
 
@@ -37,6 +40,7 @@ from pillow_heif import register_heif_opener
 from agents.auth import get_user_id
 from agents.memory import load_memory, save_memory, maybe_summarize
 from agents.stylist_agent import stream_stylist_response
+from agents.mood_processor import PRIMARY_MOODS
 
 register_heif_opener()
 
@@ -221,6 +225,24 @@ def pluck_it_weekly_digest(digest_timer: func.TimerRequest) -> None:
         logger.exception("Weekly digest failed: %s", exc)
 
 
+# ── Timer trigger: daily mood processing from fashion RSS feeds ───────────────
+
+@app.function_name(name="PluckItMoodProcessor")
+@app.timer_trigger(
+    arg_name="mood_timer",
+    schedule="0 0 6 * * *",  # Every day at 06:00 UTC
+    run_on_startup=False,
+    is_carryover=False,
+)
+def pluck_it_mood_processor(mood_timer: func.TimerRequest) -> None:
+    logger.info("PluckItMoodProcessor: triggered (past_due=%s)", mood_timer.past_due)
+    try:
+        from agents.mood_processor import run_mood_processor
+        run_mood_processor()
+    except Exception as exc:
+        logger.exception("Mood processing failed: %s", exc)
+
+
 # ── FastAPI routes ────────────────────────────────────────────────────────────
 
 @fastapi_app.get("/api/health")
@@ -392,4 +414,119 @@ async def get_latest_digest(user_id: str = Depends(get_user_id)):
     except Exception as exc:
         logger.exception("Failed to load digest for user %s: %s", user_id, exc)
         raise HTTPException(status_code=500, detail="Could not load digest.")
+
+
+# ── Moods endpoints ───────────────────────────────────────────────────────────
+
+_MOOD_LIST_LIMIT = 50
+_COSMOS_INTERNAL_KEYS = ["_rid", "_self", "_etag", "_attachments", "_ts"]
+
+
+class SeedMoodsRequest(BaseModel):
+    months_back: int = 3
+
+
+@fastapi_app.post("/api/moods/seed")
+async def seed_moods(body: SeedMoodsRequest = SeedMoodsRequest()):
+    """
+    One-time sitemap seeder — populates the Moods container from publication
+    sitemaps. Invoke manually; safe to call repeatedly (upserts by mood ID).
+
+    Body (optional): {"months_back": 3}  — clamped 1–12
+    """
+    months_back = max(1, min(body.months_back, 12))
+    logger.info("seed_moods: starting (months_back=%d).", months_back)
+    try:
+        from agents.sitemap_seeder import run_sitemap_seeder
+        import asyncio
+        result = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: run_sitemap_seeder(months_back=months_back)
+        )
+        return result
+    except Exception as exc:
+        logger.exception("Sitemap seeder failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@fastapi_app.get("/api/moods")
+async def list_moods(primaryMood: Optional[str] = None):
+    """
+    List all fashion trend moods, optionally filtered by primaryMood category.
+    Results are ordered by trendScore (most-mentioned first).
+
+    Query params:
+      primaryMood — optional filter, must be one of the known primary mood categories.
+    """
+    from agents.db import get_moods_container
+    container = get_moods_container()
+
+    if primaryMood is not None and primaryMood not in PRIMARY_MOODS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown primaryMood '{primaryMood}'. Valid values: {', '.join(PRIMARY_MOODS)}",
+        )
+
+    try:
+        if primaryMood:
+            query = (
+                "SELECT * FROM c WHERE c.primaryMood = @primaryMood "
+                "ORDER BY c.trendScore DESC OFFSET 0 LIMIT @limit"
+            )
+            parameters = [
+                {"name": "@primaryMood", "value": primaryMood},
+                {"name": "@limit",       "value": _MOOD_LIST_LIMIT},
+            ]
+        else:
+            query = (
+                "SELECT * FROM c ORDER BY c.trendScore DESC OFFSET 0 LIMIT @limit"
+            )
+            parameters = [{"name": "@limit", "value": _MOOD_LIST_LIMIT}]
+
+        moods = []
+        async for item in container.query_items(query=query, parameters=parameters):
+            for key in _COSMOS_INTERNAL_KEYS:
+                item.pop(key, None)
+            moods.append(item)
+
+        return {"moods": moods, "primaryMoods": PRIMARY_MOODS}
+    except Exception as exc:
+        logger.exception("Failed to list moods: %s", exc)
+        raise HTTPException(status_code=500, detail="Could not load moods.")
+
+
+@fastapi_app.get("/api/moods/{mood_id}")
+async def get_mood(mood_id: str):
+    """Return a single mood document by its ID."""
+    from agents.db import get_moods_container
+    container = get_moods_container()
+
+    try:
+        # mood_id format: "<primaryMood_lower>-<slug>", e.g. "minimalist-quiet-luxury"
+        # Extract the primaryMood prefix by matching against the known vocabulary.
+        parts = mood_id.split("-")
+        if len(parts) < 2:
+            raise HTTPException(status_code=404, detail="Mood not found.")
+
+        # Try progressively longer prefixes to handle multi-word primary moods
+        partition_key = None
+        for n in range(1, len(parts)):
+            candidate = "-".join(parts[:n])
+            match = next((m for m in PRIMARY_MOODS if m.lower() == candidate), None)
+            if match:
+                partition_key = match
+                break
+
+        if partition_key is None:
+            raise HTTPException(status_code=404, detail="Mood not found.")
+
+        item = await container.read_item(item=mood_id, partition_key=partition_key)
+        for key in _COSMOS_INTERNAL_KEYS:
+            item.pop(key, None)
+        return item
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to load mood %s: %s", mood_id, exc)
+        raise HTTPException(status_code=404, detail="Mood not found.")
+
 
