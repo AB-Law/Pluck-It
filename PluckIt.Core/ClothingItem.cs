@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace PluckIt.Core;
 
@@ -31,6 +32,32 @@ public class ClothingSize
   public string? System { get; set; }
 }
 
+/// <summary>
+/// Structured pricing information for a clothing item.
+/// StoredAmount is in OriginalCurrency; the UI converts to the user's preferred currency at display time.
+/// </summary>
+public class ClothingPrice
+{
+  /// <summary>Purchase price in OriginalCurrency.</summary>
+  public decimal Amount { get; set; }
+
+  /// <summary>ISO 4217 currency code at time of purchase, e.g. "USD", "INR", "GBP".</summary>
+  public string OriginalCurrency { get; set; } = "USD";
+
+  /// <summary>ISO date string of the purchase, e.g. "2024-11-20". Mirrors the top-level PurchaseDate.</summary>
+  public string? PurchaseDate { get; set; }
+}
+
+/// <summary>Subjective condition grade for a clothing item.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<ItemCondition>))]
+public enum ItemCondition
+{
+  New,
+  Excellent,
+  Good,
+  Fair
+}
+
 public class ClothingItem
 {
   public string Id { get; set; } = default!;
@@ -40,14 +67,33 @@ public class ClothingItem
   public IReadOnlyCollection<ClothingColour> Colours { get; set; } = Array.Empty<ClothingColour>();
   public string? Brand { get; set; }
   public string? Category { get; set; }
-  public decimal? Price { get; set; }
+
+  /// <summary>
+  /// Structured price object — replaces the old flat decimal Price field.
+  /// Clients reading the old flat field will migrate on next PUT.
+  /// </summary>
+  public ClothingPrice? Price { get; set; }
+
   public string? Notes { get; set; }
   public DateTimeOffset? DateAdded { get; set; }
 
-  // User-enriched in the "Enrich Your Item" modal after upload
-  public string? PurchaseDate { get; set; }                          // ISO date, e.g. "2024-11-20"
-  public IReadOnlyCollection<string>? CareInfo { get; set; }         // "dry_clean" | "wash" | "iron" | "bleach"
-  public string? Condition { get; set; }                             // "New" | "Excellent" | "Good" | "Fair"
+  // ── Digital Vault analytics ──────────────────────────────────────────────
+  /// <summary>Number of times this item has been worn. Incremented via PATCH /wardrobe/{id}/wear.</summary>
+  public int WearCount { get; set; } = 0;
+
+  /// <summary>Estimated current resale/market value in the item's OriginalCurrency.</summary>
+  public decimal? EstimatedMarketValue { get; set; }
+
+  // ── Enrichment metadata (populated in the "Enrich Your Item" modal) ───────
+  public string? PurchaseDate { get; set; }                                // ISO date, e.g. "2024-11-20"
+  public IReadOnlyCollection<string>? CareInfo { get; set; }               // "dry_clean" | "wash" | "iron" | "bleach"
+  public ItemCondition? Condition { get; set; }
   public ClothingSize? Size { get; set; }
+
+  /// <summary>
+  /// Aesthetic / style tags, e.g. ["Formal", "Luxe", "Casual", "Urban"].
+  /// Used for Digital Vault smart-group filtering and AI stylist context.
+  /// </summary>
+  public IReadOnlyCollection<string>? AestheticTags { get; set; }
 }
 

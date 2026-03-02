@@ -120,6 +120,28 @@ public class WardrobeFunctions(
         return req.CreateResponse(HttpStatusCode.NoContent);
     }
 
+    // ── PATCH /api/wardrobe/{id}/wear ────────────────────────────────────────
+    // Atomically increments WearCount by 1. Returns the updated item.
+
+    [Function(nameof(LogWear))]
+    public async Task<HttpResponseData> LogWear(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "wardrobe/{id}/wear")] HttpRequestData req,
+        string id,
+        CancellationToken cancellationToken)
+    {
+        var (authed, userId) = await TryGetUserIdAsync(req);
+        if (!authed)
+            return req.CreateResponse(HttpStatusCode.Unauthorized);
+
+        var item = await repo.GetByIdAsync(id, userId!, cancellationToken);
+        if (item is null) return req.CreateResponse(HttpStatusCode.NotFound);
+
+        item.WearCount += 1;
+        await repo.UpsertAsync(item, cancellationToken);
+
+        return await JsonOk(req, item, PluckItJsonContext.Default.ClothingItem);
+    }
+
     // ── POST /api/wardrobe/upload ────────────────────────────────────────────
 
     [Function(nameof(UploadItem))]

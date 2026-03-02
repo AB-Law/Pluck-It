@@ -1,5 +1,6 @@
 using System;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Azure;
 using Azure.AI.OpenAI;
 using Microsoft.Azure.Cosmos;
@@ -37,6 +38,11 @@ var host = new HostBuilder()
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             PropertyNameCaseInsensitive = true,
+            Converters =
+            {
+                new ClothingPriceConverter(),
+                new JsonStringEnumConverter(null, allowIntegerValues: true),
+            },
         };
         services.AddSingleton(_ => new CosmosClient(cosmosEndpoint, cosmosKey, new CosmosClientOptions
         {
@@ -54,6 +60,13 @@ var host = new HostBuilder()
                 sp.GetRequiredService<CosmosClient>(),
                 cosmosDatabase,
                 cosmosUserProfilesContainer));
+
+        var cosmosCollectionsContainer = config["Cosmos:CollectionsContainer"] ?? "Collections";
+        services.AddSingleton<ICollectionRepository>(sp =>
+            new CollectionRepository(
+                sp.GetRequiredService<CosmosClient>(),
+                cosmosDatabase,
+                cosmosCollectionsContainer));
 
         // ── Azure OpenAI ─────────────────────────────────────────────────────
         var aiEndpoint = config["AI:Endpoint"]

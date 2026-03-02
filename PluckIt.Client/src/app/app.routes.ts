@@ -10,5 +10,15 @@ export const routes: Routes = [
   { path: 'tos', component: TosComponent },
   { path: 'privacy', component: PrivacyComponent },
   { path: '', component: DashboardComponent, canActivate: [authGuard] },
+  {
+    path: 'vault',
+    loadComponent: () => import('./features/vault/vault.component').then(m => m.VaultComponent),
+    canActivate: [authGuard],
+  },
+  {
+    path: 'collections',
+    loadComponent: () => import('./features/collections/collections.component').then(m => m.CollectionsComponent),
+    canActivate: [authGuard],
+  },
   { path: '**', redirectTo: '' }
 ];

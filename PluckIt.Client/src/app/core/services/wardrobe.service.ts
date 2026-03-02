@@ -43,4 +43,9 @@ export class WardrobeService {
   delete(id: string): Observable<void> {
     return this.http.delete<void>(`${this.base}/api/wardrobe/${id}`);
   }
+
+  /** Increment WearCount by 1 and return the updated item */
+  logWear(id: string): Observable<ClothingItem> {
+    return this.http.patch<ClothingItem>(`${this.base}/api/wardrobe/${id}/wear`, null);
+  }
 }

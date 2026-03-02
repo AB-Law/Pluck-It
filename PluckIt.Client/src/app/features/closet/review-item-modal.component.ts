@@ -7,7 +7,7 @@ import {
   SimpleChanges,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ClothingItem, ClothingSize } from '../../core/models/clothing-item.model';
+import { ClothingItem, ClothingSize, ItemCondition } from '../../core/models/clothing-item.model';
 import { UserProfileService } from '../../core/services/user-profile.service';
 
 interface CareOption {
@@ -162,7 +162,8 @@ function sizeType(category: string | null): 'letter' | 'bottoms' | 'shoe' | 'non
                     </div>
                     <input
                       type="number"
-                      [(ngModel)]="draft.price"
+                      [ngModel]="priceAmount"
+                      (ngModelChange)="setPriceAmount($event)"
                       min="0"
                       step="0.01"
                       placeholder="0.00"
@@ -444,6 +445,28 @@ export class ReviewItemModalComponent implements OnChanges {
     return this.profileService.getOrDefault().currencyCode;
   }
 
+  /** Adapter: read amount from ClothingPrice (or null → empty). */
+  get priceAmount(): number | null {
+    return this.draft?.price?.amount ?? null;
+  }
+
+  /** Adapter: write amount back into the ClothingPrice object. */
+  setPriceAmount(val: number | null): void {
+    if (!this.draft) return;
+    if (val === null || val === undefined) {
+      this.draft = { ...this.draft, price: null };
+    } else {
+      this.draft = {
+        ...this.draft,
+        price: {
+          amount: val,
+          originalCurrency: this.currency,
+          purchaseDate: this.draft.purchaseDate,
+        },
+      };
+    }
+  }
+
   get sizeSystem(): string {
     return this.profileService.getOrDefault().preferredSizeSystem;
   }
@@ -458,9 +481,9 @@ export class ReviewItemModalComponent implements OnChanges {
     if (changes['item'] && this.item) {
       this.draft = {
         ...this.item,
-        tags:         [...(this.item.tags     ?? [])],
-        colours:      (this.item.colours      ?? []).map(c => ({ ...c })),
-        careInfo:     [...(this.item.careInfo  ?? [])],
+        tags:         [...(this.item.tags       ?? [])],
+        colours:      (this.item.colours        ?? []).map(c => ({ ...c })),
+        careInfo:     [...(this.item.careInfo    ?? [])],
         condition:    this.item.condition     ?? null,
         purchaseDate: this.item.purchaseDate  ?? null,
         size: this.item.size ? { ...this.item.size } : null,
@@ -549,7 +572,7 @@ export class ReviewItemModalComponent implements OnChanges {
   // ── Condition ────────────────────────────────────────────────────────────
 
   setCondition(condition: string): void {
-    if (this.draft) this.draft = { ...this.draft, condition };
+    if (this.draft) this.draft = { ...this.draft, condition: condition as ItemCondition };
   }
 
   condBtnClass(cond: string, isLast: boolean): string {

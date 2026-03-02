@@ -1,6 +1,6 @@
 import { Component, OnInit, signal, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 import { UserProfileService } from '../../core/services/user-profile.service';
 import { WardrobeComponent } from '../closet/closet.component';
@@ -10,7 +10,7 @@ import { ProfilePanelComponent } from '../profile/profile-panel.component';
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [FormsModule, WardrobeComponent, StylistPanelComponent, ProfilePanelComponent],
+  imports: [FormsModule, RouterLink, WardrobeComponent, StylistPanelComponent, ProfilePanelComponent],
   template: `
     <div class="flex flex-col h-screen bg-background-dark text-chrome overflow-hidden font-display">
 
@@ -47,6 +47,20 @@ import { ProfilePanelComponent } from '../profile/profile-panel.component';
             <span class="material-symbols-outlined" style="font-size:18px">upload_file</span>
             <span class="hidden sm:inline">Upload</span>
           </button>
+
+          <!-- Vault icon -->
+          <a routerLink="/vault"
+             class="p-2 rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] transition-colors"
+             title="Digital Vault">
+            <span class="material-symbols-outlined" style="font-size:20px">inventory_2</span>
+          </a>
+
+          <!-- Collections icon -->
+          <a routerLink="/collections"
+             class="p-2 rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] transition-colors"
+             title="My Collections">
+            <span class="material-symbols-outlined" style="font-size:20px">folder_special</span>
+          </a>
 
           <button class="p-2 rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] transition-colors">
             <span class="material-symbols-outlined" style="font-size:20px">notifications</span>
