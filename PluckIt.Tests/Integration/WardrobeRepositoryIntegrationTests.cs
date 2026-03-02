@@ -11,12 +11,14 @@
 //
 // The emulator image ~1.5 GB — first pull takes a few minutes. Subsequent runs
 // use Docker's layer cache.
+//
+// The [Collection("CosmosDb Integration")] attribute ensures all tests in this
+// file share a single CosmosDbFixture (one container for the whole run) and
+// execute sequentially, preventing multiple 1.5 GB containers starting in parallel.
 
 using Shouldly;
-using Microsoft.Azure.Cosmos;
 using PluckIt.Core;
 using PluckIt.Infrastructure;
-using Testcontainers.CosmosDb;
 using Xunit;
 
 namespace PluckIt.Tests.Integration;
@@ -28,53 +30,26 @@ namespace PluckIt.Tests.Integration;
 /// - ORDER BY dateAdded DESC
 /// - Pagination consistency under concurrent writes
 /// </summary>
+[Collection("CosmosDb Integration")]
 [Trait("Category", "Integration")]
-public sealed class WardrobeRepositoryIntegrationTests : IAsyncLifetime
+public sealed class WardrobeRepositoryIntegrationTests
 {
-    private readonly CosmosDbContainer _cosmos = new CosmosDbBuilder("mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest")
-        .Build();
+    private readonly WardrobeRepository _repo;
 
-    private CosmosClient _client = null!;
-    private WardrobeRepository _repo = null!;
+    // Each xUnit test method creates a new instance of this class, so each test
+    // gets a fresh GUID partition — no cross-test data contamination in the
+    // shared container.
+    private readonly string UserId = Guid.NewGuid().ToString("N");
 
-    private const string UserId  = "integration-user-001";
-    private const string Database = "PluckIt";
-    private const string Container = "Wardrobe";
-
-    public async Task InitializeAsync()
+    public WardrobeRepositoryIntegrationTests(CosmosDbFixture fixture)
     {
-        await _cosmos.StartAsync();
-
-        // The emulator uses a well-known self-signed cert; CosmosDb Testcontainer
-        // disables TLS verification automatically via its connection string.
-        _client = new CosmosClient(
-            _cosmos.GetConnectionString(),
-            new CosmosClientOptions
-            {
-                HttpClientFactory = () => new HttpClient(
-                    new HttpClientHandler
-                    {
-                        ServerCertificateCustomValidationCallback =
-                            HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-                    }),
-                ConnectionMode = ConnectionMode.Gateway,
-            });
-
-        await _client.CreateDatabaseIfNotExistsAsync(Database);
-        await _client
-            .GetDatabase(Database)
-            .CreateContainerIfNotExistsAsync(new ContainerProperties(Container, "/userId"));
-
-        _repo = new WardrobeRepository(_client, Database, Container);
+        _repo = new WardrobeRepository(
+            fixture.Client,
+            CosmosDbFixture.Database,
+            CosmosDbFixture.Container);
     }
 
-    public async Task DisposeAsync()
-    {
-        _client.Dispose();
-        await _cosmos.StopAsync();
-    }
-
-    private static ClothingItem MakeItem(
+    private ClothingItem MakeItem(
         string id,
         string? category   = "Tops",
         string[]? tags     = null,

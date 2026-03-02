@@ -61,8 +61,11 @@ public sealed class InMemoryWardrobeRepository : IWardrobeRepository
 
     public Task UpsertAsync(ClothingItem item, CancellationToken cancellationToken = default)
     {
+        // Match on (Id, UserId) — mirrors Cosmos partition semantics where the
+        // same document id can exist in multiple userId partitions.
         var existing = _store.FindIndex(i =>
-            string.Equals(i.Id, item.Id, StringComparison.OrdinalIgnoreCase));
+            string.Equals(i.Id,     item.Id,     StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(i.UserId, item.UserId, StringComparison.OrdinalIgnoreCase));
         if (existing >= 0) _store[existing] = item;
         else               _store.Add(item);
         return Task.CompletedTask;
