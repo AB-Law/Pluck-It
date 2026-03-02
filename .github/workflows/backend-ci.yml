@@ -7,6 +7,7 @@ on:
       - 'PluckIt.Functions/**'
       - 'PluckIt.Core/**'
       - 'PluckIt.Infrastructure/**'
+      - 'PluckIt.Tests/**'
       - '.github/workflows/backend-ci.yml'
   pull_request:
     branches: [ main ]
@@ -14,6 +15,7 @@ on:
       - 'PluckIt.Functions/**'
       - 'PluckIt.Core/**'
       - 'PluckIt.Infrastructure/**'
+      - 'PluckIt.Tests/**'
       - '.github/workflows/backend-ci.yml'
 
 concurrency:
@@ -46,6 +48,9 @@ jobs:
 
     - name: Build
       run: dotnet build PluckIt.sln --no-restore --configuration Release
+
+    - name: Run Unit Tests
+      run: dotnet test PluckIt.sln --no-build --configuration Release --filter "Category!=Integration" --logger "github" --logger "console;verbosity=minimal"
 
     - name: Publish
       run: dotnet publish PluckIt.Functions/PluckIt.Functions.csproj --no-build --configuration Release --output ./publish
