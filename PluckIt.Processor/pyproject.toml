@@ -9,6 +9,7 @@ dependencies = [
   "azure-cosmos>=4.7.0",
   "pillow>=10.0.0",
   "rembg>=2.0.0",
+  "feedparser>=6.0.0",
 ]
 
 [build-system]
