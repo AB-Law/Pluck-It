@@ -113,13 +113,13 @@ resource "azurerm_cosmosdb_sql_container" "user_profiles" {
 # Stores per-user conversation memory: rolling summary + last-digest wardrobe hash.
 # TTL of 30 days auto-expires stale summaries.
 resource "azurerm_cosmosdb_sql_container" "conversations" {
-  name                   = "Conversations"
-  resource_group_name    = azurerm_resource_group.rg_pluckit_archive.name
-  account_name           = azurerm_cosmosdb_account.pluckit.name
-  database_name          = azurerm_cosmosdb_sql_database.pluckit.name
-  partition_key_paths    = ["/userId"]
-  partition_key_version  = 1
-  default_ttl            = 2592000 # 30 days in seconds
+  name                  = "Conversations"
+  resource_group_name   = azurerm_resource_group.rg_pluckit_archive.name
+  account_name          = azurerm_cosmosdb_account.pluckit.name
+  database_name         = azurerm_cosmosdb_sql_database.pluckit.name
+  partition_key_paths   = ["/userId"]
+  partition_key_version = 1
+  default_ttl           = 2592000 # 30 days in seconds
 
   indexing_policy {
     indexing_mode = "consistent"
@@ -145,6 +145,37 @@ resource "azurerm_cosmosdb_sql_container" "digests" {
 
     included_path {
       path = "/*"
+    }
+  }
+}
+
+# Partition key = ownerId so all of a user's owned collections are co-located.
+# A separate cross-partition query fetches collections where the user is a member.
+resource "azurerm_cosmosdb_sql_container" "collections" {
+  name                  = "Collections"
+  resource_group_name   = azurerm_resource_group.rg_pluckit_archive.name
+  account_name          = azurerm_cosmosdb_account.pluckit.name
+  database_name         = azurerm_cosmosdb_sql_database.pluckit.name
+  partition_key_paths   = ["/ownerId"]
+  partition_key_version = 1
+
+  indexing_policy {
+    indexing_mode = "consistent"
+
+    included_path {
+      path = "/*"
+    }
+
+    # Composite index to efficiently query "collections I joined" across all partitions
+    composite_index {
+      index {
+        path  = "/memberUserIds"
+        order = "Ascending"
+      }
+      index {
+        path  = "/createdAt"
+        order = "Descending"
+      }
     }
   }
 }
@@ -243,23 +274,23 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
   }
 
   app_settings = {
-    "FUNCTIONS_EXTENSION_VERSION"        = "~4"
+    "FUNCTIONS_EXTENSION_VERSION"           = "~4"
     "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.pluckit.connection_string
-    "Cosmos__Endpoint"                   = azurerm_cosmosdb_account.pluckit.endpoint
-    "Cosmos__Key"                        = azurerm_cosmosdb_account.pluckit.primary_key
-    "Cosmos__Database"                   = azurerm_cosmosdb_sql_database.pluckit.name
-    "Cosmos__Container"                  = azurerm_cosmosdb_sql_container.wardrobe.name
-    "Cosmos__UserProfilesContainer"      = azurerm_cosmosdb_sql_container.user_profiles.name
-    "AI__Endpoint"                       = var.ai_gpt4o_endpoint
-    "AI__ApiKey"                         = var.ai_api_key
-    "AI__Deployment"                     = "gpt-4.1-mini"
-    "BlobStorage__AccountName"           = azurerm_storage_account.sa_pluckit.name
-    "BlobStorage__AccountKey"            = azurerm_storage_account.sa_pluckit.primary_access_key
-    "BlobStorage__ArchiveContainer"      = azurerm_storage_container.archive.name
-    "Processor__BaseUrl"                 = "https://${local.base_name}-processor-func.azurewebsites.net"
+    "Cosmos__Endpoint"                      = azurerm_cosmosdb_account.pluckit.endpoint
+    "Cosmos__Key"                           = azurerm_cosmosdb_account.pluckit.primary_key
+    "Cosmos__Database"                      = azurerm_cosmosdb_sql_database.pluckit.name
+    "Cosmos__Container"                     = azurerm_cosmosdb_sql_container.wardrobe.name
+    "Cosmos__UserProfilesContainer"         = azurerm_cosmosdb_sql_container.user_profiles.name
+    "AI__Endpoint"                          = var.ai_gpt4o_endpoint
+    "AI__ApiKey"                            = var.ai_api_key
+    "AI__Deployment"                        = "gpt-4.1-mini"
+    "BlobStorage__AccountName"              = azurerm_storage_account.sa_pluckit.name
+    "BlobStorage__AccountKey"               = azurerm_storage_account.sa_pluckit.primary_access_key
+    "BlobStorage__ArchiveContainer"         = azurerm_storage_container.archive.name
+    "Processor__BaseUrl"                    = "https://${local.base_name}-processor-func.azurewebsites.net"
     # Google OAuth Client ID — used by GoogleTokenValidator to verify GIS ID tokens.
     # The client secret is NOT needed; verification uses Google's public JWKS only.
-    "GoogleAuth__ClientId"               = var.google_oauth_client_id
+    "GoogleAuth__ClientId" = var.google_oauth_client_id
   }
 }
 
@@ -272,11 +303,11 @@ resource "azurerm_static_web_app" "frontend" {
   resource_group_name = azurerm_resource_group.rg_pluckit_archive.name
   # SWA was originally created in eastasia (different from the resource group region).
   # Hardcoded to prevent destroy+recreate on every plan.
-  location            = "eastasia"
+  location = "eastasia"
   # Free tier — the SWA is now a plain static host; Google auth is handled
   # entirely in the browser via GIS and verified in the API Function App.
-  sku_tier            = "Free"
-  sku_size            = "Free"
+  sku_tier = "Free"
+  sku_size = "Free"
 
   # Linking the repo allows the portal to show deployment history
   repository_url    = var.swa_repository_url
@@ -334,24 +365,24 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
     "FUNCTIONS_EXTENSION_VERSION"           = "~4"
     "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.pluckit.connection_string
     "UPLOADS_CONTAINER_NAME"                = azurerm_storage_container.uploads.name
-    "ARCHIVE_CONTAINER_NAME"               = azurerm_storage_container.archive.name
-    "STORAGE_ACCOUNT_NAME"                 = azurerm_storage_account.sa_pluckit.name
-    "STORAGE_ACCOUNT_KEY"                  = azurerm_storage_account.sa_pluckit.primary_access_key
-    "COSMOS_DB_ENDPOINT"                   = azurerm_cosmosdb_account.pluckit.endpoint
-    "COSMOS_DB_KEY"                        = azurerm_cosmosdb_account.pluckit.primary_key
-    "COSMOS_DB_DATABASE"                   = azurerm_cosmosdb_sql_database.pluckit.name
-    "COSMOS_DB_CONTAINER"                  = azurerm_cosmosdb_sql_container.wardrobe.name
-    "COSMOS_DB_USER_PROFILES_CONTAINER"    = azurerm_cosmosdb_sql_container.user_profiles.name
-    "COSMOS_DB_CONVERSATIONS_CONTAINER"    = azurerm_cosmosdb_sql_container.conversations.name
-    "COSMOS_DB_DIGESTS_CONTAINER"          = azurerm_cosmosdb_sql_container.digests.name
+    "ARCHIVE_CONTAINER_NAME"                = azurerm_storage_container.archive.name
+    "STORAGE_ACCOUNT_NAME"                  = azurerm_storage_account.sa_pluckit.name
+    "STORAGE_ACCOUNT_KEY"                   = azurerm_storage_account.sa_pluckit.primary_access_key
+    "COSMOS_DB_ENDPOINT"                    = azurerm_cosmosdb_account.pluckit.endpoint
+    "COSMOS_DB_KEY"                         = azurerm_cosmosdb_account.pluckit.primary_key
+    "COSMOS_DB_DATABASE"                    = azurerm_cosmosdb_sql_database.pluckit.name
+    "COSMOS_DB_CONTAINER"                   = azurerm_cosmosdb_sql_container.wardrobe.name
+    "COSMOS_DB_USER_PROFILES_CONTAINER"     = azurerm_cosmosdb_sql_container.user_profiles.name
+    "COSMOS_DB_CONVERSATIONS_CONTAINER"     = azurerm_cosmosdb_sql_container.conversations.name
+    "COSMOS_DB_DIGESTS_CONTAINER"           = azurerm_cosmosdb_sql_container.digests.name
     # Azure OpenAI — primary model for chat/agents
-    "AZURE_OPENAI_ENDPOINT"                = var.ai_gpt4o_endpoint
-    "AZURE_OPENAI_API_KEY"                 = var.ai_api_key
-    "AZURE_OPENAI_DEPLOYMENT"              = "gpt-4.1-mini"
+    "AZURE_OPENAI_ENDPOINT"   = var.ai_gpt4o_endpoint
+    "AZURE_OPENAI_API_KEY"    = var.ai_api_key
+    "AZURE_OPENAI_DEPLOYMENT" = "gpt-4.1-mini"
     # Lighter model used only for conversation summarization (~4x cheaper)
-    "AZURE_OPENAI_NANO_DEPLOYMENT"         = var.ai_nano_deployment
+    "AZURE_OPENAI_NANO_DEPLOYMENT" = var.ai_nano_deployment
     # Google OAuth client ID — used to validate bearer tokens from Angular
-    "GOOGLE_CLIENT_ID"                     = var.google_oauth_client_id
+    "GOOGLE_CLIENT_ID" = var.google_oauth_client_id
   }
 }
 
