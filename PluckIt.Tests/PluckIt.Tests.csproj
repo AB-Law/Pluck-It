@@ -19,26 +19,27 @@
   <ItemGroup>
     <!-- Test framework -->
     <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.0.2">
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.3.0" />
 
     <!-- Mocking & assertions -->
     <PackageReference Include="Moq" Version="4.20.72" />
-    <PackageReference Include="FluentAssertions" Version="6.12.2" />
+    <PackageReference Include="FluentAssertions" Version="8.8.0" />
+    <PackageReference Include="GitHubActionsTestLogger" Version="3.0.1" />
 
     <!-- Fake HTTP + configuration helpers -->
-    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.3" />
 
     <!-- Azure Functions Worker types needed for HttpRequestData test helpers -->
     <PackageReference Include="Microsoft.Azure.Functions.Worker" Version="2.51.0" />
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Http" Version="3.3.0" />
 
     <!-- Testcontainers for Cosmos Emulator integration tests -->
-    <PackageReference Include="Testcontainers.CosmosDb" Version="4.4.0" />
+    <PackageReference Include="Testcontainers.CosmosDb" Version="4.10.0" />
   </ItemGroup>
 </Project>

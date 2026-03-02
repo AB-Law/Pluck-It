@@ -31,8 +31,7 @@ namespace PluckIt.Tests.Integration;
 [Trait("Category", "Integration")]
 public sealed class WardrobeRepositoryIntegrationTests : IAsyncLifetime
 {
-    private readonly CosmosDbContainer _cosmos = new CosmosDbBuilder()
-        .WithImage("mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest")
+    private readonly CosmosDbContainer _cosmos = new CosmosDbBuilder("mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest")
         .Build();
 
     private CosmosClient _client = null!;
