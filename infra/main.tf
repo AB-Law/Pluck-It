@@ -149,6 +149,25 @@ resource "azurerm_cosmosdb_sql_container" "digests" {
   }
 }
 
+# Stores fashion trend moods extracted daily from RSS feeds.
+# Partition key is /primaryMood to allow efficient filtering by mood category.
+resource "azurerm_cosmosdb_sql_container" "moods" {
+  name                  = "Moods"
+  resource_group_name   = azurerm_resource_group.rg_pluckit_archive.name
+  account_name          = azurerm_cosmosdb_account.pluckit.name
+  database_name         = azurerm_cosmosdb_sql_database.pluckit.name
+  partition_key_paths   = ["/primaryMood"]
+  partition_key_version = 1
+
+  indexing_policy {
+    indexing_mode = "consistent"
+
+    included_path {
+      path = "/*"
+    }
+  }
+}
+
 # ── Logging: Log Analytics Workspace + Application Insights ─────────────────
 # Free tier: 500 MB/day on Log Analytics; first 5 GB/month free on App Insights.
 
@@ -344,6 +363,7 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
     "COSMOS_DB_USER_PROFILES_CONTAINER"    = azurerm_cosmosdb_sql_container.user_profiles.name
     "COSMOS_DB_CONVERSATIONS_CONTAINER"    = azurerm_cosmosdb_sql_container.conversations.name
     "COSMOS_DB_DIGESTS_CONTAINER"          = azurerm_cosmosdb_sql_container.digests.name
+    "COSMOS_DB_MOODS_CONTAINER"            = azurerm_cosmosdb_sql_container.moods.name
     # Azure OpenAI — primary model for chat/agents
     "AZURE_OPENAI_ENDPOINT"                = var.ai_gpt4o_endpoint
     "AZURE_OPENAI_API_KEY"                 = var.ai_api_key

@@ -33,6 +33,11 @@ output "cosmos_container_name" {
   value       = azurerm_cosmosdb_sql_container.wardrobe.name
 }
 
+output "cosmos_moods_container_name" {
+  description = "Cosmos DB container name for fashion trend moods."
+  value       = azurerm_cosmosdb_sql_container.moods.name
+}
+
 output "api_func_url" {
   description = "Default hostname for the PluckIt .NET Functions API."
   value       = azurerm_function_app_flex_consumption.pluckit_api.default_hostname

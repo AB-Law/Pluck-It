@@ -53,6 +53,10 @@ def get_digests_container_sync():
     return _sync_container("COSMOS_DB_DIGESTS_CONTAINER", "Digests")
 
 
+def get_moods_container_sync():
+    return _sync_container("COSMOS_DB_MOODS_CONTAINER", "Moods")
+
+
 # ── Async client (used in FastAPI/LangGraph routes) ──────────────────────────
 # We keep a module-level instance; Azure Functions reuses the worker process
 # so this is effectively a singleton within a worker.
@@ -90,3 +94,7 @@ def get_conversations_container():
 
 def get_digests_container():
     return _async_container("COSMOS_DB_DIGESTS_CONTAINER", "Digests")
+
+
+def get_moods_container():
+    return _async_container("COSMOS_DB_MOODS_CONTAINER", "Moods")
