@@ -1,6 +1,6 @@
 using System.Net;
 using System.Text.Json;
-using FluentAssertions;
+using Shouldly;
 using PluckIt.Core;
 using PluckIt.Functions.Functions;
 using PluckIt.Functions.Serialization;
@@ -38,10 +38,10 @@ public sealed class UserProfileFunctionsTests
             TestRequest.Get("http://localhost/api/profile"), CancellationToken.None)
             as TestHttpResponseData;
 
-        result!.StatusCode.Should().Be(HttpStatusCode.OK);
+        result!.StatusCode.ShouldBe(HttpStatusCode.OK);
         var body = JsonSerializer.Deserialize<UserProfile>(result.ReadBodyAsString(),
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-        body!.CurrencyCode.Should().Be("GBP");
+        body!.CurrencyCode.ShouldBe("GBP");
     }
 
     [Fact]
@@ -52,11 +52,11 @@ public sealed class UserProfileFunctionsTests
             TestRequest.Get("http://localhost/api/profile"), CancellationToken.None)
             as TestHttpResponseData;
 
-        result!.StatusCode.Should().Be(HttpStatusCode.OK);
+        result!.StatusCode.ShouldBe(HttpStatusCode.OK);
         var body = JsonSerializer.Deserialize<UserProfile>(result.ReadBodyAsString(),
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-        body!.Id.Should().Be(UserId);
-        body.CurrencyCode.Should().Be("USD"); // default value
+        body!.Id.ShouldBe(UserId);
+        body.CurrencyCode.ShouldBe("USD"); // default value
     }
 
     [Fact]
@@ -71,7 +71,7 @@ public sealed class UserProfileFunctionsTests
         var result = await sut.GetProfile(
             TestRequest.Get("http://localhost/api/profile"), CancellationToken.None);
 
-        result.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        result.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }
 
     // ── UpdateProfile ────────────────────────────────────────────────────────
@@ -93,9 +93,9 @@ public sealed class UserProfileFunctionsTests
             TestRequest.Put("http://localhost/api/profile", json), CancellationToken.None)
             as TestHttpResponseData;
 
-        result!.StatusCode.Should().Be(HttpStatusCode.NoContent);
-        repo.All[UserId].Id.Should().Be(UserId);
-        repo.All[UserId].CurrencyCode.Should().Be("EUR");
+        result!.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        repo.All[UserId].Id.ShouldBe(UserId);
+        repo.All[UserId].CurrencyCode.ShouldBe("EUR");
     }
 
     [Fact]
@@ -104,6 +104,6 @@ public sealed class UserProfileFunctionsTests
         var result = await CreateSut().UpdateProfile(
             TestRequest.Put("http://localhost/api/profile", "not-json"), CancellationToken.None);
 
-        result.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        result.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }
 }

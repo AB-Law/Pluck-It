@@ -12,7 +12,7 @@
 // The emulator image ~1.5 GB — first pull takes a few minutes. Subsequent runs
 // use Docker's layer cache.
 
-using FluentAssertions;
+using Shouldly;
 using Microsoft.Azure.Cosmos;
 using PluckIt.Core;
 using PluckIt.Infrastructure;
@@ -98,8 +98,8 @@ public sealed class WardrobeRepositoryIntegrationTests : IAsyncLifetime
 
         var fetched = await _repo.GetByIdAsync("rt-001", UserId);
 
-        fetched.Should().NotBeNull();
-        fetched!.Id.Should().Be("rt-001");
+        fetched.ShouldNotBeNull();
+        fetched!.Id.ShouldBe("rt-001");
     }
 
     [Fact]
@@ -110,7 +110,7 @@ public sealed class WardrobeRepositoryIntegrationTests : IAsyncLifetime
         await _repo.DeleteAsync("del-001", UserId);
 
         var fetched = await _repo.GetByIdAsync("del-001", UserId);
-        fetched.Should().BeNull();
+        fetched.ShouldBeNull();
     }
 
     // ── Pagination ───────────────────────────────────────────────────────────
@@ -130,13 +130,13 @@ public sealed class WardrobeRepositoryIntegrationTests : IAsyncLifetime
         var page1 = await _repo.GetAllAsync(UserId, null, null, 1, 4);
         var page2 = await _repo.GetAllAsync(UserId, null, null, 2, 4);
 
-        page0.Count.Should().Be(4);
-        page1.Count.Should().Be(4);
-        page2.Count.Should().Be(4);
+        page0.Count.ShouldBe(4);
+        page1.Count.ShouldBe(4);
+        page2.Count.ShouldBe(4);
 
         var allIds = page0.Concat(page1).Concat(page2).Select(i => i.Id).ToList();
-        allIds.Should().OnlyHaveUniqueItems("no duplicates across pages");
-        allIds.Should().HaveCount(12);
+        allIds.Distinct().Count().ShouldBe(allIds.Count, "no duplicates across pages");
+        allIds.Count.ShouldBe(12);
     }
 
     // ── Category filter ──────────────────────────────────────────────────────
@@ -149,8 +149,8 @@ public sealed class WardrobeRepositoryIntegrationTests : IAsyncLifetime
 
         var tops = await _repo.GetAllAsync(UserId, "Tops", null, 0, 100);
 
-        tops.Should().ContainSingle(i => i.Id == "cat-tops");
-        tops.Should().NotContain(i => i.Id == "cat-btm");
+        tops.ShouldHaveSingleItem().Id.ShouldBe("cat-tops");
+        tops.ShouldNotContain(i => i.Id == "cat-btm");
     }
 
     // ── Tag filter (ARRAY_INTERSECT / ARRAY_CONTAINS in Cosmos) ─────────────
@@ -164,7 +164,7 @@ public sealed class WardrobeRepositoryIntegrationTests : IAsyncLifetime
 
         var result = await _repo.GetAllAsync(UserId, null, ["denim"], 0, 100);
 
-        result.Select(i => i.Id).Should().BeEquivalentTo(["tag-a", "tag-c"]);
+        result.Select(i => i.Id).ShouldBe(new[] {"tag-a", "tag-c"}, ignoreOrder: true);
     }
 
     [Fact]
@@ -176,7 +176,7 @@ public sealed class WardrobeRepositoryIntegrationTests : IAsyncLifetime
 
         var result = await _repo.GetAllAsync(UserId, "Tops", ["denim"], 0, 100);
 
-        result.Should().ContainSingle(i => i.Id == "match");
+        result.ShouldHaveSingleItem().Id.ShouldBe("match");
     }
 
     // ── User isolation ───────────────────────────────────────────────────────
@@ -196,7 +196,7 @@ public sealed class WardrobeRepositoryIntegrationTests : IAsyncLifetime
 
         var result = await _repo.GetAllAsync(UserId, null, null, 0, 100);
 
-        result.Should().ContainSingle(i => i.Id == "my-item");
-        result.Should().NotContain(i => i.Id == "other-user-item");
+        result.ShouldHaveSingleItem().Id.ShouldBe("my-item");
+        result.ShouldNotContain(i => i.Id == "other-user-item");
     }
 }

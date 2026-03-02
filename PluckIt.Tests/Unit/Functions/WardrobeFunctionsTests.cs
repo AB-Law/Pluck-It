@@ -1,7 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using FluentAssertions;
+using Shouldly;
 using PluckIt.Core;
 using PluckIt.Functions.Functions;
 using PluckIt.Functions.Serialization;
@@ -58,10 +58,10 @@ public sealed class WardrobeFunctionsTests
         var req    = TestRequest.Get($"http://localhost/api/wardrobe");
         var result = await sut.GetWardrobe(req, CancellationToken.None) as Helpers.TestHttpResponseData;
 
-        result!.StatusCode.Should().Be(HttpStatusCode.OK);
+        result!.StatusCode.ShouldBe(HttpStatusCode.OK);
         var body = result.ReadBodyAsString();
-        body.Should().Contain("\"id\":\"a\"");
-        body.Should().Contain("\"id\":\"b\"");
+        body.ShouldContain("\"id\":\"a\"");
+        body.ShouldContain("\"id\":\"b\"");
     }
 
     [Fact]
@@ -77,8 +77,8 @@ public sealed class WardrobeFunctionsTests
         var result = await sut.GetWardrobe(req, CancellationToken.None) as Helpers.TestHttpResponseData;
         var body   = result!.ReadBodyAsString();
 
-        body.Should().Contain("tops-1");
-        body.Should().NotContain("btm-1");
+        body.ShouldContain("tops-1");
+        body.ShouldNotContain("btm-1");
     }
 
     [Fact]
@@ -94,8 +94,8 @@ public sealed class WardrobeFunctionsTests
         var result = await sut.GetWardrobe(req, CancellationToken.None) as Helpers.TestHttpResponseData;
         var body   = result!.ReadBodyAsString();
 
-        body.Should().Contain("\"id\":\"a\"");
-        body.Should().NotContain("\"id\":\"b\"");
+        body.ShouldContain("\"id\":\"a\"");
+        body.ShouldNotContain("\"id\":\"b\"");
     }
 
     [Fact]
@@ -111,18 +111,18 @@ public sealed class WardrobeFunctionsTests
         var res1 = await sut.GetWardrobe(req1, CancellationToken.None) as Helpers.TestHttpResponseData;
         var list1 = JsonSerializer.Deserialize<List<ClothingItem>>(res1!.ReadBodyAsString(),
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-        list1!.Count.Should().Be(3);
+        list1!.Count.ShouldBe(3);
 
         var req2 = TestRequest.Get("http://localhost/api/wardrobe?page=1&pageSize=3");
         var res2 = await sut.GetWardrobe(req2, CancellationToken.None) as Helpers.TestHttpResponseData;
         var list2 = JsonSerializer.Deserialize<List<ClothingItem>>(res2!.ReadBodyAsString(),
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-        list2!.Count.Should().Be(3);
+        list2!.Count.ShouldBe(3);
 
         // Pages must not overlap
         var ids1 = list1.Select(i => i.Id).ToHashSet();
         var ids2 = list2.Select(i => i.Id).ToHashSet();
-        ids1.Intersect(ids2).Should().BeEmpty();
+        ids1.Intersect(ids2).ShouldBeEmpty();
     }
 
     [Fact]
@@ -158,7 +158,7 @@ public sealed class WardrobeFunctionsTests
         var req    = TestRequest.Get("http://localhost/api/wardrobe");
         var result = await sut.GetWardrobe(req, CancellationToken.None);
 
-        result.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        result.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }
 
     // ── GetWardrobeItem ──────────────────────────────────────────────────────
@@ -173,8 +173,8 @@ public sealed class WardrobeFunctionsTests
         var req    = TestRequest.Get("http://localhost/api/wardrobe/abc");
         var result = await sut.GetWardrobeItem(req, "abc", CancellationToken.None) as Helpers.TestHttpResponseData;
 
-        result!.StatusCode.Should().Be(HttpStatusCode.OK);
-        result.ReadBodyAsString().Should().Contain("\"id\":\"abc\"");
+        result!.StatusCode.ShouldBe(HttpStatusCode.OK);
+        result.ReadBodyAsString().ShouldContain("\"id\":\"abc\"");
     }
 
     [Fact]
@@ -184,7 +184,7 @@ public sealed class WardrobeFunctionsTests
         var req = TestRequest.Get("http://localhost/api/wardrobe/missing");
         var result = await sut.GetWardrobeItem(req, "missing", CancellationToken.None);
 
-        result.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        result.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
     [Fact]
@@ -197,7 +197,7 @@ public sealed class WardrobeFunctionsTests
         var result = await sut.GetWardrobeItem(
             TestRequest.Get("http://localhost/api/wardrobe/x"), "x", CancellationToken.None);
 
-        result.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        result.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
     // ── UpdateWardrobeItem ───────────────────────────────────────────────────
@@ -215,7 +215,7 @@ public sealed class WardrobeFunctionsTests
             "wrong-id",
             CancellationToken.None);
 
-        result.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        result.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }
 
     [Fact]
@@ -233,8 +233,8 @@ public sealed class WardrobeFunctionsTests
             "item-002",
             CancellationToken.None);
 
-        result.StatusCode.Should().Be(HttpStatusCode.NoContent);
-        repo.AllItems.Single(i => i.Id == "item-002").UserId.Should().Be(UserId);
+        result.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        repo.AllItems.Single(i => i.Id == "item-002").UserId.ShouldBe(UserId);
     }
 
     // ── DeleteWardrobeItem ───────────────────────────────────────────────────
@@ -245,7 +245,7 @@ public sealed class WardrobeFunctionsTests
         var result = await CreateSut().DeleteWardrobeItem(
             TestRequest.Delete("http://localhost/api/wardrobe/ghost"), "ghost", CancellationToken.None);
 
-        result.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        result.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
     [Fact]
@@ -259,9 +259,9 @@ public sealed class WardrobeFunctionsTests
         var result = await sut.DeleteWardrobeItem(
             TestRequest.Delete("http://localhost/api/wardrobe/del-1"), "del-1", CancellationToken.None);
 
-        result.StatusCode.Should().Be(HttpStatusCode.NoContent);
-        repo.AllItems.Should().BeEmpty();
-        sas.DeletedUrls.Should().Contain(item.ImageUrl);
+        result.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        repo.AllItems.ShouldBeEmpty();
+        sas.DeletedUrls.ShouldContain(item.ImageUrl);
     }
 
     // ── LogWear ──────────────────────────────────────────────────────────────
@@ -278,11 +278,11 @@ public sealed class WardrobeFunctionsTests
             TestRequest.Patch("http://localhost/api/wardrobe/wear-1/wear"), "wear-1", CancellationToken.None)
             as Helpers.TestHttpResponseData;
 
-        result!.StatusCode.Should().Be(HttpStatusCode.OK);
+        result!.StatusCode.ShouldBe(HttpStatusCode.OK);
         var body = JsonSerializer.Deserialize<ClothingItem>(result.ReadBodyAsString(),
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-        body!.WearCount.Should().Be(4);
-        repo.AllItems.Single(i => i.Id == "wear-1").WearCount.Should().Be(4);
+        body!.WearCount.ShouldBe(4);
+        repo.AllItems.Single(i => i.Id == "wear-1").WearCount.ShouldBe(4);
     }
 
     [Fact]
@@ -291,7 +291,7 @@ public sealed class WardrobeFunctionsTests
         var result = await CreateSut().LogWear(
             TestRequest.Patch("http://localhost/api/wardrobe/ghost/wear"), "ghost", CancellationToken.None);
 
-        result.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        result.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
     // ── SaveItem ─────────────────────────────────────────────────────────────
@@ -309,10 +309,10 @@ public sealed class WardrobeFunctionsTests
             TestRequest.Post("http://localhost/api/wardrobe", json), CancellationToken.None)
             as Helpers.TestHttpResponseData;
 
-        result!.StatusCode.Should().Be(HttpStatusCode.Created);
-        repo.AllItems.Should().ContainSingle(i => i.Id == "new-1");
-        repo.AllItems.Single().UserId.Should().Be(UserId);
-        repo.AllItems.Single().DateAdded.Should().NotBeNull();
+        result!.StatusCode.ShouldBe(HttpStatusCode.Created);
+        repo.AllItems.ShouldHaveSingleItem().Id.ShouldBe("new-1");
+        repo.AllItems.Single().UserId.ShouldBe(UserId);
+        repo.AllItems.Single().DateAdded.ShouldNotBeNull();
     }
 
     [Fact]
@@ -326,7 +326,7 @@ public sealed class WardrobeFunctionsTests
         var result = await sut.SaveItem(
             TestRequest.Post("http://localhost/api/wardrobe", json), CancellationToken.None);
 
-        result.StatusCode.Should().Be(HttpStatusCode.Created);
-        repo.AllItems.Single().Id.Should().NotBeNullOrEmpty();
+        result.StatusCode.ShouldBe(HttpStatusCode.Created);
+        repo.AllItems.Single().Id.ShouldNotBeNullOrEmpty();
     }
 }

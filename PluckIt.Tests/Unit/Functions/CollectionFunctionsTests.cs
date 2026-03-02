@@ -1,6 +1,6 @@
 using System.Net;
 using System.Text.Json;
-using FluentAssertions;
+using Shouldly;
 using PluckIt.Core;
 using PluckIt.Functions.Functions;
 using PluckIt.Functions.Serialization;
@@ -59,8 +59,8 @@ public sealed class CollectionFunctionsTests
             as TestHttpResponseData;
 
         var body = result!.ReadBodyAsString();
-        body.Should().Contain("owned-1");
-        body.Should().Contain("joined-1");
+        body.ShouldContain("owned-1");
+        body.ShouldContain("joined-1");
     }
 
     [Fact]
@@ -77,7 +77,7 @@ public sealed class CollectionFunctionsTests
 
         var items = JsonSerializer.Deserialize<List<Collection>>(result!.ReadBodyAsString(),
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-        items!.Should().HaveCount(1);
+        items!.Count.ShouldBe(1);
     }
 
     [Fact]
@@ -93,7 +93,7 @@ public sealed class CollectionFunctionsTests
         var result = await sut.GetCollections(
             TestRequest.Get("http://localhost/api/collections"), CancellationToken.None);
 
-        result.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        result.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }
 
     // ── CreateCollection ─────────────────────────────────────────────────────
@@ -110,10 +110,10 @@ public sealed class CollectionFunctionsTests
             TestRequest.Post("http://localhost/api/collections", json), CancellationToken.None)
             as TestHttpResponseData;
 
-        result!.StatusCode.Should().Be(HttpStatusCode.Created);
-        repo.AllCollections.Should().HaveCount(1);
-        repo.AllCollections[0].OwnerId.Should().Be(OwnerId);
-        repo.AllCollections[0].Name.Should().Be("Summer 2026");
+        result!.StatusCode.ShouldBe(HttpStatusCode.Created);
+        repo.AllCollections.Count.ShouldBe(1);
+        repo.AllCollections[0].OwnerId.ShouldBe(OwnerId);
+        repo.AllCollections[0].Name.ShouldBe("Summer 2026");
     }
 
     [Fact]
@@ -124,7 +124,7 @@ public sealed class CollectionFunctionsTests
         var result = await CreateSut().CreateCollection(
             TestRequest.Post("http://localhost/api/collections", json), CancellationToken.None);
 
-        result.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        result.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }
 
     // ── DeleteCollection ─────────────────────────────────────────────────────
@@ -139,8 +139,8 @@ public sealed class CollectionFunctionsTests
         var result = await sut.DeleteCollection(
             TestRequest.Delete("http://localhost/api/collections/del-col"), "del-col", CancellationToken.None);
 
-        result.StatusCode.Should().Be(HttpStatusCode.NoContent);
-        repo.AllCollections.Should().BeEmpty();
+        result.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        repo.AllCollections.ShouldBeEmpty();
     }
 
     [Fact]
@@ -156,9 +156,9 @@ public sealed class CollectionFunctionsTests
         var result = await sut.DeleteCollection(
             TestRequest.Delete("http://localhost/api/collections/col-x"), "col-x", CancellationToken.None);
 
-        result.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        result.StatusCode.ShouldBe(HttpStatusCode.NoContent);
         // Collection still exists — non-owner partition delete was a no-op
-        repo.AllCollections.Should().HaveCount(1);
+        repo.AllCollections.Count.ShouldBe(1);
     }
 
     // ── JoinCollection ───────────────────────────────────────────────────────
@@ -175,8 +175,8 @@ public sealed class CollectionFunctionsTests
             "public-col",
             CancellationToken.None);
 
-        result.StatusCode.Should().Be(HttpStatusCode.NoContent);
-        repo.AllCollections[0].MemberUserIds.Should().Contain(MemberId);
+        result.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        repo.AllCollections[0].MemberUserIds.ShouldContain(MemberId);
     }
 
     [Fact]
@@ -191,7 +191,7 @@ public sealed class CollectionFunctionsTests
             "private-col",
             CancellationToken.None);
 
-        result.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        result.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
     }
 
     // ── AddItemToCollection / RemoveItemFromCollection ────────────────────────
@@ -209,8 +209,8 @@ public sealed class CollectionFunctionsTests
             "col-items",
             CancellationToken.None);
 
-        result.StatusCode.Should().Be(HttpStatusCode.NoContent);
-        repo.AllCollections[0].ClothingItemIds.Should().Contain("item-abc");
+        result.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        repo.AllCollections[0].ClothingItemIds.ShouldContain("item-abc");
     }
 
     [Fact]
@@ -227,7 +227,7 @@ public sealed class CollectionFunctionsTests
             "item-xyz",
             CancellationToken.None);
 
-        result.StatusCode.Should().Be(HttpStatusCode.NoContent);
-        repo.AllCollections[0].ClothingItemIds.Should().NotContain("item-xyz");
+        result.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        repo.AllCollections[0].ClothingItemIds.ShouldNotContain("item-xyz");
     }
 }

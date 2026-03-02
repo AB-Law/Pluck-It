@@ -1,5 +1,5 @@
 using System.Net;
-using FluentAssertions;
+using Shouldly;
 using PluckIt.Core;
 using PluckIt.Functions.Functions;
 using PluckIt.Tests.Fakes;
@@ -47,8 +47,8 @@ public sealed class StylistFunctionsTests
             TestRequest.Post("http://localhost/api/stylist/recommendations", "{}"),
             CancellationToken.None) as TestHttpResponseData;
 
-        result!.StatusCode.Should().Be(HttpStatusCode.OK);
-        result.ReadBodyAsString().Should().Contain("Casual Monday");
+        result!.StatusCode.ShouldBe(HttpStatusCode.OK);
+        result.ReadBodyAsString().ShouldContain("Casual Monday");
     }
 
     [Fact]
@@ -59,7 +59,7 @@ public sealed class StylistFunctionsTests
             TestRequest.Post("http://localhost/api/stylist/recommendations", "{}"),
             CancellationToken.None);
 
-        result.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        result.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }
 
     [Fact]
@@ -77,7 +77,7 @@ public sealed class StylistFunctionsTests
             TestRequest.Post("http://localhost/api/stylist/recommendations", "{}"),
             CancellationToken.None);
 
-        result.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        result.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }
 
     [Fact]
@@ -91,6 +91,6 @@ public sealed class StylistFunctionsTests
             TestRequest.Post("http://localhost/api/stylist/recommendations", "{}"),
             CancellationToken.None);
 
-        stylist.CallCount.Should().Be(1);
+        stylist.CallCount.ShouldBe(1);
     }
 }

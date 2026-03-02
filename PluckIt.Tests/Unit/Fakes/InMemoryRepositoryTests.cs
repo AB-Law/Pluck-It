@@ -1,4 +1,4 @@
-using FluentAssertions;
+using Shouldly;
 using PluckIt.Core;
 using PluckIt.Tests.Fakes;
 using Xunit;
@@ -34,8 +34,8 @@ public sealed class InMemoryWardrobeRepositoryTests
 
         var items = await repo.GetAllAsync(User1, null, null, 0, 100);
 
-        items.Should().ContainSingle(i => i.Id == "a");
-        items.Should().NotContain(i => i.UserId == User2);
+        items.ShouldHaveSingleItem().Id.ShouldBe("a");
+        items.ShouldNotContain(i => i.UserId == User2);
     }
 
     [Fact]
@@ -46,7 +46,7 @@ public sealed class InMemoryWardrobeRepositoryTests
 
         var result = await repo.GetAllAsync(User1, "Tops", null, 0, 100);
 
-        result.Should().ContainSingle(i => i.Id == "t1");
+        result.ShouldHaveSingleItem().Id.ShouldBe("t1");
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public sealed class InMemoryWardrobeRepositoryTests
 
         var result = await repo.GetAllAsync(User1, null, ["denim"], 0, 100);
 
-        result.Select(i => i.Id).Should().BeEquivalentTo(["a", "c"]);
+        result.Select(i => i.Id).ShouldBe(new[] {"a", "c"}, ignoreOrder: true);
     }
 
     [Fact]
@@ -73,13 +73,13 @@ public sealed class InMemoryWardrobeRepositoryTests
         var page1 = await repo.GetAllAsync(User1, null, null, 1, 5);
         var page2 = await repo.GetAllAsync(User1, null, null, 2, 5);
 
-        page0.Count.Should().Be(5);
-        page1.Count.Should().Be(5);
-        page2.Count.Should().Be(5);
+        page0.Count.ShouldBe(5);
+        page1.Count.ShouldBe(5);
+        page2.Count.ShouldBe(5);
 
         var ids0 = page0.Select(i => i.Id).ToHashSet();
         var ids1 = page1.Select(i => i.Id).ToHashSet();
-        ids0.Intersect(ids1).Should().BeEmpty("pages must not overlap");
+        ids0.Intersect(ids1).ShouldBeEmpty("pages must not overlap");
     }
 
     [Fact]
@@ -90,7 +90,7 @@ public sealed class InMemoryWardrobeRepositoryTests
 
         await repo.UpsertAsync(item);
 
-        repo.AllItems.Should().ContainSingle(i => i.Id == "new-1");
+        repo.AllItems.ShouldHaveSingleItem().Id.ShouldBe("new-1");
     }
 
     [Fact]
@@ -102,8 +102,8 @@ public sealed class InMemoryWardrobeRepositoryTests
         updated.Category = "Bottoms";
         await repo.UpsertAsync(updated);
 
-        repo.AllItems.Should().HaveCount(1);
-        repo.AllItems.Single().Category.Should().Be("Bottoms");
+        repo.AllItems.Count.ShouldBe(1);
+        repo.AllItems.Single().Category.ShouldBe("Bottoms");
     }
 
     [Fact]
@@ -113,7 +113,7 @@ public sealed class InMemoryWardrobeRepositoryTests
 
         await repo.DeleteAsync("del-1", User1);
 
-        repo.AllItems.Should().ContainSingle(i => i.Id == "keep-1");
+        repo.AllItems.ShouldHaveSingleItem().Id.ShouldBe("keep-1");
     }
 
     [Fact]
@@ -124,7 +124,7 @@ public sealed class InMemoryWardrobeRepositoryTests
 
         await repo.DeleteAsync("shared-id", User1); // wrong user
 
-        repo.AllItems.Should().HaveCount(1, "other user's item should be untouched");
+        repo.AllItems.Count.ShouldBe(1, "other user's item should be untouched");
     }
 
     [Fact]
@@ -134,6 +134,6 @@ public sealed class InMemoryWardrobeRepositoryTests
 
         var result = await repo.GetByIdAsync("x", User2);
 
-        result.Should().BeNull();
+        result.ShouldBeNull();
     }
 }
