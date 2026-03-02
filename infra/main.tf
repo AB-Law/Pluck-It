@@ -75,8 +75,8 @@ resource "azurerm_cosmosdb_sql_database" "pluckit" {
   resource_group_name = azurerm_resource_group.rg_pluckit_archive.name
   account_name        = azurerm_cosmosdb_account.pluckit.name
 
-  # Shared throughput: all containers inherit this pool.
-  # 1000 RU/s is fully covered by the free tier discount, so billed cost = $0.
+  # Shared throughput pool: all containers inherit these RU/s.
+  # 1000 RU/s is fully covered by the Cosmos DB free tier, so billed cost = $0.
   throughput = 1000
 }
 

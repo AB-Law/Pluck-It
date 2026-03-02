@@ -489,3 +489,4 @@ Thumbs.db
 # Angular specific
 /.angular
 PluckIt.Api/appsettings.Development.json
+cosmos-backup/
