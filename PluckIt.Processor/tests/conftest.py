@@ -9,7 +9,6 @@ import os
 os.environ.setdefault("AZURE_OPENAI_ENDPOINT",    "https://test.openai.azure.com/")
 os.environ.setdefault("AZURE_OPENAI_API_KEY",     "test-api-key-xxxx")
 os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT",  "gpt-4.1-mini")
-os.environ.setdefault("AZURE_OPENAI_NANO_DEPLOYMENT", "gpt-4.1-nano")
 os.environ.setdefault("COSMOS_DB_ENDPOINT",       "https://localhost:8081")
 os.environ.setdefault("COSMOS_DB_KEY",            "test-cosmos-key==")
 os.environ.setdefault("COSMOS_DB_DATABASE",       "PluckIt")

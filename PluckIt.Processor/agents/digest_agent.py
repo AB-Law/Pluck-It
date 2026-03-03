@@ -101,7 +101,8 @@ def _infer_climate_zone(location_city: Optional[str], wear_events_conditions: li
         nano = AzureChatOpenAI(
             azure_endpoint=_get_env("AZURE_OPENAI_ENDPOINT"),
             api_key=_get_env("AZURE_OPENAI_API_KEY"),
-            azure_deployment=os.getenv("AZURE_OPENAI_NANO_DEPLOYMENT", "gpt-4.1-nano"),
+            azure_deployment=os.getenv("AZURE_OPENAI_NANO_DEPLOYMENT",
+                                        os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini")),
             api_version="2024-12-01-preview",
             temperature=0,
             max_tokens=5,
