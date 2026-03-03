@@ -120,6 +120,30 @@ public sealed class InMemoryWardrobeRepository : IWardrobeRepository
         return Task.CompletedTask;
     }
 
+    public Task<ClothingItem?> AppendWearEventAsync(
+        string itemId,
+        string userId,
+        WearEvent ev,
+        int maxEvents = 30,
+        CancellationToken cancellationToken = default)
+    {
+        var item = _store.FirstOrDefault(i =>
+            string.Equals(i.Id,     itemId, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(i.UserId, userId, StringComparison.OrdinalIgnoreCase));
+        if (item is null) return Task.FromResult<ClothingItem?>(null);
+
+        item.WearEvents.Add(ev);
+        if (item.WearEvents.Count > maxEvents)
+        {
+            var trimmed = item.WearEvents.OrderByDescending(e => e.OccurredAt).Take(maxEvents).ToList();
+            item.WearEvents.Clear();
+            item.WearEvents.AddRange(trimmed);
+        }
+        item.WearCount  += 1;
+        item.LastWornAt  = ev.OccurredAt;
+        return Task.FromResult<ClothingItem?>(item);
+    }
+
     // ── Extra query helpers used by cleanup / digest ─────────────────────────
 
     public IEnumerable<string> AllImageUrls()

@@ -33,7 +33,8 @@ logger = logging.getLogger(__name__)
 # After this many total messages the oldest half is summarised.
 SUMMARY_TRIGGER = 12
 # Model used exclusively for cheap summarisation.
-_NANO_DEPLOYMENT = os.getenv("AZURE_OPENAI_NANO_DEPLOYMENT", "gpt-4.1-nano")
+_NANO_DEPLOYMENT = os.getenv("AZURE_OPENAI_NANO_DEPLOYMENT",
+                              os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini"))
 
 
 @dataclass

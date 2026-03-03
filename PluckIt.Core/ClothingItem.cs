@@ -81,6 +81,15 @@ public class ClothingItem
   /// <summary>Number of times this item has been worn. Incremented via PATCH /wardrobe/{id}/wear.</summary>
   public int WearCount { get; set; } = 0;
 
+  /// <summary>UTC timestamp of the most recent wear event. Null if never worn.</summary>
+  public DateTimeOffset? LastWornAt { get; set; }
+
+  /// <summary>
+  /// Rolling log of the last ≤30 wear events (oldest trimmed on overflow).
+  /// Each event captures when, what occasion, and optionally the weather conditions.
+  /// </summary>
+  public List<WearEvent> WearEvents { get; set; } = [];
+
   /// <summary>Estimated current resale/market value in the item's OriginalCurrency.</summary>
   public decimal? EstimatedMarketValue { get; set; }
 

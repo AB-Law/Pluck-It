@@ -28,6 +28,7 @@ from .tools.weather import get_weather
 from .tools.profile import get_user_profile
 from .tools.gaps import analyze_wardrobe_gaps
 from .tools.mood import get_trending_moods
+from .tools.wear_patterns import get_wear_patterns
 from .db import get_wardrobe_container
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,7 @@ def _build_llm() -> AzureChatOpenAI:
     )
 
 
-TOOLS = [search_wardrobe, get_wardrobe_summary, get_weather, get_user_profile, analyze_wardrobe_gaps, get_trending_moods]
+TOOLS = [search_wardrobe, get_wardrobe_summary, get_weather, get_user_profile, analyze_wardrobe_gaps, get_trending_moods, get_wear_patterns]
 
 _SYSTEM_TEMPLATE = """\
 You are PluckIt AI — a personal stylist with deep knowledge of fashion, colour theory, and personal style.
@@ -68,6 +69,10 @@ Your job:
 - Keep responses concise, warm, and actionable — you're a friend who happens to be a stylist.
 - When showing outfit combinations, reference item categories/colours/brands, not blob URLs.
 - Never make up items — only reference what exists in search results.
+- RATIONALE REQUIRED: Every item or outfit recommendation MUST include a one-sentence rationale
+  grounded in a concrete signal you have seen (e.g. wear frequency, climate context, occasion match,
+  style alignment). Examples: "You've worn your black hoodie 14 times — it clearly works for you."
+  or "This linen shirt suits your temperate climate and minimalist style."
 
 CRITICAL — conversation continuity:
 - ALWAYS read the full conversation history before choosing what to do.
@@ -194,7 +199,8 @@ async def _classify_follow_up_intent(user_message: str, last_assistant: str) -> 
         nano = AzureChatOpenAI(
             azure_endpoint=_db_env("AZURE_OPENAI_ENDPOINT"),
             api_key=_db_env("AZURE_OPENAI_API_KEY"),
-            azure_deployment=os.getenv("AZURE_OPENAI_NANO_DEPLOYMENT", "gpt-4.1-nano"),
+            azure_deployment=os.getenv("AZURE_OPENAI_NANO_DEPLOYMENT",
+                                        os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini")),
             api_version="2024-12-01-preview",
             temperature=0,
             max_tokens=10,

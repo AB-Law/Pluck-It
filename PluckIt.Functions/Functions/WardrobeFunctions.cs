@@ -165,7 +165,9 @@ public class WardrobeFunctions(
     }
 
     // ── PATCH /api/wardrobe/{id}/wear ────────────────────────────────────────
-    // Atomically increments WearCount by 1. Returns the updated item.
+    // Records a wear event: increments WearCount, stamps LastWornAt, appends to
+    // WearEvents (bounded at 30). Accepts an optional JSON body with Occasion
+    // and WeatherSnapshot context.
 
     [Function(nameof(LogWear))]
     public async Task<HttpResponseData> LogWear(
@@ -177,13 +179,35 @@ public class WardrobeFunctions(
         if (!authed)
             return req.CreateResponse(HttpStatusCode.Unauthorized);
 
-        var item = await repo.GetByIdAsync(id, userId!, cancellationToken);
-        if (item is null) return req.CreateResponse(HttpStatusCode.NotFound);
+        // Parse optional body — missing or empty body is always valid
+        WearLogRequest? wearReq = null;
+        using var ms = new MemoryStream();
+        await req.Body.CopyToAsync(ms, cancellationToken);
+        if (ms.Length > 0)
+        {
+            ms.Seek(0, SeekOrigin.Begin);
+            try
+            {
+                wearReq = await JsonSerializer.DeserializeAsync(
+                    ms, PluckItJsonContext.Default.WearLogRequest, cancellationToken);
+            }
+            catch
+            {
+                return await JsonError(req, HttpStatusCode.BadRequest, "Invalid request body.");
+            }
+        }
 
-        item.WearCount += 1;
-        await repo.UpsertAsync(item, cancellationToken);
+        var ev = new WearEvent(
+            OccurredAt:      DateTimeOffset.UtcNow,
+            Occasion:        wearReq?.Occasion,
+            WeatherSnapshot: wearReq?.WeatherSnapshot);
 
-        return await JsonOk(req, item, PluckItJsonContext.Default.ClothingItem);
+        var updated = await repo.AppendWearEventAsync(id, userId!, ev, maxEvents: 30, cancellationToken);
+        if (updated is null)
+            return req.CreateResponse(HttpStatusCode.NotFound);
+
+        updated.ImageUrl = sasService.GenerateSasUrl(updated.ImageUrl);
+        return await JsonOk(req, updated, PluckItJsonContext.Default.ClothingItem);
     }
 
     // ── POST /api/wardrobe/upload ────────────────────────────────────────────

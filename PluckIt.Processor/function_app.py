@@ -5,15 +5,18 @@ HTTP routes are handled by FastAPI (enabling true SSE streaming).
 Non-HTTP triggers (blob, timer) remain as AsgiFunctionApp decorators.
 
 Endpoints:
-  POST /api/process-image   — background removal (existing, now FastAPI)
-  POST /api/chat            — SSE streaming stylist agent chat
-  GET  /api/chat/memory     — retrieve user's conversation memory summary
-  PUT  /api/chat/memory     — update user's conversation memory summary
-  GET  /api/digest/latest   — most recent wardrobe digest suggestions
-  GET  /api/moods           — list all fashion trend moods (filter: ?primaryMood=)
-  GET  /api/moods/{mood_id} — get a single mood by ID
-  POST /api/moods/seed      — one-time sitemap seeder (admin)
-  GET  /api/health          — processor health check
+  POST /api/process-image       — background removal (existing, now FastAPI)
+  POST /api/chat                — SSE streaming stylist agent chat
+  GET  /api/chat/memory         — retrieve user's conversation memory summary
+  PUT  /api/chat/memory         — update user's conversation memory summary
+  GET  /api/digest/latest       — most recent wardrobe digest suggestions
+  POST /api/digest/run          — manually trigger digest generation (dev/testing)
+  GET  /api/digest/feedback     — fetch feedback already given for a digest
+  POST /api/digest/feedback     — record thumbs-up/down on a digest suggestion
+  GET  /api/moods               — list all fashion trend moods (filter: ?primaryMood=)
+  GET  /api/moods/{mood_id}     — get a single mood by ID
+  POST /api/moods/seed          — one-time sitemap seeder (admin)
+  GET  /api/health              — processor health check
 """
 
 import io
@@ -21,6 +24,7 @@ import json
 import logging
 import os
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 # Point rembg at the bundled model directory so it never downloads at runtime.
@@ -388,6 +392,29 @@ async def update_memory(body: MemoryUpdateRequest, user_id: str = Depends(get_us
 
 # ── Digest results endpoint ───────────────────────────────────────────────────
 
+@fastapi_app.post("/api/digest/run")
+async def run_digest_now(user_id: str = Depends(get_user_id), force: bool = True):
+    """Manually trigger digest generation for the authenticated user.
+    Useful for local dev/testing — production relies on the Monday timer trigger.
+    Defaults to force=True to bypass the wardrobe-unchanged hash guard.
+    Pass ?force=false to respect the hash guard.
+    """
+    import asyncio
+    from agents.digest_agent import run_digest_for_user
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(
+            None, run_digest_for_user, user_id, force
+        )
+        if result is None:
+            return {"status": "skipped", "reason": "opted out of recommendations or no wardrobe items"}
+        for key in ["_rid", "_self", "_etag", "_attachments", "_ts"]:
+            result.pop(key, None)
+        return {"status": "ok", "digest": result}
+    except Exception as exc:
+        logger.exception("Manual digest run failed for user %s: %s", user_id, exc)
+        raise HTTPException(status_code=500, detail="Could not run digest.")
+
+
 @fastapi_app.get("/api/digest/latest")
 async def get_latest_digest(user_id: str = Depends(get_user_id)):
     """Return the most recently generated wardrobe digest for the user."""
@@ -414,6 +441,77 @@ async def get_latest_digest(user_id: str = Depends(get_user_id)):
     except Exception as exc:
         logger.exception("Failed to load digest for user %s: %s", user_id, exc)
         raise HTTPException(status_code=500, detail="Could not load digest.")
+
+
+class DigestFeedbackRequest(BaseModel):
+    digestId: str
+    suggestionIndex: int
+    suggestionDescription: str = ""
+    signal: str  # "up" | "down"
+
+
+@fastapi_app.get("/api/digest/feedback")
+async def get_digest_feedback(
+    digestId: str,
+    user_id: str = Depends(get_user_id),
+):
+    """Return all feedback the user has already given for a specific digest.
+    Used by the UI to restore thumbs state when the panel is reopened.
+    """
+    from agents.db import get_digest_feedback_container
+    container = get_digest_feedback_container()
+    results = []
+    try:
+        async for item in container.query_items(
+            query=(
+                "SELECT c.suggestionIndex, c.signal FROM c "
+                "WHERE c.userId = @userId AND c.digestId = @digestId"
+            ),
+            parameters=[
+                {"name": "@userId",   "value": user_id},
+                {"name": "@digestId", "value": digestId},
+            ],
+        ):
+            results.append(item)
+    except Exception as exc:
+        logger.exception("Failed to load digest feedback: %s", exc)
+        raise HTTPException(status_code=500, detail="Could not load feedback.")
+    return {"feedback": results}
+
+
+@fastapi_app.post("/api/digest/feedback")
+async def post_digest_feedback(
+    body: DigestFeedbackRequest,
+    user_id: str = Depends(get_user_id),
+):
+    """
+    Record thumbs-up or thumbs-down feedback on a single digest suggestion.
+    Feedback is stored in the DigestFeedback container (90-day TTL) and is
+    injected into the next digest run to personalise suggestions.
+    """
+    if body.signal not in ("up", "down"):
+        raise HTTPException(status_code=400, detail="signal must be 'up' or 'down'.")
+
+    from agents.db import get_digest_feedback_container
+    container = get_digest_feedback_container()
+
+    doc_id = f"{user_id}-{body.digestId}-{body.suggestionIndex}"
+    doc = {
+        "id": doc_id,
+        "userId": user_id,
+        "digestId": body.digestId,
+        "suggestionIndex": body.suggestionIndex,
+        "suggestionDescription": body.suggestionDescription,
+        "signal": body.signal,
+        "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+    try:
+        await container.upsert_item(doc)
+    except Exception as exc:
+        logger.exception("Failed to save digest feedback: %s", exc)
+        raise HTTPException(status_code=500, detail="Could not save feedback.")
+
+    return {"status": "ok"}
 
 
 # ── Moods endpoints ───────────────────────────────────────────────────────────

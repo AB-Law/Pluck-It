@@ -9,7 +9,6 @@ import os
 os.environ.setdefault("AZURE_OPENAI_ENDPOINT",    "https://test.openai.azure.com/")
 os.environ.setdefault("AZURE_OPENAI_API_KEY",     "test-api-key-xxxx")
 os.environ.setdefault("AZURE_OPENAI_DEPLOYMENT",  "gpt-4.1-mini")
-os.environ.setdefault("AZURE_OPENAI_NANO_DEPLOYMENT", "gpt-4.1-nano")
 os.environ.setdefault("COSMOS_DB_ENDPOINT",       "https://localhost:8081")
 os.environ.setdefault("COSMOS_DB_KEY",            "test-cosmos-key==")
 os.environ.setdefault("COSMOS_DB_DATABASE",       "PluckIt")
@@ -17,6 +16,8 @@ os.environ.setdefault("COSMOS_DB_CONTAINER",      "Wardrobe")
 os.environ.setdefault("COSMOS_DB_USER_PROFILES_CONTAINER", "UserProfiles")
 os.environ.setdefault("COSMOS_DB_CONVERSATIONS_CONTAINER", "Conversations")
 os.environ.setdefault("COSMOS_DB_DIGESTS_CONTAINER",       "Digests")
+os.environ.setdefault("COSMOS_DB_DIGEST_FEEDBACK_CONTAINER", "DigestFeedback")
+os.environ.setdefault("COSMOS_DB_MOODS_CONTAINER",          "Moods")
 os.environ.setdefault("STORAGE_ACCOUNT_NAME",     "testaccount")
 os.environ.setdefault("STORAGE_ACCOUNT_KEY",      "dGVzdA==")
 os.environ.setdefault("UPLOADS_CONTAINER_NAME",   "uploads")
@@ -137,5 +138,19 @@ def mock_user_profiles_container():
         "locationCity": "London",
         "wardrobeHashAtLastDigest": None,
     })
+    container.upsert_item = AsyncMock(return_value={})
+    return container
+
+
+@pytest.fixture()
+def mock_digest_feedback_container():
+    """AsyncMock of the DigestFeedback Cosmos container."""
+    container = AsyncMock()
+
+    async def _empty_query(**kwargs):
+        return
+        yield  # make it an async generator
+
+    container.query_items = _empty_query
     container.upsert_item = AsyncMock(return_value={})
     return container

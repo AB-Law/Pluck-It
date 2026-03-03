@@ -220,6 +220,27 @@ const STYLE_OPTIONS = [
               class="w-full bg-transparent border border-[#1F1F1F] focus:border-primary focus:outline-none text-white font-mono h-10 px-3 text-sm transition-colors placeholder-slate-600"
             />
           </div>
+
+          <!-- AI Recommendations opt-in -->
+          <div class="flex items-center justify-between pt-1">
+            <div>
+              <p class="text-[11px] text-slate-200 font-semibold">AI Personalisation</p>
+              <p class="text-[10px] text-slate-500 font-mono mt-0.5">Enable weekly digest &amp; wear-based recommendations</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              [attr.aria-checked]="draft.recommendationOptIn !== false"
+              class="relative w-10 h-6 rounded-full transition-colors shrink-0 focus:outline-none"
+              [class]="draft.recommendationOptIn !== false ? 'bg-primary' : 'bg-[#333]'"
+              (click)="draft.recommendationOptIn = draft.recommendationOptIn === false ? true : false"
+            >
+              <span
+                class="absolute top-1 left-1 h-4 w-4 rounded-full bg-white shadow transition-transform"
+                [class.translate-x-4]="draft.recommendationOptIn !== false"
+              ></span>
+            </button>
+          </div>
         </section>
 
       </div>

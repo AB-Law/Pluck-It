@@ -6,11 +6,12 @@ import { UserProfileService } from '../../core/services/user-profile.service';
 import { WardrobeComponent } from '../closet/closet.component';
 import { StylistPanelComponent } from '../stylist/stylist.component';
 import { ProfilePanelComponent } from '../profile/profile-panel.component';
+import { DigestPanelComponent } from '../digest/digest-panel.component';
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [FormsModule, RouterLink, WardrobeComponent, StylistPanelComponent, ProfilePanelComponent],
+  imports: [FormsModule, RouterLink, WardrobeComponent, StylistPanelComponent, ProfilePanelComponent, DigestPanelComponent],
   template: `
     <div class="flex flex-col h-screen bg-background-dark text-chrome overflow-hidden font-display">
 
@@ -61,6 +62,12 @@ import { ProfilePanelComponent } from '../profile/profile-panel.component';
              title="My Collections">
             <span class="material-symbols-outlined" style="font-size:20px">folder_special</span>
           </a>
+
+          <!-- Weekly Digest -->
+          <button class="p-2 rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] transition-colors"
+                  (click)="digestOpen.set(true)" title="Weekly Digest">
+            <span class="material-symbols-outlined" style="font-size:20px">tips_and_updates</span>
+          </button>
 
           <button class="p-2 rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] transition-colors">
             <span class="material-symbols-outlined" style="font-size:20px">notifications</span>
@@ -164,6 +171,11 @@ import { ProfilePanelComponent } from '../profile/profile-panel.component';
       @if (settingsOpen()) {
         <app-profile-panel (closed)="settingsOpen.set(false)" />
       }
+
+      <!-- Weekly Digest panel -->
+      @if (digestOpen()) {
+        <app-digest-panel (closed)="digestOpen.set(false)" />
+      }
     </div>
   `,
 })
@@ -172,6 +184,7 @@ export class DashboardComponent implements OnInit {
 
   protected readonly stylistOpen  = signal(false);
   protected readonly settingsOpen = signal(false);
+  protected readonly digestOpen   = signal(false);
   protected readonly avatarMenuOpen = signal(false);
   protected readonly searchQuery  = signal('');
   protected readonly selectedIds  = signal<string[]>([]);
