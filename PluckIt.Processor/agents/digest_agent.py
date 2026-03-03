@@ -114,10 +114,11 @@ def _infer_climate_zone(location_city: Optional[str], wear_events_conditions: li
     return None
 
 
-def run_digest_for_user(user_id: str) -> Optional[dict]:
+def run_digest_for_user(user_id: str, force: bool = False) -> Optional[dict]:
     """
     Synchronous digest run for a single user. Returns the digest dict or None
     if skipped (wardrobe unchanged) or on error.
+    Set force=True to bypass the wardrobe hash guard (useful for manual/dev triggers).
     """
     # ── 1. Load wardrobe ──────────────────────────────────────────────────────
     try:
@@ -152,7 +153,7 @@ def run_digest_for_user(user_id: str) -> Optional[dict]:
         profile = {}
 
     last_hash = profile.get("wardrobeHashAtLastDigest")
-    if last_hash == current_hash:
+    if not force and last_hash == current_hash:
         logger.info("Digest: wardrobe unchanged for %s (hash %s), skipping.", user_id, current_hash)
         return None
 

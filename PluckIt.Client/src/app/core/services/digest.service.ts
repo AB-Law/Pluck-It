@@ -19,6 +19,13 @@ export class DigestService {
     );
   }
 
+  getFeedback(digestId: string): Observable<{ feedback: { suggestionIndex: number; signal: string }[] }> {
+    return this.http.get<{ feedback: { suggestionIndex: number; signal: string }[] }>(
+      `${this.base}/api/digest/feedback`,
+      { params: { digestId } }
+    );
+  }
+
   sendFeedback(body: DigestFeedbackRequest): Observable<{ status: string }> {
     return this.http.post<{ status: string }>(
       `${this.base}/api/digest/feedback`,

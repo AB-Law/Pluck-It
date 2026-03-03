@@ -10,6 +10,8 @@ Endpoints:
   GET  /api/chat/memory         — retrieve user's conversation memory summary
   PUT  /api/chat/memory         — update user's conversation memory summary
   GET  /api/digest/latest       — most recent wardrobe digest suggestions
+  POST /api/digest/run          — manually trigger digest generation (dev/testing)
+  GET  /api/digest/feedback     — fetch feedback already given for a digest
   POST /api/digest/feedback     — record thumbs-up/down on a digest suggestion
   GET  /api/moods               — list all fashion trend moods (filter: ?primaryMood=)
   GET  /api/moods/{mood_id}     — get a single mood by ID
@@ -390,6 +392,29 @@ async def update_memory(body: MemoryUpdateRequest, user_id: str = Depends(get_us
 
 # ── Digest results endpoint ───────────────────────────────────────────────────
 
+@fastapi_app.post("/api/digest/run")
+async def run_digest_now(user_id: str = Depends(get_user_id), force: bool = True):
+    """Manually trigger digest generation for the authenticated user.
+    Useful for local dev/testing — production relies on the Monday timer trigger.
+    Defaults to force=True to bypass the wardrobe-unchanged hash guard.
+    Pass ?force=false to respect the hash guard.
+    """
+    import asyncio
+    from agents.digest_agent import run_digest_for_user
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(
+            None, run_digest_for_user, user_id, force
+        )
+        if result is None:
+            return {"status": "skipped", "reason": "opted out of recommendations or no wardrobe items"}
+        for key in ["_rid", "_self", "_etag", "_attachments", "_ts"]:
+            result.pop(key, None)
+        return {"status": "ok", "digest": result}
+    except Exception as exc:
+        logger.exception("Manual digest run failed for user %s: %s", user_id, exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @fastapi_app.get("/api/digest/latest")
 async def get_latest_digest(user_id: str = Depends(get_user_id)):
     """Return the most recently generated wardrobe digest for the user."""
@@ -423,6 +448,35 @@ class DigestFeedbackRequest(BaseModel):
     suggestionIndex: int
     suggestionDescription: str = ""
     signal: str  # "up" | "down"
+
+
+@fastapi_app.get("/api/digest/feedback")
+async def get_digest_feedback(
+    digestId: str,
+    user_id: str = Depends(get_user_id),
+):
+    """Return all feedback the user has already given for a specific digest.
+    Used by the UI to restore thumbs state when the panel is reopened.
+    """
+    from agents.db import get_digest_feedback_container
+    container = get_digest_feedback_container()
+    results = []
+    try:
+        async for item in container.query_items(
+            query=(
+                "SELECT c.suggestionIndex, c.signal FROM c "
+                "WHERE c.userId = @userId AND c.digestId = @digestId"
+            ),
+            parameters=[
+                {"name": "@userId",   "value": user_id},
+                {"name": "@digestId", "value": digestId},
+            ],
+        ):
+            results.append(item)
+    except Exception as exc:
+        logger.exception("Failed to load digest feedback: %s", exc)
+        raise HTTPException(status_code=500, detail="Could not load feedback.")
+    return {"feedback": results}
 
 
 @fastapi_app.post("/api/digest/feedback")

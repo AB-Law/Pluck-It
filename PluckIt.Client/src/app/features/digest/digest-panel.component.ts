@@ -158,8 +158,24 @@ export class DigestPanelComponent implements OnInit {
         this.digest.set(res.digest);
         const len = res.digest?.suggestions.length ?? 0;
         this.rationaleOpen.set(Array(len).fill(false));
-        this.feedbackSent.set(Array(len).fill(null));
+        const blank: (string | null)[] = Array(len).fill(null);
+        this.feedbackSent.set(blank);
         this.loading.set(false);
+
+        // Restore any feedback the user already gave for this digest
+        if (res.digest) {
+          this.digestService.getFeedback(res.digest.id).subscribe({
+            next: fb => {
+              this.feedbackSent.update(arr => {
+                const copy = [...arr];
+                for (const entry of fb.feedback) {
+                  copy[entry.suggestionIndex] = entry.signal;
+                }
+                return copy;
+              });
+            },
+          });
+        }
       },
       error: err => {
         this.loadError.set(err?.error?.detail ?? 'Could not load digest.');
