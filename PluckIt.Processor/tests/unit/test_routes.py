@@ -77,7 +77,7 @@ async def test_get_vault_insights_returns_payload(async_client):
         "generatedAt": "2026-03-04T10:00:00Z",
         "currency": "INR",
         "insufficientData": False,
-        "behavioralInsights": {"blackWearSharePct": 63.0},
+        "behavioralInsights": {"topColorWearShare": {"color": "black", "pct": 63.0}},
         "cpwIntel": [],
     }
     with patch("agents.vault_insights.compute_vault_insights", new=AsyncMock(return_value=fake)):
@@ -86,7 +86,8 @@ async def test_get_vault_insights_returns_payload(async_client):
     assert response.status_code == 200
     data = response.json()
     assert data["currency"] == "INR"
-    assert data["behavioralInsights"]["blackWearSharePct"] == 63.0
+    assert data["behavioralInsights"]["topColorWearShare"]["color"] == "black"
+    assert data["behavioralInsights"]["topColorWearShare"]["pct"] == 63.0
 
 
 # ── POST /api/digest/run ─────────────────────────────────────────────────────

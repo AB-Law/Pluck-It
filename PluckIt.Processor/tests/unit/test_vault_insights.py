@@ -92,6 +92,8 @@ async def test_compute_vault_insights_computes_cpw_badges():
         result = await compute_vault_insights("test-user", target_cpw=100)
 
     assert result["insufficientData"] is False
+    assert result["behavioralInsights"]["topColorWearShare"]["color"] == "black"
+    assert result["behavioralInsights"]["topColorWearShare"]["pct"] == 100.0
     intel = {x["itemId"]: x for x in result["cpwIntel"]}
     assert intel["item-1"]["cpw"] == 500.0
     assert intel["item-1"]["badge"] == "high"

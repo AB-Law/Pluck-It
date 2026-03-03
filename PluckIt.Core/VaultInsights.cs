@@ -13,10 +13,16 @@ public class VaultInsightsResponse
 
 public class VaultBehavioralInsights
 {
-  public double? BlackWearSharePct { get; set; }
+  public TopColorWearShare? TopColorWearShare { get; set; }
   public double? Unworn90dPct { get; set; }
   public ExpensiveUnwornItem? MostExpensiveUnworn { get; set; }
   public bool SparseHistory { get; set; }
+}
+
+public class TopColorWearShare
+{
+  public string Color { get; set; } = default!;
+  public double Pct { get; set; }
 }
 
 public class ExpensiveUnwornItem
@@ -42,4 +48,3 @@ public class CpwForecast
   public string? ProjectedMonth { get; set; }
   public int? ProjectedWearsNeeded { get; set; }
 }
-

@@ -2,7 +2,7 @@
 Deterministic vault insights + CPW intelligence engine.
 
 No LLM calls. This module computes:
-  - Behavioral insights (black wear share, unworn in 90 days, most expensive unworn item)
+  - Behavioral insights (top color wear share, unworn in 90 days, most expensive unworn item)
   - Per-item CPW badges
   - Break-even milestone state
   - Forecast month to reach target CPW
@@ -23,6 +23,11 @@ from .db import (
 
 _FX_LAST_REFRESH: Optional[datetime] = None
 _FX_CACHE: dict[tuple[str, str], float] = {}
+_KNOWN_COLORS = {
+    "black", "white", "blue", "navy", "red", "green", "yellow", "orange",
+    "pink", "purple", "brown", "beige", "grey", "gray", "cream", "olive",
+    "maroon", "teal", "gold", "silver",
+}
 
 
 def _ensure_fx_cache() -> tuple[str, str]:
@@ -72,23 +77,47 @@ def _parse_iso(iso: Optional[str]) -> Optional[datetime]:
         return None
 
 
-def _is_black_item(item: dict) -> Optional[bool]:
-    colours = item.get("colours") or []
-    tags = [str(t).lower() for t in (item.get("tags") or [])]
-
-    resolvable = bool(colours) or bool(tags)
-    if not resolvable:
+def _normalize_color_name(raw: Optional[str]) -> Optional[str]:
+    if not raw:
         return None
+    text = str(raw).strip().lower()
+    if not text:
+        return None
+    if text == "gray":
+        return "grey"
+    for token in text.replace("/", " ").replace("-", " ").split():
+        if token == "gray":
+            token = "grey"
+        if token in _KNOWN_COLORS:
+            return token
+    return None
+
+
+def _item_primary_color(item: dict) -> Optional[str]:
+    colours = item.get("colours") or []
+    tags = item.get("tags") or []
 
     for c in colours:
         if isinstance(c, dict):
-            name = str(c.get("name") or "").lower()
-            hexv = str(c.get("hex") or "").lower()
-            if "black" in name or hexv in {"#000000", "#111111", "#1a1a1a"}:
-                return True
-    if any("black" in t for t in tags):
-        return True
-    return False
+            from_name = _normalize_color_name(c.get("name"))
+            if from_name:
+                return from_name
+
+            hexv = str(c.get("hex") or "").lower().strip()
+            # Lightweight named buckets for common dark/light neutrals.
+            if hexv in {"#000000", "#111111", "#1a1a1a"}:
+                return "black"
+            if hexv in {"#ffffff", "#f5f5f5", "#fafafa"}:
+                return "white"
+            if hexv in {"#808080", "#a9a9a9", "#c0c0c0"}:
+                return "grey"
+
+    for t in tags:
+        from_tag = _normalize_color_name(t)
+        if from_tag:
+            return from_tag
+
+    return None
 
 
 def _months_since(date_added: Optional[str], now: datetime) -> int:
@@ -157,7 +186,7 @@ async def compute_vault_insights(
             "fxDate": fx_date,
             "conversionStatus": fx_status,
             "behavioralInsights": {
-                "blackWearSharePct": None,
+                "topColorWearShare": None,
                 "unworn90dPct": None,
                 "mostExpensiveUnworn": None,
                 "sparseHistory": True,
@@ -182,18 +211,24 @@ async def compute_vault_insights(
     window_wears = Counter([e.get("itemId") for e in window_events if e.get("itemId")])
 
     denominator = 0
-    numerator = 0
+    color_counter: Counter[str] = Counter()
     for ev in window_events:
         item = item_by_id.get(ev.get("itemId"))
         if not item:
             continue
-        black_state = _is_black_item(item)
-        if black_state is None:
+        color = _item_primary_color(item)
+        if not color:
             continue
         denominator += 1
-        if black_state:
-            numerator += 1
-    black_share = round((numerator / denominator) * 100.0, 1) if denominator > 0 else None
+        color_counter[color] += 1
+
+    top_color_share = None
+    if denominator > 0 and color_counter:
+        top_color, top_count = color_counter.most_common(1)[0]
+        top_color_share = {
+            "color": top_color,
+            "pct": round((top_count / denominator) * 100.0, 1),
+        }
 
     unworn_cutoff = now - timedelta(days=90)
     unworn_count = 0
@@ -276,11 +311,10 @@ async def compute_vault_insights(
         "fxDate": fx_date,
         "conversionStatus": fx_status,
         "behavioralInsights": {
-            "blackWearSharePct": black_share,
+            "topColorWearShare": top_color_share,
             "unworn90dPct": unworn_90,
             "mostExpensiveUnworn": most_expensive_unworn,
             "sparseHistory": items_with_history < 5,
         },
         "cpwIntel": cpw_intel,
     }
-

@@ -18,7 +18,7 @@ import { VaultInsightsResponse } from '../../core/models/vault-insights.model';
       } @else {
         <div class="grid gap-2 md:grid-cols-3">
           <div class="rounded border border-border-chrome bg-black/40 p-3 text-xs text-slate-300">
-            You wear black {{ fmtPct(insights()!.behavioralInsights.blackWearSharePct) }} of the time.
+            You wear {{ topColorLabel() }} {{ fmtPct(insights()!.behavioralInsights.topColorWearShare?.pct) }} of the time.
           </div>
           <div class="rounded border border-border-chrome bg-black/40 p-3 text-xs text-slate-300">
             You haven’t worn {{ fmtPct(insights()!.behavioralInsights.unworn90dPct) }} of wardrobe in 90 days.
@@ -37,7 +37,7 @@ import { VaultInsightsResponse } from '../../core/models/vault-insights.model';
                 {{ row.itemId }} · badge: {{ row.badge }} ·
                 @if (row.forecast?.projectedMonth) {
                   At current usage, this item can reach
-                  {{ row.forecast.targetCpw | number : '1.0-0' }} CPW by {{ row.forecast.projectedMonth }}.
+                  {{ (row.forecast?.targetCpw ?? 0) | number : '1.0-0' }} CPW by {{ row.forecast?.projectedMonth ?? '—' }}.
                 } @else {
                   Forecast unavailable.
                 }
@@ -53,6 +53,7 @@ export class VaultInsightsPanelComponent {
   insights = input<VaultInsightsResponse | null>(null);
 
   readonly topCpwRows = computed(() => (this.insights()?.cpwIntel ?? []).slice(0, 4));
+  readonly topColorLabel = computed(() => (this.insights()?.behavioralInsights.topColorWearShare?.color ?? 'N/A'));
 
   fmtPct(val?: number | null): string {
     if (val == null) return 'N/A';
@@ -68,4 +69,3 @@ export class VaultInsightsPanelComponent {
     }).format(val);
   }
 }
-

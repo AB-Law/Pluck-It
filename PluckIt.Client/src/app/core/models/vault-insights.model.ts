@@ -4,8 +4,13 @@ export interface ExpensiveUnwornItem {
   currency: string;
 }
 
+export interface TopColorWearShare {
+  color: string;
+  pct: number;
+}
+
 export interface VaultBehavioralInsights {
-  blackWearSharePct?: number | null;
+  topColorWearShare?: TopColorWearShare | null;
   unworn90dPct?: number | null;
   mostExpensiveUnworn?: ExpensiveUnwornItem | null;
   sparseHistory?: boolean;
@@ -37,4 +42,3 @@ export interface VaultInsightsResponse {
   behavioralInsights: VaultBehavioralInsights;
   cpwIntel: CpwIntelItem[];
 }
-
