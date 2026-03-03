@@ -4,6 +4,25 @@ export interface ClothingColour {
 }
 
 /**
+ * Weather snapshot recorded at wear time.
+ * Mirrors the C# WeatherSnapshot record.
+ */
+export interface WeatherSnapshot {
+  tempCelsius: number;
+  conditions: string; // e.g. "clear", "rain", "snow"
+}
+
+/**
+ * A single wear event logged via PATCH /api/wardrobe/{id}/wear.
+ * Mirrors the C# WearEvent record.
+ */
+export interface WearEvent {
+  occurredAt: string;           // ISO 8601 UTC string
+  occasion?: string | null;     // e.g. "casual", "work", "formal"
+  weatherSnapshot?: WeatherSnapshot | null;
+}
+
+/**
  * Category-aware sizing. Only the relevant fields are set per category type:
  * - Tops / Knitwear / Outerwear / Dresses / Activewear / Swimwear / Underwear → letter
  * - Bottoms → waist + inseam
@@ -49,7 +68,14 @@ export interface ClothingItem {
   // ── Digital Vault analytics ─────────────────────────────────────────────
   wearCount: number;                // defaults to 0 on the server; may be absent in very old docs
   estimatedMarketValue: number | null;
+  /** UTC timestamp of the most recent wear event. Null if never worn. */
+  lastWornAt?: string | null;
 
+  /**
+   * Rolling log of the last ≤30 wear events.
+   * Absent in documents created before the personalization graph feature.
+   */
+  wearEvents?: WearEvent[] | null;
   // ── Enrichment metadata ──────────────────────────────────────────────────
   purchaseDate: string | null;  // ISO date string, e.g. "2024-11-20"
   careInfo?: string[] | null;   // "dry_clean" | "wash" | "iron" | "bleach" — absent in old docs

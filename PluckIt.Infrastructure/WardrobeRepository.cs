@@ -163,7 +163,7 @@ public class WardrobeRepository : IWardrobeRepository
       cancellationToken: cancellationToken);
   }
 
-  public async Task DeleteAsync(
+    public async Task DeleteAsync(
     string id,
     string userId,
     CancellationToken cancellationToken = default)
@@ -179,6 +179,39 @@ public class WardrobeRepository : IWardrobeRepository
     {
       // Already deleted — treat as success
     }
+  }
+
+  public async Task<ClothingItem?> AppendWearEventAsync(
+    string itemId,
+    string userId,
+    WearEvent ev,
+    int maxEvents = 30,
+    CancellationToken cancellationToken = default)
+  {
+    // Read current item to build trimmed event list
+    var item = await GetByIdAsync(itemId, userId, cancellationToken);
+    if (item is null) return null;
+
+    // Build new events list: append + trim oldest beyond maxEvents
+    var events = new List<WearEvent>(item.WearEvents) { ev };
+    if (events.Count > maxEvents)
+      events = events.OrderByDescending(e => e.OccurredAt).Take(maxEvents).ToList();
+
+    // Apply all changes via Cosmos Patch API (atomic, no full-document round-trip for the write)
+    var patchOps = new List<PatchOperation>
+    {
+      PatchOperation.Increment("/wearCount", 1),
+      PatchOperation.Set("/lastWornAt", ev.OccurredAt),
+      PatchOperation.Set("/wearEvents", events),
+    };
+
+    var response = await Container.PatchItemAsync<ClothingItem>(
+      itemId,
+      new PartitionKey(userId),
+      patchOps,
+      cancellationToken: cancellationToken);
+
+    return response.Resource;
   }
 }
 

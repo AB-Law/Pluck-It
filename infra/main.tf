@@ -104,6 +104,7 @@ resource "azurerm_cosmosdb_sql_container" "wardrobe" {
     included_path { path = "/price/amount/?" }
     included_path { path = "/brand/?" }
     included_path { path = "/condition/?" }
+    included_path { path = "/lastWornAt/?" }
 
     # Composite indexes — required for efficient ORDER BY when combined with
     # range filters inside a partition.  Each group covers one sort dimension.
@@ -172,6 +173,30 @@ resource "azurerm_cosmosdb_sql_container" "wardrobe" {
     composite_index {
       index {
         path  = "/price/amount"
+        order = "ascending"
+      }
+      index {
+        path  = "/id"
+        order = "ascending"
+      }
+    }
+
+    # Sort by most recently worn
+    composite_index {
+      index {
+        path  = "/lastWornAt"
+        order = "descending"
+      }
+      index {
+        path  = "/id"
+        order = "ascending"
+      }
+    }
+
+    # Sort by least recently worn (re-wear cadence analysis)
+    composite_index {
+      index {
+        path  = "/lastWornAt"
         order = "ascending"
       }
       index {
@@ -284,6 +309,39 @@ resource "azurerm_cosmosdb_sql_container" "moods" {
 
     included_path {
       path = "/*"
+    }
+  }
+}
+
+# Stores thumbs-up / thumbs-down feedback on digest purchase suggestions.
+# TTL of 90 days keeps feedback relevant and bounds container growth.
+# Partition key = /userId so all feedback for one user is co-located.
+resource "azurerm_cosmosdb_sql_container" "digest_feedback" {
+  name                  = "DigestFeedback"
+  resource_group_name   = azurerm_resource_group.rg_pluckit_archive.name
+  account_name          = azurerm_cosmosdb_account.pluckit.name
+  database_name         = azurerm_cosmosdb_sql_database.pluckit.name
+  partition_key_paths   = ["/userId"]
+  partition_key_version = 1
+  default_ttl           = 7776000 # 90 days in seconds
+
+  indexing_policy {
+    indexing_mode = "consistent"
+
+    included_path {
+      path = "/*"
+    }
+
+    # Efficient fetch of all feedback for a specific digest id within a user partition
+    composite_index {
+      index {
+        path  = "/digestId"
+        order = "ascending"
+      }
+      index {
+        path  = "/createdAt"
+        order = "descending"
+      }
     }
   }
 }
@@ -480,6 +538,7 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
     "COSMOS_DB_CONVERSATIONS_CONTAINER"     = azurerm_cosmosdb_sql_container.conversations.name
     "COSMOS_DB_DIGESTS_CONTAINER"           = azurerm_cosmosdb_sql_container.digests.name
     "COSMOS_DB_MOODS_CONTAINER"             = azurerm_cosmosdb_sql_container.moods.name
+    "COSMOS_DB_DIGEST_FEEDBACK_CONTAINER"   = azurerm_cosmosdb_sql_container.digest_feedback.name
     # Azure OpenAI — primary model for chat/agents
     "AZURE_OPENAI_ENDPOINT"   = var.ai_gpt4o_endpoint
     "AZURE_OPENAI_API_KEY"    = var.ai_api_key

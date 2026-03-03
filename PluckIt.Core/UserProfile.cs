@@ -71,4 +71,26 @@ public class UserProfile
   /// The digest agent skips the full analysis when the hash is unchanged.
   /// </summary>
   public string? WardrobeHashAtLastDigest { get; set; }
+
+  // ── Personalization graph fields (AI-inferred, never user-declared) ────────
+
+  /// <summary>
+  /// Whether the user has opted in to personalized recommendations.
+  /// Defaults to true. When false the digest and stylist agents skip preference scoring.
+  /// </summary>
+  public bool RecommendationOptIn { get; set; } = true;
+
+  /// <summary>
+  /// AI-inferred style confidence score in the range [0, 1].
+  /// Represents how strongly the user's wear history aligns with their declared style preferences.
+  /// Updated after each digest run. Null until at least one digest has run.
+  /// </summary>
+  public double? StyleConfidenceProfile { get; set; }
+
+  /// <summary>
+  /// AI-inferred climate zone based on LocationCity and seasonal wear patterns.
+  /// e.g. "temperate", "tropical", "continental", "arid".
+  /// Null until inferred. Invalidated when LocationCity changes.
+  /// </summary>
+  public string? ClimateZone { get; set; }
 }

@@ -18,6 +18,10 @@ export interface UserProfile {
   favoriteBrands: string[];
   preferredColours: string[];
   locationCity?: string | null;
+  // Personalization graph fields (AI-inferred, never user-declared except recommendationOptIn)
+  recommendationOptIn?: boolean;
+  styleConfidenceProfile?: number | null;  // 0–1, AI-inferred
+  climateZone?: string | null;             // e.g. "temperate", "tropical"
 }
 
 const DEFAULT_PROFILE: UserProfile = {

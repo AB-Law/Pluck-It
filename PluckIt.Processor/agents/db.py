@@ -98,3 +98,11 @@ def get_digests_container():
 
 def get_moods_container():
     return _async_container("COSMOS_DB_MOODS_CONTAINER", "Moods")
+
+
+def get_digest_feedback_container():
+    return _async_container("COSMOS_DB_DIGEST_FEEDBACK_CONTAINER", "DigestFeedback")
+
+
+def get_digest_feedback_container_sync():
+    return _sync_container("COSMOS_DB_DIGEST_FEEDBACK_CONTAINER", "DigestFeedback")

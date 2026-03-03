@@ -40,4 +40,8 @@ async def get_user_profile(config: RunnableConfig) -> str:
         "height_cm": profile.get("heightCm"),
         "preferred_size_system": profile.get("preferredSizeSystem", "US"),
         "currency_code": profile.get("currencyCode", "USD"),
+        # Personalization graph fields (AI-inferred)
+        "recommendation_opt_in": profile.get("recommendationOptIn", True),
+        "style_confidence_profile": profile.get("styleConfidenceProfile"),
+        "climate_zone": profile.get("climateZone"),
     }, ensure_ascii=False)

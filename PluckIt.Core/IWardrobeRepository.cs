@@ -27,5 +27,18 @@ public interface IWardrobeRepository
     string id,
     string userId,
     CancellationToken cancellationToken = default);
+
+  /// <summary>
+  /// Atomically appends <paramref name="ev"/> to the item's WearEvents array,
+  /// stamps LastWornAt, increments WearCount by 1, and trims WearEvents to
+  /// the most recent <paramref name="maxEvents"/> entries.
+  /// Returns the updated item, or null if the item does not exist.
+  /// </summary>
+  Task<ClothingItem?> AppendWearEventAsync(
+    string itemId,
+    string userId,
+    WearEvent ev,
+    int maxEvents = 30,
+    CancellationToken cancellationToken = default);
 }
 
