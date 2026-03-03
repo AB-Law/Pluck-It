@@ -32,10 +32,10 @@ public sealed class InMemoryWardrobeRepositoryTests
         var repo = new InMemoryWardrobeRepository()
             .WithItems(Item("a", User1), Item("b", User2));
 
-        var items = await repo.GetAllAsync(User1, null, null, 0, 100);
+        var result = await repo.GetAllAsync(User1, new WardrobeQuery { PageSize = 100 });
 
-        items.ShouldHaveSingleItem().Id.ShouldBe("a");
-        items.ShouldNotContain(i => i.UserId == User2);
+        result.Items.ShouldHaveSingleItem().Id.ShouldBe("a");
+        result.Items.ShouldNotContain(i => i.UserId == User2);
     }
 
     [Fact]
@@ -44,9 +44,9 @@ public sealed class InMemoryWardrobeRepositoryTests
         var repo = new InMemoryWardrobeRepository()
             .WithItems(Item("t1", category: "Tops"), Item("b1", category: "Bottoms"));
 
-        var result = await repo.GetAllAsync(User1, "Tops", null, 0, 100);
+        var result = await repo.GetAllAsync(User1, new WardrobeQuery { Category = "Tops", PageSize = 100 });
 
-        result.ShouldHaveSingleItem().Id.ShouldBe("t1");
+        result.Items.ShouldHaveSingleItem().Id.ShouldBe("t1");
     }
 
     [Fact]
@@ -58,28 +58,31 @@ public sealed class InMemoryWardrobeRepositoryTests
                 Item("b", tags: ["formal", "slim"]),
                 Item("c", tags: ["denim", "ripped"]));
 
-        var result = await repo.GetAllAsync(User1, null, ["denim"], 0, 100);
+        var result = await repo.GetAllAsync(User1, new WardrobeQuery { Tags = ["denim"], PageSize = 100 });
 
-        result.Select(i => i.Id).ShouldBe(new[] {"a", "c"}, ignoreOrder: true);
+        result.Items.Select(i => i.Id).ShouldBe(new[] {"a", "c"}, ignoreOrder: true);
     }
 
     [Fact]
-    public async Task GetAllAsync_PaginatesCorrectly()
+    public async Task GetAllAsync_PaginatesWithContinuationTokens()
     {
         var repo = new InMemoryWardrobeRepository()
-            .WithItems(Enumerable.Range(1, 20).Select(i => Item($"item-{i}")).ToArray());
+            .WithItems(Enumerable.Range(1, 15).Select(i => Item($"item-{i:D2}")).ToArray());
 
-        var page0 = await repo.GetAllAsync(User1, null, null, 0, 5);
-        var page1 = await repo.GetAllAsync(User1, null, null, 1, 5);
-        var page2 = await repo.GetAllAsync(User1, null, null, 2, 5);
+        var page0 = await repo.GetAllAsync(User1, new WardrobeQuery { PageSize = 5 });
+        var page1 = await repo.GetAllAsync(User1, new WardrobeQuery { PageSize = 5, ContinuationToken = page0.NextContinuationToken });
+        var page2 = await repo.GetAllAsync(User1, new WardrobeQuery { PageSize = 5, ContinuationToken = page1.NextContinuationToken });
 
-        page0.Count.ShouldBe(5);
-        page1.Count.ShouldBe(5);
-        page2.Count.ShouldBe(5);
+        page0.Items.Count.ShouldBe(5);
+        page1.Items.Count.ShouldBe(5);
+        page2.Items.Count.ShouldBe(5);
 
-        var ids0 = page0.Select(i => i.Id).ToHashSet();
-        var ids1 = page1.Select(i => i.Id).ToHashSet();
+        var ids0 = page0.Items.Select(i => i.Id).ToHashSet();
+        var ids1 = page1.Items.Select(i => i.Id).ToHashSet();
         ids0.Intersect(ids1).ShouldBeEmpty("pages must not overlap");
+
+        // Last page should not have a continuation token
+        page2.NextContinuationToken.ShouldBeNull();
     }
 
     [Fact]

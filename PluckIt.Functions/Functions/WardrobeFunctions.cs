@@ -32,16 +32,54 @@ public class WardrobeFunctions(
         if (!authed0)
             return req.CreateResponse(System.Net.HttpStatusCode.Unauthorized);
 
-        var query = ParseQueryString(req.Url);
-        var category = query.GetValueOrDefault("category");
-        var tags = query.TryGetValue("tags", out var t) ? t.Split(',', StringSplitOptions.RemoveEmptyEntries) : null;
-        var page = int.TryParse(query.GetValueOrDefault("page"), out var p) ? Math.Max(p, 0) : 0;
-        var pageSize = int.TryParse(query.GetValueOrDefault("pageSize"), out var s) ? Math.Clamp(s, 1, 100) : 24;
+        var qs       = ParseQueryString(req.Url);
+        var pageSize = int.TryParse(qs.GetValueOrDefault("pageSize"), out var s) ? Math.Clamp(s, 1, 100) : 24;
 
-        var items = await repo.GetAllAsync(userId!, category, tags, page, pageSize, cancellationToken);
-        var result = items.Select(i => { i.ImageUrl = sasService.GenerateSasUrl(i.ImageUrl); return i; }).ToList();
+        // ── Parse condition (string enum) ───────────────────────────────────
+        ItemCondition? condition = null;
+        if (qs.TryGetValue("condition", out var condStr) &&
+            Enum.TryParse<ItemCondition>(condStr, ignoreCase: true, out var condParsed))
+            condition = condParsed;
 
-        return await JsonOk(req, result, PluckItJsonContext.Default.ListClothingItem);
+        // ── Parse numeric filters ───────────────────────────────────────────
+        decimal? priceMin = decimal.TryParse(qs.GetValueOrDefault("priceMin"), out var pmin) ? pmin : null;
+        decimal? priceMax = decimal.TryParse(qs.GetValueOrDefault("priceMax"), out var pmax) ? pmax : null;
+        int?     minWears = int.TryParse(qs.GetValueOrDefault("minWears"), out var mw) ? mw : null;
+        int?     maxWears = int.TryParse(qs.GetValueOrDefault("maxWears"), out var xw) ? xw : null;
+
+        // ── Parse sort ──────────────────────────────────────────────────────
+        var sortField = qs.GetValueOrDefault("sortField") is string sf &&
+                        WardrobeSortField.Allowlist.Contains(sf, StringComparer.OrdinalIgnoreCase)
+                        ? sf : WardrobeSortField.DateAdded;
+        var sortDir   = qs.GetValueOrDefault("sortDir") is string sd &&
+                        string.Equals(sd, "asc", StringComparison.OrdinalIgnoreCase)
+                        ? "asc" : "desc";
+
+        var wardrobeQuery = new WardrobeQuery
+        {
+            Category          = qs.GetValueOrDefault("category"),
+            Brand             = qs.GetValueOrDefault("brand"),
+            Condition         = condition,
+            Tags              = qs.TryGetValue("tags", out var t)
+                                  ? t.Split(',', StringSplitOptions.RemoveEmptyEntries) : null,
+            AestheticTags     = qs.TryGetValue("aestheticTags", out var at)
+                                  ? at.Split(',', StringSplitOptions.RemoveEmptyEntries) : null,
+            PriceMin          = priceMin,
+            PriceMax          = priceMax,
+            MinWears          = minWears,
+            MaxWears          = maxWears,
+            SortField         = sortField,
+            SortDir           = sortDir,
+            PageSize          = pageSize,
+            ContinuationToken = qs.GetValueOrDefault("continuationToken"),
+        };
+
+        var paged  = await repo.GetAllAsync(userId!, wardrobeQuery, cancellationToken);
+        // Enrich each item's image URL with a short-lived SAS token
+        foreach (var item in paged.Items)
+            item.ImageUrl = sasService.GenerateSasUrl(item.ImageUrl);
+
+        return await JsonOk(req, paged, PluckItJsonContext.Default.WardrobePagedResult);
     }
 
     // ── GET /api/wardrobe/{id} ──────────────────────────────────────────────

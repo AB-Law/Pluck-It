@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -6,12 +5,13 @@ namespace PluckIt.Core;
 
 public interface IWardrobeRepository
 {
-  Task<IReadOnlyCollection<ClothingItem>> GetAllAsync(
+  /// <summary>
+  /// Returns a single page of clothing items for a user, applying all filters,
+  /// sort, and pagination specified in <paramref name="query"/>.
+  /// </summary>
+  Task<WardrobePagedResult> GetAllAsync(
     string userId,
-    string? category,
-    IReadOnlyCollection<string>? tags,
-    int page,
-    int pageSize,
+    WardrobeQuery query,
     CancellationToken cancellationToken = default);
 
   Task<ClothingItem?> GetByIdAsync(

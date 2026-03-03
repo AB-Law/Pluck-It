@@ -289,8 +289,8 @@ export class CollectionsComponent implements OnInit {
     // Load all wardrobe items and filter by IDs in the collection.
     // Cosmos doesn't support multi-ID lookups without separate calls, so we fetch all
     // for the current user and filter client-side. Acceptable given small wardrobe sizes.
-    this.wardrobeService.getAll({ pageSize: 200 }).subscribe(allItems => {
-      const filtered = allItems.filter(i => col.clothingItemIds.includes(i.id));
+    this.wardrobeService.getAll({ pageSize: 200 }).subscribe(response => {
+      const filtered = response.items.filter(i => col.clothingItemIds.includes(i.id));
       this.collectionItemsMap.update(m => ({ ...m, [col.id]: filtered }));
     });
   }

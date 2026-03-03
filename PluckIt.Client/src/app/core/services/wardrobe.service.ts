@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
-import { ClothingItem } from '../models/clothing-item.model';
+import { ClothingItem, WardrobeQuery, WardrobePagedResponse } from '../models/clothing-item.model';
 
 @Injectable({ providedIn: 'root' })
 export class WardrobeService {
@@ -10,12 +10,29 @@ export class WardrobeService {
 
   constructor(private http: HttpClient) {}
 
-  getAll(params?: { category?: string; page?: number; pageSize?: number }): Observable<ClothingItem[]> {
+  /**
+   * Fetch a page of wardrobe items using full multidimensional filter + sort support.
+   * Returns a paged envelope `{ items, nextContinuationToken }` instead of a bare array.
+   */
+  getAll(query?: WardrobeQuery): Observable<WardrobePagedResponse> {
     let qp = new HttpParams()
-      .set('page', String(params?.page ?? 0))
-      .set('pageSize', String(params?.pageSize ?? 24));
-    if (params?.category) qp = qp.set('category', params.category);
-    return this.http.get<ClothingItem[]>(`${this.base}/api/wardrobe`, { params: qp });
+      .set('pageSize', String(query?.pageSize ?? 24));
+
+    if (query?.category)            qp = qp.set('category',          query.category);
+    if (query?.brand)               qp = qp.set('brand',             query.brand);
+    if (query?.condition)           qp = qp.set('condition',         query.condition);
+    if (query?.tags?.length)        qp = qp.set('tags',              query.tags.join(','));
+    if (query?.aestheticTags?.length)
+                                    qp = qp.set('aestheticTags',     query.aestheticTags!.join(','));
+    if (query?.priceMin  != null)   qp = qp.set('priceMin',          String(query.priceMin));
+    if (query?.priceMax  != null)   qp = qp.set('priceMax',          String(query.priceMax));
+    if (query?.minWears  != null)   qp = qp.set('minWears',          String(query.minWears));
+    if (query?.maxWears  != null)   qp = qp.set('maxWears',          String(query.maxWears));
+    if (query?.sortField)           qp = qp.set('sortField',         query.sortField);
+    if (query?.sortDir)             qp = qp.set('sortDir',           query.sortDir);
+    if (query?.continuationToken)   qp = qp.set('continuationToken', query.continuationToken);
+
+    return this.http.get<WardrobePagedResponse>(`${this.base}/api/wardrobe`, { params: qp });
   }
 
   getById(id: string): Observable<ClothingItem> {
