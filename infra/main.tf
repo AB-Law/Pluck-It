@@ -91,8 +91,81 @@ resource "azurerm_cosmosdb_sql_container" "wardrobe" {
   indexing_policy {
     indexing_mode = "consistent"
 
+    # Cover all scalar paths (default wildcard)
     included_path {
       path = "/*"
+    }
+
+    # Explicit range indexes for the sort/filter paths that may not be reached
+    # by the wildcard when nested (Cosmos guarantees nested paths for /* but
+    # explicit entries ensure index is present after any future schema changes).
+    included_path { path = "/dateAdded/?" }
+    included_path { path = "/wearCount/?" }
+    included_path { path = "/price/amount/?" }
+    included_path { path = "/brand/?" }
+    included_path { path = "/condition/?" }
+
+    # Composite indexes — required for efficient ORDER BY when combined with
+    # range filters inside a partition.  Each group covers one sort dimension.
+
+    # Sort by most recently added
+    composite_index {
+      index {
+        path  = "/dateAdded"
+        order = "descending"
+      }
+      index {
+        path  = "/id"
+        order = "ascending"
+      }
+    }
+
+    # Sort by most worn (descending)
+    composite_index {
+      index {
+        path  = "/wearCount"
+        order = "descending"
+      }
+      index {
+        path  = "/id"
+        order = "ascending"
+      }
+    }
+
+    # Sort by most worn (ascending — cheapest first / least worn)
+    composite_index {
+      index {
+        path  = "/wearCount"
+        order = "ascending"
+      }
+      index {
+        path  = "/id"
+        order = "ascending"
+      }
+    }
+
+    # Sort by price descending (most expensive first)
+    composite_index {
+      index {
+        path  = "/price/amount"
+        order = "descending"
+      }
+      index {
+        path  = "/id"
+        order = "ascending"
+      }
+    }
+
+    # Sort by price ascending (cheapest first)
+    composite_index {
+      index {
+        path  = "/price/amount"
+        order = "ascending"
+      }
+      index {
+        path  = "/id"
+        order = "ascending"
+      }
     }
   }
 }
