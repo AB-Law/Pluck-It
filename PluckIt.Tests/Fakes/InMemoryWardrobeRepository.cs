@@ -1,10 +1,17 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using PluckIt.Core;
 
 namespace PluckIt.Tests.Fakes;
 
 /// <summary>
 /// In-memory <see cref="IWardrobeRepository"/> for unit tests.
-/// Supports all query features: category filter, tag intersection, pagination.
+/// Supports all query features: category, brand, condition, tags, aestheticTags,
+/// price range, wearCount range, sort, and continuation-token pagination.
 /// Thread-safety is not a goal (single-threaded tests).
 /// </summary>
 public sealed class InMemoryWardrobeRepository : IWardrobeRepository
@@ -23,29 +30,65 @@ public sealed class InMemoryWardrobeRepository : IWardrobeRepository
 
     // ── Interface implementation ─────────────────────────────────────────────
 
-    public Task<IReadOnlyCollection<ClothingItem>> GetAllAsync(
+    public Task<WardrobePagedResult> GetAllAsync(
         string userId,
-        string? category,
-        IReadOnlyCollection<string>? tags,
-        int page,
-        int pageSize,
+        WardrobeQuery query,
         CancellationToken cancellationToken = default)
     {
-        var query = _store.Where(i => i.UserId == userId);
+        var q = _store.Where(i => i.UserId == userId);
 
-        if (!string.IsNullOrEmpty(category))
-            query = query.Where(i =>
-                string.Equals(i.Category, category, StringComparison.OrdinalIgnoreCase));
+        // ── Filters ──────────────────────────────────────────────────────────
 
-        if (tags is { Count: > 0 })
-            query = query.Where(i =>
-                i.Tags.Any(t => tags.Contains(t, StringComparer.OrdinalIgnoreCase)));
+        if (!string.IsNullOrEmpty(query.Category))
+            q = q.Where(i => string.Equals(i.Category, query.Category, StringComparison.OrdinalIgnoreCase));
 
-        // Cosmos orders by dateAdded DESC; mirror that behaviour
-        query = query.OrderByDescending(i => i.DateAdded ?? DateTimeOffset.MinValue);
+        if (!string.IsNullOrEmpty(query.Brand))
+            q = q.Where(i => string.Equals(i.Brand, query.Brand, StringComparison.OrdinalIgnoreCase));
 
-        var page0 = query.Skip(page * pageSize).Take(pageSize).ToList();
-        return Task.FromResult<IReadOnlyCollection<ClothingItem>>(page0);
+        if (query.Condition.HasValue)
+            q = q.Where(i => i.Condition == query.Condition.Value);
+
+        if (query.Tags is { Count: > 0 })
+            q = q.Where(i => i.Tags.Any(t => query.Tags.Contains(t, StringComparer.OrdinalIgnoreCase)));
+
+        if (query.AestheticTags is { Count: > 0 })
+            q = q.Where(i => i.AestheticTags != null &&
+                              i.AestheticTags.Any(t => query.AestheticTags.Contains(t, StringComparer.OrdinalIgnoreCase)));
+
+        if (query.PriceMin.HasValue)
+            q = q.Where(i => i.Price != null && i.Price.Amount >= query.PriceMin.Value);
+
+        if (query.PriceMax.HasValue)
+            q = q.Where(i => i.Price != null && i.Price.Amount <= query.PriceMax.Value);
+
+        if (query.MinWears.HasValue)
+            q = q.Where(i => i.WearCount >= query.MinWears.Value);
+
+        if (query.MaxWears.HasValue)
+            q = q.Where(i => i.WearCount <= query.MaxWears.Value);
+
+        // ── Sort ──────────────────────────────────────────────────────────────
+
+        bool asc = string.Equals(query.SortDir, "asc", StringComparison.OrdinalIgnoreCase);
+        q = query.SortField switch
+        {
+            WardrobeSortField.WearCount   => asc ? q.OrderBy(i => i.WearCount)       : q.OrderByDescending(i => i.WearCount),
+            WardrobeSortField.PriceAmount => asc ? q.OrderBy(i => i.Price?.Amount)   : q.OrderByDescending(i => i.Price?.Amount),
+            _                             => asc ? q.OrderBy(i => i.DateAdded ?? DateTimeOffset.MinValue)
+                                                 : q.OrderByDescending(i => i.DateAdded ?? DateTimeOffset.MinValue),
+        };
+
+        // ── Continuation-token paging (opaque base64-encoded skip count) ──────
+
+        var pageSize = Math.Clamp(query.PageSize, 1, 100);
+        var skip     = DecodeToken(query.ContinuationToken);
+        var page     = q.Skip(skip).Take(pageSize).ToList();
+        var nextSkip = skip + page.Count;
+        var nextToken = page.Count == pageSize && nextSkip < q.Count()
+            ? EncodeToken(nextSkip)
+            : null;
+
+        return Task.FromResult(new WardrobePagedResult(page, nextToken));
     }
 
     public Task<ClothingItem?> GetByIdAsync(
@@ -61,8 +104,6 @@ public sealed class InMemoryWardrobeRepository : IWardrobeRepository
 
     public Task UpsertAsync(ClothingItem item, CancellationToken cancellationToken = default)
     {
-        // Match on (Id, UserId) — mirrors Cosmos partition semantics where the
-        // same document id can exist in multiple userId partitions.
         var existing = _store.FindIndex(i =>
             string.Equals(i.Id,     item.Id,     StringComparison.OrdinalIgnoreCase) &&
             string.Equals(i.UserId, item.UserId, StringComparison.OrdinalIgnoreCase));
@@ -83,4 +124,17 @@ public sealed class InMemoryWardrobeRepository : IWardrobeRepository
 
     public IEnumerable<string> AllImageUrls()
         => _store.Select(i => i.ImageUrl).Where(u => !string.IsNullOrEmpty(u))!;
+
+    // ── Token helpers ─────────────────────────────────────────────────────────
+
+    private static string? EncodeToken(int skip) =>
+        skip <= 0 ? null : Convert.ToBase64String(BitConverter.GetBytes(skip));
+
+    private static int DecodeToken(string? token)
+    {
+        if (string.IsNullOrEmpty(token)) return 0;
+        try { return BitConverter.ToInt32(Convert.FromBase64String(token)); }
+        catch { return 0; }
+    }
 }
+

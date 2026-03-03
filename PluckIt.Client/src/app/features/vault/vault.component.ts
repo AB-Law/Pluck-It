@@ -1,16 +1,18 @@
 import { Component, OnInit, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { WardrobeService } from '../../core/services/wardrobe.service';
 import { UserProfileService } from '../../core/services/user-profile.service';
-import { ClothingItem } from '../../core/models/clothing-item.model';
-import { VaultSidebarComponent, VaultFilters } from './vault-sidebar.component';
+import { ClothingItem, ItemCondition, WardrobeQuery } from '../../core/models/clothing-item.model';
+import type { WardrobeSortField } from '../../core/models/clothing-item.model';
+import { VaultSidebarComponent, VaultFilters, SmartGroup } from './vault-sidebar.component';
 import { VaultCardComponent } from './vault-card.component';
 import { ItemDetailDrawerComponent } from './item-detail-drawer.component';
 import { StatCardComponent } from '../../shared/stat-card.component';
 import { ReviewItemModalComponent } from '../closet/review-item-modal.component';
 import { AddToCollectionModalComponent } from '../collections/add-to-collection-modal.component';
+import { matchesItem } from '../../core/utils/search.utils';
 
 @Component({
   selector: 'app-vault',
@@ -88,6 +90,7 @@ import { AddToCollectionModalComponent } from '../collections/add-to-collection-
         <app-vault-sidebar
           [maxPrice]="maxItemPrice()"
           [currency]="currency()"
+          [initialFilters]="activeFilters()"
           (filtersChange)="onFiltersChange($event)"
         />
 
@@ -142,6 +145,26 @@ import { AddToCollectionModalComponent } from '../collections/add-to-collection-
             }
           </div>
 
+          <!-- Load More -->
+          @if (hasMore()) {
+            <div class="mt-8 flex justify-center">
+              <button
+                class="px-6 py-2.5 rounded-lg border border-[#333] text-sm font-medium text-slate-300 hover:text-white hover:border-slate-500 transition-colors font-mono disabled:opacity-50"
+                [disabled]="loadingMore()"
+                (click)="loadMore()"
+              >
+                @if (loadingMore()) {
+                  <span class="flex items-center gap-2">
+                    <span class="material-symbols-outlined animate-spin" style="font-size:16px">progress_activity</span>
+                    Loading...
+                  </span>
+                } @else {
+                  Load More
+                }
+              </button>
+            </div>
+          }
+
         </main>
 
         <!-- Right drawer -->
@@ -184,26 +207,46 @@ export class VaultComponent implements OnInit {
   protected editingItem  = signal<ClothingItem | null>(null);
   protected sharingItem  = signal<ClothingItem | null>(null);
   protected loading      = signal(true);
+  protected loadingMore  = signal(false);
+  protected hasMore      = signal(false);
+  protected nextToken    = signal<string | null>(null);
   protected searchQuery  = signal('');
 
   protected readonly activeFilters = signal<VaultFilters>({
-    group: 'all',
+    group:      'all',
     priceRange: [0, 999_999],
-    minWears: 0,
+    minWears:   0,
+    brand:      '',
+    condition:  '',
+    sortField:  'dateAdded',
+    sortDir:    'desc',
   });
 
   constructor(
     private wardrobeService: WardrobeService,
     private profileService: UserProfileService,
     private router: Router,
+    private route: ActivatedRoute,
   ) {}
 
   ngOnInit(): void {
     this.profileService.load().subscribe();
-    this.wardrobeService.getAll({ pageSize: 100 }).subscribe({
-      next: items => { this.allItems.set(items); this.loading.set(false); },
-      error: ()    => this.loading.set(false),
-    });
+
+    // Restore filters from URL query params
+    const params    = this.route.snapshot.queryParamMap;
+    const priceMin  = Number(params.get('priceMin') ?? 0);
+    const priceMax  = Number(params.get('priceMax') ?? 999_999);
+    const restored: VaultFilters = {
+      group:      (params.get('group')     as SmartGroup)        ?? 'all',
+      priceRange: [priceMin, priceMax],
+      minWears:   Number(params.get('minWears') ?? 0),
+      brand:      params.get('brand')    ?? '',
+      condition:  (params.get('condition') as ItemCondition | '') ?? '',
+      sortField:  (params.get('sortField') as WardrobeSortField)  ?? 'dateAdded',
+      sortDir:    (params.get('sortDir')   as 'asc' | 'desc')     ?? 'desc',
+    };
+    this.activeFilters.set(restored);
+    this.loadItems(restored);
   }
 
   // ── Computed stats ──────────────────────────────────────────────────────
@@ -213,14 +256,15 @@ export class VaultComponent implements OnInit {
   readonly maxItemPrice = computed(() =>
     Math.max(5000, ...this.allItems().map(i => i.price?.amount ?? 0)));
 
+  /**
+   * Client-side filter: applies only Smart Group and free-text search.
+   * Price range, min wears, brand, condition, and sort are handled server-side.
+   */
   readonly filteredItems = computed(() => {
     const q = this.searchQuery().toLowerCase();
-    const { group, priceRange, minWears } = this.activeFilters();
+    const { group } = this.activeFilters();
     return this.allItems().filter(item => {
       if (q && !this.matchesSearch(item, q)) return false;
-      const price = item.price?.amount ?? 0;
-      if (price < priceRange[0] || price > priceRange[1]) return false;
-      if (item.wearCount < minWears) return false;
       if (group === 'favorites')
         return item.tags.includes('favorite') || item.aestheticTags?.includes('Favorite');
       if (group === 'recent') return (item.wearCount ?? 0) > 0;
@@ -250,6 +294,23 @@ export class VaultComponent implements OnInit {
 
   onFiltersChange(f: VaultFilters): void {
     this.activeFilters.set(f);
+    this.syncUrl(f);
+    this.loadItems(f);
+  }
+
+  loadMore(): void {
+    const token = this.nextToken();
+    if (!token || this.loadingMore()) return;
+    this.loadingMore.set(true);
+    this.wardrobeService.getAll(this.buildQuery(this.activeFilters(), token)).subscribe({
+      next: res => {
+        this.allItems.update(curr => [...curr, ...res.items]);
+        this.nextToken.set(res.nextContinuationToken ?? null);
+        this.hasMore.set(!!res.nextContinuationToken);
+        this.loadingMore.set(false);
+      },
+      error: () => this.loadingMore.set(false),
+    });
   }
 
   onCardSelect(item: ClothingItem): void {
@@ -272,15 +333,57 @@ export class VaultComponent implements OnInit {
     this.selectedItem.set(updated);
   }
 
-  setCurrency(cur: string): void {
-    // Profile currency update — delegate to profile service
-    const profile = this.profileService.getOrDefault();
-    this.profileService.update({ ...profile, currencyCode: cur }).subscribe();
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
+  private loadItems(filters: VaultFilters): void {
+    this.loading.set(true);
+    this.nextToken.set(null);
+    this.hasMore.set(false);
+    this.wardrobeService.getAll(this.buildQuery(filters)).subscribe({
+      next: res => {
+        this.allItems.set(res.items);
+        this.nextToken.set(res.nextContinuationToken ?? null);
+        this.hasMore.set(!!res.nextContinuationToken);
+        this.loading.set(false);
+      },
+      error: () => this.loading.set(false),
+    });
+  }
+
+  private buildQuery(filters: VaultFilters, continuationToken?: string | null): WardrobeQuery {
+    const [priceMin, priceMax] = filters.priceRange;
+    return {
+      brand:             filters.brand        || undefined,
+      condition:         filters.condition ? (filters.condition as ItemCondition) : undefined,
+      priceMin:          priceMin  > 0        ? priceMin  : undefined,
+      priceMax:          priceMax  < 999_999  ? priceMax  : undefined,
+      minWears:          filters.minWears > 0 ? filters.minWears : undefined,
+      sortField:         filters.sortField,
+      sortDir:           filters.sortDir,
+      pageSize:          24,
+      continuationToken: continuationToken ?? undefined,
+    };
+  }
+
+  private syncUrl(f: VaultFilters): void {
+    const [priceMin, priceMax] = f.priceRange;
+    this.router.navigate([], {
+      queryParams: {
+        group:      f.group     !== 'all'       ? f.group      : null,
+        priceMin:   priceMin    > 0             ? priceMin     : null,
+        priceMax:   priceMax    < 999_999       ? priceMax     : null,
+        minWears:   f.minWears  > 0             ? f.minWears   : null,
+        brand:      f.brand                     ? f.brand      : null,
+        condition:  f.condition                 ? f.condition  : null,
+        sortField:  f.sortField !== 'dateAdded' ? f.sortField  : null,
+        sortDir:    f.sortDir   !== 'desc'      ? f.sortDir    : null,
+      },
+      replaceUrl: true,
+    });
   }
 
   private matchesSearch(item: ClothingItem, q: string): boolean {
-    return [item.brand, item.category, item.notes, ...(item.tags ?? []), ...(item.aestheticTags ?? [])]
-      .some(v => v?.toLowerCase().includes(q));
+    return matchesItem(item, q);
   }
 
   private fmt(val: number): string {

@@ -62,3 +62,37 @@ export interface ClothingItem {
    */
   aestheticTags?: string[] | null;
 }
+
+// ─── Wardrobe query / paging types ───────────────────────────────────────────
+
+/** Sort field identifiers — must match C# WardrobeSortField allowlist exactly. */
+export type WardrobeSortField = 'dateAdded' | 'wearCount' | 'price.amount';
+
+/**
+ * All filter, sort, and pagination parameters accepted by GET /api/wardrobe.
+ * All fields are optional — omitted fields are not sent as query params.
+ */
+export interface WardrobeQuery {
+  category?:          string | null;
+  brand?:             string | null;
+  condition?:         ItemCondition | null;
+  tags?:              string[] | null;
+  aestheticTags?:     string[] | null;
+  priceMin?:          number | null;
+  priceMax?:          number | null;
+  minWears?:          number | null;
+  maxWears?:          number | null;
+  sortField?:         WardrobeSortField | null;
+  sortDir?:           'asc' | 'desc' | null;
+  pageSize?:          number | null;
+  continuationToken?: string | null;
+}
+
+/**
+ * Paged response envelope returned by GET /api/wardrobe.
+ * Mirrors C# WardrobePagedResult (camelCase serialization).
+ */
+export interface WardrobePagedResponse {
+  items:                  ClothingItem[];
+  nextContinuationToken?: string | null;
+}

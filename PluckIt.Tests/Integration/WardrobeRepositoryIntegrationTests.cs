@@ -27,8 +27,8 @@ namespace PluckIt.Tests.Integration;
 /// Integration tests for <see cref="WardrobeRepository"/> against the live Cosmos emulator.
 /// Validates query correctness that in-memory fakes cannot cover:
 /// - ARRAY_INTERSECT tag filtering
-/// - ORDER BY dateAdded DESC
-/// - Pagination consistency under concurrent writes
+/// - ORDER BY, composite indexes
+/// - Continuation-token paging
 /// </summary>
 [Collection("CosmosDb Integration")]
 [Trait("Category", "Integration")]
@@ -37,8 +37,7 @@ public sealed class WardrobeRepositoryIntegrationTests
     private readonly WardrobeRepository _repo;
 
     // Each xUnit test method creates a new instance of this class, so each test
-    // gets a fresh GUID partition — no cross-test data contamination in the
-    // shared container.
+    // gets a fresh GUID partition — no cross-test data contamination.
     private readonly string UserId = Guid.NewGuid().ToString("N");
 
     public WardrobeRepositoryIntegrationTests(CosmosDbFixture fixture)
@@ -51,16 +50,52 @@ public sealed class WardrobeRepositoryIntegrationTests
 
     private ClothingItem MakeItem(
         string id,
-        string? category   = "Tops",
-        string[]? tags     = null,
-        DateTimeOffset? dt = null) => new()
+        string? category      = "Tops",
+        string[]? tags        = null,
+        string? brand         = null,
+        ItemCondition? cond   = null,
+        decimal? price        = null,
+        int wearCount         = 0,
+        DateTimeOffset? dt    = null) => new()
     {
         Id        = id,
         UserId    = UserId,
         ImageUrl  = $"https://blob.example.com/{id}.png",
         Category  = category,
         Tags      = tags ?? ["casual"],
-        DateAdded = dt ?? DateTimeOffset.UtcNow
+        Brand     = brand,
+        Condition = cond,
+        Price     = price.HasValue ? new ClothingPrice { Amount = price.Value, OriginalCurrency = "USD" } : null,
+        WearCount = wearCount,
+        DateAdded = dt ?? DateTimeOffset.UtcNow,
+    };
+
+    private static WardrobeQuery Q(
+        string? category     = null,
+        string[]? tags       = null,
+        string? brand        = null,
+        ItemCondition? cond  = null,
+        decimal? priceMin    = null,
+        decimal? priceMax    = null,
+        int? minWears        = null,
+        int? maxWears        = null,
+        string sortField     = WardrobeSortField.DateAdded,
+        string sortDir       = "desc",
+        int pageSize         = 100,
+        string? token        = null) => new()
+    {
+        Category          = category,
+        Tags              = tags,
+        Brand             = brand,
+        Condition         = cond,
+        PriceMin          = priceMin,
+        PriceMax          = priceMax,
+        MinWears          = minWears,
+        MaxWears          = maxWears,
+        SortField         = sortField,
+        SortDir           = sortDir,
+        PageSize          = pageSize,
+        ContinuationToken = token,
     };
 
     // ── Sanity: upsert + point-read ──────────────────────────────────────────
@@ -68,8 +103,7 @@ public sealed class WardrobeRepositoryIntegrationTests
     [Fact]
     public async Task UpsertAndGetById_RoundTrips()
     {
-        var item = MakeItem("rt-001");
-        await _repo.UpsertAsync(item);
+        await _repo.UpsertAsync(MakeItem("rt-001"));
 
         var fetched = await _repo.GetByIdAsync("rt-001", UserId);
 
@@ -80,38 +114,34 @@ public sealed class WardrobeRepositoryIntegrationTests
     [Fact]
     public async Task DeleteAsync_RemovesItem()
     {
-        var item = MakeItem("del-001");
-        await _repo.UpsertAsync(item);
+        await _repo.UpsertAsync(MakeItem("del-001"));
         await _repo.DeleteAsync("del-001", UserId);
 
-        var fetched = await _repo.GetByIdAsync("del-001", UserId);
-        fetched.ShouldBeNull();
+        (await _repo.GetByIdAsync("del-001", UserId)).ShouldBeNull();
     }
 
-    // ── Pagination ───────────────────────────────────────────────────────────
+    // ── Pagination (continuation tokens) ─────────────────────────────────────
 
     [Fact]
-    public async Task GetAllAsync_PaginatesWithoutGapsOrDuplicates()
+    public async Task GetAllAsync_PaginatesWithContinuationTokens()
     {
-        // Seed 12 items with distinct timestamps so ordering is deterministic
         for (var i = 1; i <= 12; i++)
-        {
-            await _repo.UpsertAsync(MakeItem(
-                $"page-item-{i:D2}",
-                dt: DateTimeOffset.UtcNow.AddSeconds(-i)));
-        }
+            await _repo.UpsertAsync(MakeItem($"page-{i:D2}", dt: DateTimeOffset.UtcNow.AddSeconds(-i)));
 
-        var page0 = await _repo.GetAllAsync(UserId, null, null, 0, 4);
-        var page1 = await _repo.GetAllAsync(UserId, null, null, 1, 4);
-        var page2 = await _repo.GetAllAsync(UserId, null, null, 2, 4);
+        var page0 = await _repo.GetAllAsync(UserId, Q(pageSize: 4));
+        page0.Items.Count.ShouldBe(4);
+        page0.NextContinuationToken.ShouldNotBeNullOrEmpty();
 
-        page0.Count.ShouldBe(4);
-        page1.Count.ShouldBe(4);
-        page2.Count.ShouldBe(4);
+        var page1 = await _repo.GetAllAsync(UserId, Q(pageSize: 4, token: page0.NextContinuationToken));
+        page1.Items.Count.ShouldBe(4);
+        page1.NextContinuationToken.ShouldNotBeNullOrEmpty();
 
-        var allIds = page0.Concat(page1).Concat(page2).Select(i => i.Id).ToList();
-        allIds.Distinct().Count().ShouldBe(allIds.Count, "no duplicates across pages");
-        allIds.Count.ShouldBe(12);
+        var page2 = await _repo.GetAllAsync(UserId, Q(pageSize: 4, token: page1.NextContinuationToken));
+        page2.Items.Count.ShouldBe(4);
+        page2.NextContinuationToken.ShouldBeNull("last page must signal end of results");
+
+        var allIds = page0.Items.Concat(page1.Items).Concat(page2.Items).Select(i => i.Id).ToList();
+        allIds.Distinct().Count().ShouldBe(12, "no duplicates across pages");
     }
 
     // ── Category filter ──────────────────────────────────────────────────────
@@ -122,36 +152,118 @@ public sealed class WardrobeRepositoryIntegrationTests
         await _repo.UpsertAsync(MakeItem("cat-tops", "Tops"));
         await _repo.UpsertAsync(MakeItem("cat-btm",  "Bottoms"));
 
-        var tops = await _repo.GetAllAsync(UserId, "Tops", null, 0, 100);
+        var result = await _repo.GetAllAsync(UserId, Q(category: "Tops"));
 
-        tops.ShouldHaveSingleItem().Id.ShouldBe("cat-tops");
-        tops.ShouldNotContain(i => i.Id == "cat-btm");
+        result.Items.ShouldHaveSingleItem().Id.ShouldBe("cat-tops");
     }
 
-    // ── Tag filter (ARRAY_INTERSECT / ARRAY_CONTAINS in Cosmos) ─────────────
+    // ── Tag filter ───────────────────────────────────────────────────────────
 
     [Fact]
     public async Task GetAllAsync_FiltersByTagIntersection()
     {
         await _repo.UpsertAsync(MakeItem("tag-a", tags: ["denim", "casual"]));
-        await _repo.UpsertAsync(MakeItem("tag-b", tags: ["formal", "fitted"]));
+        await _repo.UpsertAsync(MakeItem("tag-b", tags: ["formal"]));
         await _repo.UpsertAsync(MakeItem("tag-c", tags: ["denim", "ripped"]));
 
-        var result = await _repo.GetAllAsync(UserId, null, ["denim"], 0, 100);
+        var result = await _repo.GetAllAsync(UserId, Q(tags: ["denim"]));
 
-        result.Select(i => i.Id).ShouldBe(new[] {"tag-a", "tag-c"}, ignoreOrder: true);
+        result.Items.Select(i => i.Id).ShouldBe(new[] { "tag-a", "tag-c" }, ignoreOrder: true);
     }
 
     [Fact]
     public async Task GetAllAsync_CombinesCategoryAndTagFilters()
     {
-        await _repo.UpsertAsync(MakeItem("match", "Tops", ["denim"]));
-        await _repo.UpsertAsync(MakeItem("wrong-cat", "Bottoms", ["denim"]));
-        await _repo.UpsertAsync(MakeItem("wrong-tag", "Tops", ["formal"]));
+        await _repo.UpsertAsync(MakeItem("match",      "Tops",    tags: ["denim"]));
+        await _repo.UpsertAsync(MakeItem("wrong-cat",  "Bottoms", tags: ["denim"]));
+        await _repo.UpsertAsync(MakeItem("wrong-tag",  "Tops",    tags: ["formal"]));
 
-        var result = await _repo.GetAllAsync(UserId, "Tops", ["denim"], 0, 100);
+        var result = await _repo.GetAllAsync(UserId, Q(category: "Tops", tags: ["denim"]));
 
-        result.ShouldHaveSingleItem().Id.ShouldBe("match");
+        result.Items.ShouldHaveSingleItem().Id.ShouldBe("match");
+    }
+
+    // ── Brand filter ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetAllAsync_FiltersByBrand()
+    {
+        await _repo.UpsertAsync(MakeItem("nike",   brand: "Nike"));
+        await _repo.UpsertAsync(MakeItem("adidas", brand: "Adidas"));
+
+        var result = await _repo.GetAllAsync(UserId, Q(brand: "Nike"));
+
+        result.Items.ShouldHaveSingleItem().Id.ShouldBe("nike");
+    }
+
+    // ── Condition filter ─────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetAllAsync_FiltersByCondition()
+    {
+        await _repo.UpsertAsync(MakeItem("new-item",  cond: ItemCondition.New));
+        await _repo.UpsertAsync(MakeItem("fair-item", cond: ItemCondition.Fair));
+
+        var result = await _repo.GetAllAsync(UserId, Q(cond: ItemCondition.New));
+
+        result.Items.ShouldHaveSingleItem().Id.ShouldBe("new-item");
+    }
+
+    // ── Price range filter ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetAllAsync_FiltersByPriceRange()
+    {
+        await _repo.UpsertAsync(MakeItem("cheap",     price: 20m));
+        await _repo.UpsertAsync(MakeItem("mid",       price: 75m));
+        await _repo.UpsertAsync(MakeItem("expensive", price: 200m));
+
+        var result = await _repo.GetAllAsync(UserId, Q(priceMin: 50m, priceMax: 100m));
+
+        result.Items.ShouldHaveSingleItem().Id.ShouldBe("mid");
+    }
+
+    // ── WearCount range filter ────────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetAllAsync_FiltersByWearCountRange()
+    {
+        await _repo.UpsertAsync(MakeItem("unworn",  wearCount: 0));
+        await _repo.UpsertAsync(MakeItem("worn",    wearCount: 5));
+        await _repo.UpsertAsync(MakeItem("heavily", wearCount: 20));
+
+        var result = await _repo.GetAllAsync(UserId, Q(minWears: 3, maxWears: 10));
+
+        result.Items.ShouldHaveSingleItem().Id.ShouldBe("worn");
+    }
+
+    // ── Sort ──────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetAllAsync_SortsByWearCountDesc()
+    {
+        await _repo.UpsertAsync(MakeItem("a", wearCount: 1));
+        await _repo.UpsertAsync(MakeItem("b", wearCount: 10));
+        await _repo.UpsertAsync(MakeItem("c", wearCount: 5));
+
+        var result = await _repo.GetAllAsync(UserId,
+            Q(sortField: WardrobeSortField.WearCount, sortDir: "desc"));
+
+        result.Items.Select(i => i.Id).ShouldBe(new[] { "b", "c", "a" });
+    }
+
+    [Fact]
+    public async Task GetAllAsync_SortsByDateAddedDesc()
+    {
+        var now = DateTimeOffset.UtcNow;
+        await _repo.UpsertAsync(MakeItem("old", dt: now.AddDays(-10)));
+        await _repo.UpsertAsync(MakeItem("new", dt: now.AddDays(-1)));
+        await _repo.UpsertAsync(MakeItem("mid", dt: now.AddDays(-5)));
+
+        var result = await _repo.GetAllAsync(UserId,
+            Q(sortField: WardrobeSortField.DateAdded, sortDir: "desc"));
+
+        result.Items.Select(i => i.Id).ShouldBe(new[] { "new", "mid", "old" });
     }
 
     // ── User isolation ───────────────────────────────────────────────────────
@@ -164,14 +276,15 @@ public sealed class WardrobeRepositoryIntegrationTests
             Id       = "other-user-item",
             UserId   = "other-user-999",
             ImageUrl = "https://blob.example.com/other.png",
-            Tags     = ["casual"]
+            Tags     = ["casual"],
         };
         await _repo.UpsertAsync(otherItem);
         await _repo.UpsertAsync(MakeItem("my-item"));
 
-        var result = await _repo.GetAllAsync(UserId, null, null, 0, 100);
+        var result = await _repo.GetAllAsync(UserId, Q());
 
-        result.ShouldHaveSingleItem().Id.ShouldBe("my-item");
-        result.ShouldNotContain(i => i.Id == "other-user-item");
+        result.Items.ShouldHaveSingleItem().Id.ShouldBe("my-item");
+        result.Items.ShouldNotContain(i => i.Id == "other-user-item");
     }
 }
+

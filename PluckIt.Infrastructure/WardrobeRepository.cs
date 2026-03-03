@@ -24,59 +24,114 @@ public class WardrobeRepository : IWardrobeRepository
 
   private Container Container => _client.GetContainer(_databaseName, _containerName);
 
-  public async Task<IReadOnlyCollection<ClothingItem>> GetAllAsync(
+  // Maps the allowlisted sort-field identifiers to Cosmos SQL field references.
+  private static readonly Dictionary<string, string> SortFieldMap =
+    new(StringComparer.OrdinalIgnoreCase)
+    {
+      [WardrobeSortField.DateAdded]   = "c.dateAdded",
+      [WardrobeSortField.WearCount]   = "c.wearCount",
+      [WardrobeSortField.PriceAmount] = "c.price.amount",
+    };
+
+  public async Task<WardrobePagedResult> GetAllAsync(
     string userId,
-    string? category,
-    IReadOnlyCollection<string>? tags,
-    int page,
-    int pageSize,
+    WardrobeQuery query,
     CancellationToken cancellationToken = default)
   {
-    var query = "SELECT * FROM c";
+    var sql        = "SELECT * FROM c";
     var conditions = new List<string> { "c.userId = @userId" };
     var parameters = new Dictionary<string, object> { ["@userId"] = userId };
 
-    if (!string.IsNullOrWhiteSpace(category))
+    // ── Filters ────────────────────────────────────────────────────────────
+
+    if (!string.IsNullOrWhiteSpace(query.Category))
     {
-      conditions.Add("c.category = @category");
-      parameters.Add("@category", category);
+      conditions.Add("LOWER(c.category) = LOWER(@category)");
+      parameters.Add("@category", query.Category.Trim());
     }
 
-    if (tags is { Count: > 0 })
+    if (!string.IsNullOrWhiteSpace(query.Brand))
+    {
+      // Case-insensitive brand match via LOWER()
+      conditions.Add("LOWER(c.brand) = LOWER(@brand)");
+      parameters.Add("@brand", query.Brand.Trim());
+    }
+
+    if (query.Condition.HasValue)
+    {
+      conditions.Add("c.condition = @condition");
+      parameters.Add("@condition", query.Condition.Value.ToString());
+    }
+
+    if (query.Tags is { Count: > 0 })
     {
       conditions.Add("ARRAY_LENGTH(ARRAY_INTERSECT(c.tags, @tags)) > 0");
-      parameters.Add("@tags", tags);
+      parameters.Add("@tags", query.Tags);
     }
 
-    query += " WHERE " + string.Join(" AND ", conditions);
-
-    query += " ORDER BY c.dateAdded DESC";
-
-    var queryDefinition = new QueryDefinition(query);
-    foreach (var kvp in parameters)
+    if (query.AestheticTags is { Count: > 0 })
     {
-      queryDefinition = queryDefinition.WithParameter(kvp.Key, kvp.Value);
+      conditions.Add("ARRAY_LENGTH(ARRAY_INTERSECT(c.aestheticTags, @aestheticTags)) > 0");
+      parameters.Add("@aestheticTags", query.AestheticTags);
     }
 
+    if (query.PriceMin.HasValue)
+    {
+      conditions.Add("c.price.amount >= @priceMin");
+      parameters.Add("@priceMin", (double)query.PriceMin.Value);
+    }
+
+    if (query.PriceMax.HasValue)
+    {
+      conditions.Add("c.price.amount <= @priceMax");
+      parameters.Add("@priceMax", (double)query.PriceMax.Value);
+    }
+
+    if (query.MinWears.HasValue)
+    {
+      conditions.Add("c.wearCount >= @minWears");
+      parameters.Add("@minWears", query.MinWears.Value);
+    }
+
+    if (query.MaxWears.HasValue)
+    {
+      conditions.Add("c.wearCount <= @maxWears");
+      parameters.Add("@maxWears", query.MaxWears.Value);
+    }
+
+    sql += " WHERE " + string.Join(" AND ", conditions);
+
+    // ── Sort ──────────────────────────────────────────────────────────────
+
+    var sortField = SortFieldMap.GetValueOrDefault(query.SortField, "c.dateAdded");
+    var sortDir   = string.Equals(query.SortDir, "asc", StringComparison.OrdinalIgnoreCase)
+        ? "ASC" : "DESC";
+
+    sql += $" ORDER BY {sortField} {sortDir}";
+
+    // ── Build query definition ────────────────────────────────────────────
+
+    var queryDefinition = new QueryDefinition(sql);
+    foreach (var kvp in parameters)
+      queryDefinition = queryDefinition.WithParameter(kvp.Key, kvp.Value);
+
+    // ── Continuation-token paging ─────────────────────────────────────────
+
+    var pageSize = Math.Clamp(query.PageSize, 1, 100);
     var iterator = Container.GetItemQueryIterator<ClothingItem>(
       queryDefinition,
+      continuationToken: query.ContinuationToken,
       requestOptions: new QueryRequestOptions
       {
         MaxItemCount = pageSize,
-        PartitionKey = new PartitionKey(userId)
+        PartitionKey = new PartitionKey(userId),
       });
 
-    var results = new List<ClothingItem>();
-    while (iterator.HasMoreResults && results.Count < pageSize * (page + 1))
-    {
-      var response = await iterator.ReadNextAsync(cancellationToken);
-      results.AddRange(response);
-    }
+    if (!iterator.HasMoreResults)
+      return new WardrobePagedResult([], null);
 
-    return results
-      .Skip(page * pageSize)
-      .Take(pageSize)
-      .ToList();
+    var page = await iterator.ReadNextAsync(cancellationToken);
+    return new WardrobePagedResult(page.ToList(), page.ContinuationToken);
   }
 
   public async Task<ClothingItem?> GetByIdAsync(

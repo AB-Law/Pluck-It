@@ -39,13 +39,11 @@ public class StylistFunctions(
 
         request ??= new StylistRequest();
 
-        var wardrobe = await repo.GetAllAsync(
-            userId: userId!,
-            category: null,
-            tags: null,
-            page: 0,
-            pageSize: 200,
+        var wardrobePaged = await repo.GetAllAsync(
+            userId!,
+            new WardrobeQuery { PageSize = 200 },
             cancellationToken);
+        var wardrobe = wardrobePaged.Items;
 
         if (!wardrobe.Any())
         {

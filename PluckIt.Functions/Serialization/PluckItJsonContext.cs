@@ -11,6 +11,7 @@ namespace PluckIt.Functions.Serialization;
 /// </summary>
 [JsonSerializable(typeof(ClothingItem))]
 [JsonSerializable(typeof(List<ClothingItem>))]
+[JsonSerializable(typeof(WardrobePagedResult))]
 [JsonSerializable(typeof(ClothingColour))]
 [JsonSerializable(typeof(List<ClothingColour>))]
 [JsonSerializable(typeof(ClothingSize))]

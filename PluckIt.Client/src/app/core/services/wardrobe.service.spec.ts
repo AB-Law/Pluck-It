@@ -49,21 +49,22 @@ describe('WardrobeService', () => {
     expect(service).toBeTruthy();
   });
 
-  it('getAll() hits /api/wardrobe with default pagination params', () => {
+  it('getAll() hits /api/wardrobe with default pageSize', () => {
     service.getAll().subscribe();
     const req = http.expectOne(r => r.url.includes('/api/wardrobe') && !r.url.includes('/api/wardrobe/'));
     expect(req.request.method).toBe('GET');
-    expect(req.request.params.get('page')).toBe('0');
+    expect(req.request.params.get('page')).toBeNull();
     expect(req.request.params.get('pageSize')).toBe('24');
-    req.flush([MOCK_ITEM]);
+    req.flush({ items: [MOCK_ITEM], nextContinuationToken: null });
   });
 
-  it('getAll() passes category filter when provided', () => {
-    service.getAll({ category: 'Tops', page: 1 }).subscribe();
+  it('getAll() passes category + continuationToken when provided', () => {
+    service.getAll({ category: 'Tops', continuationToken: 'tok-1' }).subscribe();
     const req = http.expectOne(r => r.url.includes('/api/wardrobe'));
     expect(req.request.params.get('category')).toBe('Tops');
-    expect(req.request.params.get('page')).toBe('1');
-    req.flush([]);
+    expect(req.request.params.get('continuationToken')).toBe('tok-1');
+    expect(req.request.params.get('page')).toBeNull();
+    req.flush({ items: [], nextContinuationToken: null });
   });
 
   it('getById() hits /api/wardrobe/:id', () => {

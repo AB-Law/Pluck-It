@@ -1,9 +1,12 @@
 import { Component, computed, EventEmitter, input, OnInit, Output, signal, ViewChild } from '@angular/core';
+import { ActivatedRoute, Router } from '@angular/router';
 import { WardrobeService } from '../../core/services/wardrobe.service';
 import { ClothingItem } from '../../core/models/clothing-item.model';
+import type { WardrobeSortField } from '../../core/models/clothing-item.model';
 import { UploadItemComponent } from './upload-item.component';
 import { ClothingCardComponent } from './clothing-card.component';
 import { ReviewItemModalComponent } from './review-item-modal.component';
+import { matchesItem } from '../../core/utils/search.utils';
 
 @Component({
   selector: 'app-wardrobe',
@@ -40,10 +43,26 @@ import { ReviewItemModalComponent } from './review-item-modal.component';
     <section class="p-6 md:p-8 flex-1">
 
       <!-- Header + filters -->
-      <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
-        <div>
-          <h2 class="text-xl font-bold text-white">Digital Archive</h2>
-          <p class="text-sm text-slate-text font-mono mt-1">{{ allItems().length }} ITEMS INDEXED</p>
+      <div class="flex flex-col gap-4 mb-6">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div>
+            <h2 class="text-xl font-bold text-white">Digital Archive</h2>
+            <p class="text-sm text-slate-text font-mono mt-1">{{ allItems().length }} ITEMS INDEXED</p>
+          </div>
+
+          <!-- Sort dropdown -->
+          <select
+            class="rounded-lg bg-card-dark border border-[#333] text-sm text-slate-200 px-3 py-1.5 outline-none focus:border-primary/60 transition-colors font-mono"
+            [value]="sortKey()"
+            (change)="onSortChange($any($event.target).value)"
+          >
+            <option value="dateAdded:desc">Newest First</option>
+            <option value="dateAdded:asc">Oldest First</option>
+            <option value="wearCount:desc">Most Worn</option>
+            <option value="wearCount:asc">Least Worn</option>
+            <option value="price.amount:desc">Price: High to Low</option>
+            <option value="price.amount:asc">Price: Low to High</option>
+          </select>
         </div>
 
         <!-- Category pills -->
@@ -53,7 +72,7 @@ import { ReviewItemModalComponent } from './review-item-modal.component';
             [class]="selectedCategory() === 'all'
               ? 'bg-white text-black'
               : 'bg-card-dark border border-[#333] text-slate-text hover:text-white hover:border-slate-500'"
-            (click)="selectedCategory.set('all')"
+            (click)="selectCategory('all')"
           >All Items</button>
 
           @for (cat of allCategories(); track cat) {
@@ -62,7 +81,7 @@ import { ReviewItemModalComponent } from './review-item-modal.component';
               [class]="selectedCategory() === cat
                 ? 'bg-white text-black'
                 : 'bg-card-dark border border-[#333] text-slate-text hover:text-white hover:border-slate-500'"
-              (click)="selectedCategory.set(cat)"
+              (click)="selectCategory(cat)"
             >{{ cat }}</button>
           }
         </div>
@@ -107,6 +126,19 @@ import { ReviewItemModalComponent } from './review-item-modal.component';
             />
           }
         </div>
+
+        <!-- Load More -->
+        @if (hasMore()) {
+          <div class="pb-10 flex justify-center">
+            <button
+              class="px-6 py-2.5 rounded-lg border border-[#333] text-sm font-medium text-slate-300 hover:text-white hover:border-slate-500 transition-colors font-mono disabled:opacity-50"
+              [disabled]="loadingMore()"
+              (click)="loadMore()"
+            >
+              @if (loadingMore()) { Loading... } @else { Load More }
+            </button>
+          </div>
+        }
       }
     </section>
 
@@ -170,14 +202,21 @@ export class WardrobeComponent implements OnInit {
 
   @ViewChild('uploadRef') private uploadRef!: UploadItemComponent;
 
-  readonly allItems    = signal<ClothingItem[]>([]);
-  readonly draftItem   = signal<ClothingItem | null>(null);
-  readonly editingItem = signal<ClothingItem | null>(null);
+  readonly allItems     = signal<ClothingItem[]>([]);
+  readonly draftItem    = signal<ClothingItem | null>(null);
+  readonly editingItem  = signal<ClothingItem | null>(null);
   readonly deletingItem = signal<ClothingItem | null>(null);
-  readonly loading     = signal(false);
-  readonly uploading   = signal(false);
-  readonly uploadError = signal<string | null>(null);
+  readonly loading      = signal(false);
+  readonly loadingMore  = signal(false);
+  readonly hasMore      = signal(false);
+  readonly nextToken    = signal<string | null>(null);
+  readonly uploading    = signal(false);
+  readonly uploadError  = signal<string | null>(null);
   readonly selectedCategory = signal<string>('all');
+  readonly sortField    = signal<WardrobeSortField>('dateAdded');
+  readonly sortDir      = signal<'asc' | 'desc'>('desc');
+
+  readonly sortKey = computed(() => `${this.sortField()}:${this.sortDir()}`);
 
   readonly allCategories = computed<string[]>(() =>
     [...new Set(
@@ -196,21 +235,26 @@ export class WardrobeComponent implements OnInit {
   );
 
   readonly filteredItems = computed<ClothingItem[]>(() => {
-    const cat = this.selectedCategory();
-    const q   = this.searchQuery().toLowerCase().trim();
-    return this.allItems().filter(item => {
-      const matchesCat    = cat === 'all' || item.category?.toLowerCase() === cat.toLowerCase();
-      const matchesSearch = !q
-        || item.category?.toLowerCase().includes(q)
-        || item.brand?.toLowerCase().includes(q)
-        || item.tags.some(t => t.toLowerCase().includes(q));
-      return matchesCat && matchesSearch;
-    });
+    const q = this.searchQuery().toLowerCase().trim();
+    // Category is handled server-side; only apply free-text search client-side
+    if (!q) return this.allItems();
+    return this.allItems().filter(item => matchesItem(item, q));
   });
 
-  constructor(private wardrobe: WardrobeService) {}
+  constructor(
+    private wardrobe: WardrobeService,
+    private router: Router,
+    private route: ActivatedRoute,
+  ) {}
 
   ngOnInit(): void {
+    const params = this.route.snapshot.queryParamMap;
+    const cat    = params.get('category') ?? 'all';
+    const sf     = (params.get('sortField') as WardrobeSortField) ?? 'dateAdded';
+    const sd     = (params.get('sortDir') as 'asc' | 'desc') ?? 'desc';
+    this.selectedCategory.set(cat);
+    this.sortField.set(sf);
+    this.sortDir.set(sd);
     this.loadItems();
   }
 
@@ -219,11 +263,67 @@ export class WardrobeComponent implements OnInit {
     this.uploadRef.openFilePicker();
   }
 
+  selectCategory(cat: string): void {
+    this.selectedCategory.set(cat);
+    this.syncUrl();
+    this.loadItems();
+  }
+
+  onSortChange(key: string): void {
+    const [field, dir] = key.split(':');
+    this.sortField.set(field as WardrobeSortField);
+    this.sortDir.set(dir as 'asc' | 'desc');
+    this.syncUrl();
+    this.loadItems();
+  }
+
+  loadMore(): void {
+    const token = this.nextToken();
+    if (!token || this.loadingMore()) return;
+    this.loadingMore.set(true);
+    this.wardrobe.getAll(this.buildQuery(token)).subscribe({
+      next: res => {
+        this.allItems.update(curr => [...curr, ...res.items]);
+        this.nextToken.set(res.nextContinuationToken ?? null);
+        this.hasMore.set(!!res.nextContinuationToken);
+        this.loadingMore.set(false);
+      },
+      error: () => this.loadingMore.set(false),
+    });
+  }
+
   private loadItems(): void {
     this.loading.set(true);
-    this.wardrobe.getAll({ pageSize: 100 }).subscribe({
-      next: items => { this.allItems.set(items); this.loading.set(false); },
-      error: ()    => { this.loading.set(false); }
+    this.nextToken.set(null);
+    this.hasMore.set(false);
+    this.wardrobe.getAll(this.buildQuery()).subscribe({
+      next: res => { this.allItems.set(res.items); this.nextToken.set(res.nextContinuationToken ?? null); this.hasMore.set(!!res.nextContinuationToken); this.loading.set(false); },
+      error: ()  => { this.loading.set(false); }
+    });
+  }
+
+  private buildQuery(continuationToken?: string | null) {
+    const cat = this.selectedCategory();
+    return {
+      category:          cat !== 'all' ? cat : undefined,
+      sortField:         this.sortField(),
+      sortDir:           this.sortDir(),
+      pageSize:          24,
+      continuationToken: continuationToken ?? undefined,
+    };
+  }
+
+  private syncUrl(): void {
+    const cat = this.selectedCategory();
+    const sf  = this.sortField();
+    const sd  = this.sortDir();
+    this.router.navigate([], {
+      queryParams: {
+        category:  cat !== 'all'       ? cat  : null,
+        sortField: sf  !== 'dateAdded' ? sf   : null,
+        sortDir:   sd  !== 'desc'      ? sd   : null,
+      },
+      replaceUrl: true,
     });
   }
 
