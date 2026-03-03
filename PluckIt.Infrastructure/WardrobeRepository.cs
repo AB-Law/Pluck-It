@@ -46,8 +46,8 @@ public class WardrobeRepository : IWardrobeRepository
 
     if (!string.IsNullOrWhiteSpace(query.Category))
     {
-      conditions.Add("c.category = @category");
-      parameters.Add("@category", query.Category);
+      conditions.Add("LOWER(c.category) = LOWER(@category)");
+      parameters.Add("@category", query.Category.Trim());
     }
 
     if (!string.IsNullOrWhiteSpace(query.Brand))

@@ -72,5 +72,5 @@ public record WardrobeQuery
 /// Paged result envelope returned by <see cref="IWardrobeRepository.GetAllAsync"/>.
 /// </summary>
 public record WardrobePagedResult(
-    List<ClothingItem> Items,
-    string?            NextContinuationToken);
+    IReadOnlyList<ClothingItem> Items,
+    string?                     NextContinuationToken);

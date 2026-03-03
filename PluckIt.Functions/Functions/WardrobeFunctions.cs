@@ -47,6 +47,12 @@ public class WardrobeFunctions(
         int?     minWears = int.TryParse(qs.GetValueOrDefault("minWears"), out var mw) ? mw : null;
         int?     maxWears = int.TryParse(qs.GetValueOrDefault("maxWears"), out var xw) ? xw : null;
 
+        // ── Validate range pairings ─────────────────────────────────────────
+        if (priceMin.HasValue && priceMax.HasValue && priceMin.Value > priceMax.Value)
+            return await JsonError(req, HttpStatusCode.BadRequest, "priceMin must not exceed priceMax.");
+        if (minWears.HasValue && maxWears.HasValue && minWears.Value > maxWears.Value)
+            return await JsonError(req, HttpStatusCode.BadRequest, "minWears must not exceed maxWears.");
+
         // ── Parse sort ──────────────────────────────────────────────────────
         var sortField = qs.GetValueOrDefault("sortField") is string sf &&
                         WardrobeSortField.Allowlist.Contains(sf, StringComparer.OrdinalIgnoreCase)

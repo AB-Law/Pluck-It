@@ -138,6 +138,7 @@ public sealed class WardrobeRepositoryIntegrationTests
 
         var page2 = await _repo.GetAllAsync(UserId, Q(pageSize: 4, token: page1.NextContinuationToken));
         page2.Items.Count.ShouldBe(4);
+        page2.NextContinuationToken.ShouldBeNull("last page must signal end of results");
 
         var allIds = page0.Items.Concat(page1.Items).Concat(page2.Items).Select(i => i.Id).ToList();
         allIds.Distinct().Count().ShouldBe(12, "no duplicates across pages");

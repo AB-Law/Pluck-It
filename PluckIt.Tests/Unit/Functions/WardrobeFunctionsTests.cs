@@ -62,7 +62,7 @@ public sealed class WardrobeFunctionsTests
     }
 
     /// <summary>Deserializes the paged envelope from the response body.</summary>
-    private static (List<ClothingItem> Items, string? NextToken) ParseEnvelope(string json)
+    private static (IReadOnlyList<ClothingItem> Items, string? NextToken) ParseEnvelope(string json)
     {
         var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
         var env  = JsonSerializer.Deserialize<WardrobePagedResult>(json, opts)!;
@@ -111,7 +111,9 @@ public sealed class WardrobeFunctionsTests
 
         var result = await sut.GetWardrobe(TestRequest.Get("http://localhost/api/wardrobe"), CancellationToken.None) as Helpers.TestHttpResponseData;
         var (items, _) = ParseEnvelope(result!.ReadBodyAsString());
-        items.ShouldHaveSingleItem();
+        var item = items.ShouldHaveSingleItem();
+        sas.GenerateSasUrlCallCount.ShouldBe(1);
+        item.ImageUrl.ShouldEndWith("?sas=fake");
     }
 
     // ── GetWardrobe — category filter ────────────────────────────────────────
@@ -352,6 +354,43 @@ public sealed class WardrobeFunctionsTests
 
         var (items, _) = ParseEnvelope(result!.ReadBodyAsString());
         items.Select(i => i.Id).ShouldBe(new[] { "x", "y" }, ignoreOrder: true);
+    }
+
+    // ── GetWardrobe — range validation ───────────────────────────────────────
+
+    [Fact]
+    public async Task GetWardrobe_Returns400WhenPriceMinExceedsPriceMax()
+    {
+        var result = await CreateSut().GetWardrobe(
+            TestRequest.Get("http://localhost/api/wardrobe?priceMin=200&priceMax=50"),
+            CancellationToken.None);
+
+        result.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task GetWardrobe_Returns400WhenMinWearsExceedsMaxWears()
+    {
+        var result = await CreateSut().GetWardrobe(
+            TestRequest.Get("http://localhost/api/wardrobe?minWears=10&maxWears=2"),
+            CancellationToken.None);
+
+        result.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task GetWardrobe_AllowsEqualPriceMinAndPriceMax()
+    {
+        var repo = new InMemoryWardrobeRepository()
+            .WithItems(MakeItem("a", price: 50m), MakeItem("b", price: 100m));
+
+        var result = await CreateSut(repo).GetWardrobe(
+            TestRequest.Get("http://localhost/api/wardrobe?priceMin=50&priceMax=50"),
+            CancellationToken.None) as Helpers.TestHttpResponseData;
+
+        result!.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var (items, _) = ParseEnvelope(result.ReadBodyAsString());
+        items.ShouldHaveSingleItem().Id.ShouldBe("a");
     }
 
     // ── GetWardrobe — aesthetic tags filter ──────────────────────────────────

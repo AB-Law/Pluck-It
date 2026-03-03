@@ -14,10 +14,17 @@ public sealed class FakeBlobSasService : IBlobSasService
     /// <summary>URLs passed to <see cref="DeleteBlobAsync"/>.</summary>
     public IReadOnlyList<string> DeletedUrls => _deletedUrls.AsReadOnly();
 
+    /// <summary>Number of times <see cref="GenerateSasUrl"/> has been called.</summary>
+    public int GenerateSasUrlCallCount { get; private set; }
+
     /// <summary>Blob names returned by <see cref="ListArchiveBlobNamesAsync"/>. Seed to simulate storage contents.</summary>
     public List<string> ArchiveBlobNames { get; } = [];
 
-    public string GenerateSasUrl(string blobUrl, int validForMinutes = 120) => blobUrl;
+    public string GenerateSasUrl(string blobUrl, int validForMinutes = 120)
+    {
+        GenerateSasUrlCallCount++;
+        return blobUrl + "?sas=fake";
+    }
 
     public Task DeleteBlobAsync(string blobUrl, CancellationToken cancellationToken = default)
     {
