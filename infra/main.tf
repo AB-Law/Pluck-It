@@ -120,6 +120,18 @@ resource "azurerm_cosmosdb_sql_container" "wardrobe" {
       }
     }
 
+    # Sort by oldest first
+    composite_index {
+      index {
+        path  = "/dateAdded"
+        order = "ascending"
+      }
+      index {
+        path  = "/id"
+        order = "ascending"
+      }
+    }
+
     # Sort by most worn (descending)
     composite_index {
       index {
