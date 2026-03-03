@@ -1,4 +1,5 @@
 import { Component, input, output, signal, computed, inject, effect } from '@angular/core';
+import { Subscription } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { ClothingItem, WearHistoryRecord, WearHistorySummary } from '../../core/models/clothing-item.model';
 import { WardrobeService } from '../../core/services/wardrobe.service';
@@ -177,7 +178,7 @@ export class ItemDetailDrawerComponent {
   private profileService  = inject(UserProfileService);
 
   constructor() {
-    effect(() => {
+    effect((onCleanup) => {
       const itm = this.item();
       if (!itm) {
         this.wearHistoryEvents.set([]);
@@ -185,7 +186,7 @@ export class ItemDetailDrawerComponent {
         return;
       }
       this.wearHistoryLoading.set(true);
-      this.wardrobeService.getWearHistory(itm.id).subscribe({
+      const sub: Subscription = this.wardrobeService.getWearHistory(itm.id).subscribe({
         next: res => {
           this.wearHistoryEvents.set(res.events ?? []);
           this.wearHistorySummary.set(res.summary ?? null);
@@ -193,6 +194,7 @@ export class ItemDetailDrawerComponent {
         },
         error: () => this.wearHistoryLoading.set(false),
       });
+      onCleanup(() => sub.unsubscribe());
     });
   }
 

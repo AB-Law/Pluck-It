@@ -34,7 +34,7 @@ interface CalendarDay {
         @for (d of calendarDays(); track d.key) {
           <div
             class="aspect-square rounded border text-center text-[10px] font-mono flex items-center justify-center"
-            [class]="d.inMonth ? 'border-[#2f2f2f] text-slate-300' : 'border-transparent text-slate-600'"
+            [ngClass]="d.inMonth ? 'border-[#2f2f2f] text-slate-300' : 'border-transparent text-slate-600'"
             [style.background]="d.wearCount > 0 ? 'rgba(37,141,244,0.15)' : 'transparent'"
             [title]="d.wearCount > 0 ? (d.wearCount + ' wear' + (d.wearCount > 1 ? 's' : '')) : ''"
           >

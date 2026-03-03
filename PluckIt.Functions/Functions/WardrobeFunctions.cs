@@ -230,28 +230,35 @@ public class WardrobeFunctions(
         if (updated is null)
             return req.CreateResponse(HttpStatusCode.NotFound);
 
-        var wearHistoryId = $"wear-{id}-{Guid.NewGuid():N}";
-        await wearHistoryRepo.AddAsync(new WearHistoryRecord
+        try
         {
-            Id = wearHistoryId,
-            UserId = userId!,
-            ItemId = id,
-            OccurredAt = occurredAt,
-            Source = source,
-            Occasion = wearReq?.Occasion,
-            WeatherSnapshot = wearReq?.WeatherSnapshot,
-            StylingActivityId = wearReq?.StylingActivityId,
-            CreatedAt = DateTimeOffset.UtcNow,
-        }, cancellationToken);
+            var wearHistoryId = $"wear-{id}-{Guid.NewGuid():N}";
+            await wearHistoryRepo.AddAsync(new WearHistoryRecord
+            {
+                Id = wearHistoryId,
+                UserId = userId!,
+                ItemId = id,
+                OccurredAt = occurredAt,
+                Source = source,
+                Occasion = wearReq?.Occasion,
+                WeatherSnapshot = wearReq?.WeatherSnapshot,
+                StylingActivityId = wearReq?.StylingActivityId,
+                CreatedAt = DateTimeOffset.UtcNow,
+            }, cancellationToken);
 
-        if (!string.IsNullOrWhiteSpace(wearReq?.StylingActivityId))
+            if (!string.IsNullOrWhiteSpace(wearReq?.StylingActivityId))
+            {
+                await stylingActivityRepo.UpdateSuggestionStatusAsync(
+                    wearReq.StylingActivityId,
+                    userId!,
+                    WearSuggestionStatus.Accepted,
+                    linkedWearEventId: wearHistoryId,
+                    cancellationToken: cancellationToken);
+            }
+        }
+        catch
         {
-            await stylingActivityRepo.UpdateSuggestionStatusAsync(
-                wearReq.StylingActivityId,
-                userId!,
-                WearSuggestionStatus.Accepted,
-                linkedWearEventId: wearHistoryId,
-                cancellationToken: cancellationToken);
+            // Swallow secondary write failures to avoid duplicate wear increments on client retry.
         }
 
         updated.ImageUrl = sasService.GenerateSasUrl(updated.ImageUrl);

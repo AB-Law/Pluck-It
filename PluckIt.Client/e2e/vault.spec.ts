@@ -91,7 +91,7 @@ test.describe('Vault / Wardrobe', () => {
           currency: 'USD',
           insufficientData: false,
           behavioralInsights: {
-            blackWearSharePct: 63,
+            topColorWearShare: { color: 'Black', pct: 63 },
             unworn90dPct: 40,
             mostExpensiveUnworn: { itemId: 'item-001', amount: 199, currency: 'USD' },
           },
