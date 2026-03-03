@@ -103,4 +103,39 @@ describe('WardrobeService', () => {
     const req = http.expectOne(r => r.url.includes('/api/wardrobe/item-001/wear') && r.method === 'PATCH');
     req.flush({ ...MOCK_ITEM, wearCount: 1 });
   });
+
+  it('logWear() sends payload when provided', () => {
+    service.logWear('item-001', { clientEventId: 'evt-1', source: 'vault_card' }).subscribe();
+    const req = http.expectOne(r => r.url.includes('/api/wardrobe/item-001/wear') && r.method === 'PATCH');
+    expect(req.request.body.clientEventId).toBe('evt-1');
+    req.flush({ ...MOCK_ITEM, wearCount: 1 });
+  });
+
+  it('getWearHistory() hits /wear-history with date params', () => {
+    service.getWearHistory('item-001', '2026-01-01', '2026-01-31').subscribe();
+    const req = http.expectOne(r => r.url.includes('/api/wardrobe/item-001/wear-history') && r.method === 'GET');
+    expect(req.request.params.get('from')).toBe('2026-01-01');
+    expect(req.request.params.get('to')).toBe('2026-01-31');
+    req.flush({ itemId: 'item-001', events: [], summary: { totalInRange: 0, legacyUntrackedCount: 0 } });
+  });
+
+  it('recordStylingActivity() POSTs to styling-activity', () => {
+    service.recordStylingActivity({ itemId: 'item-001', source: 'dashboard_drag_drop' }).subscribe();
+    const req = http.expectOne(r => r.url.includes('/api/wardrobe/styling-activity') && r.method === 'POST');
+    expect(req.request.body.itemId).toBe('item-001');
+    req.flush({ status: 'recorded', activityId: 'sty-1' });
+  });
+
+  it('getWearSuggestions() GETs suggestions', () => {
+    service.getWearSuggestions().subscribe();
+    const req = http.expectOne(r => r.url.includes('/api/wardrobe/wear-suggestions') && r.method === 'GET');
+    req.flush({ suggestions: [] });
+  });
+
+  it('updateWearSuggestionStatus() PATCHes suggestion status', () => {
+    service.updateWearSuggestionStatus('sug-1', { status: 'Dismissed' }).subscribe();
+    const req = http.expectOne(r => r.url.includes('/api/wardrobe/wear-suggestions/sug-1') && r.method === 'PATCH');
+    expect(req.request.body.status).toBe('Dismissed');
+    req.flush({ status: 'updated' });
+  });
 });

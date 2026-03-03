@@ -14,6 +14,8 @@ namespace PluckIt.Functions.Functions;
 
 public class WardrobeFunctions(
     IWardrobeRepository repo,
+    IWearHistoryRepository wearHistoryRepo,
+    IStylingActivityRepository stylingActivityRepo,
     IBlobSasService sasService,
     IClothingMetadataService metadataService,
     IHttpClientFactory httpClientFactory,
@@ -197,17 +199,288 @@ public class WardrobeFunctions(
             }
         }
 
+        var existing = await repo.GetByIdAsync(id, userId!, cancellationToken);
+        if (existing is null)
+            return req.CreateResponse(HttpStatusCode.NotFound);
+
+        if (!string.IsNullOrWhiteSpace(wearReq?.ClientEventId) &&
+            string.Equals(existing.LastWearActionId, wearReq.ClientEventId, StringComparison.Ordinal))
+        {
+            existing.ImageUrl = sasService.GenerateSasUrl(existing.ImageUrl);
+            return await JsonOk(req, existing, PluckItJsonContext.Default.ClothingItem);
+        }
+
+        var occurredAt = wearReq?.OccurredAt ?? DateTimeOffset.UtcNow;
+        var source = string.IsNullOrWhiteSpace(wearReq?.Source)
+            ? WearLogSources.Unknown
+            : wearReq!.Source!.Trim();
+
         var ev = new WearEvent(
-            OccurredAt:      DateTimeOffset.UtcNow,
-            Occasion:        wearReq?.Occasion,
+            OccurredAt: occurredAt,
+            Occasion: wearReq?.Occasion,
             WeatherSnapshot: wearReq?.WeatherSnapshot);
 
-        var updated = await repo.AppendWearEventAsync(id, userId!, ev, maxEvents: 30, cancellationToken);
+        var updated = await repo.AppendWearEventAsync(
+            id,
+            userId!,
+            ev,
+            wearReq?.ClientEventId,
+            maxEvents: 30,
+            cancellationToken);
         if (updated is null)
             return req.CreateResponse(HttpStatusCode.NotFound);
 
+        try
+        {
+            var wearHistoryId = $"wear-{id}-{Guid.NewGuid():N}";
+            await wearHistoryRepo.AddAsync(new WearHistoryRecord
+            {
+                Id = wearHistoryId,
+                UserId = userId!,
+                ItemId = id,
+                OccurredAt = occurredAt,
+                Source = source,
+                Occasion = wearReq?.Occasion,
+                WeatherSnapshot = wearReq?.WeatherSnapshot,
+                StylingActivityId = wearReq?.StylingActivityId,
+                CreatedAt = DateTimeOffset.UtcNow,
+            }, cancellationToken);
+
+            if (!string.IsNullOrWhiteSpace(wearReq?.StylingActivityId))
+            {
+                await stylingActivityRepo.UpdateSuggestionStatusAsync(
+                    wearReq.StylingActivityId,
+                    userId!,
+                    WearSuggestionStatus.Accepted,
+                    linkedWearEventId: wearHistoryId,
+                    cancellationToken: cancellationToken);
+            }
+        }
+        catch
+        {
+            // Swallow secondary write failures to avoid duplicate wear increments on client retry.
+        }
+
         updated.ImageUrl = sasService.GenerateSasUrl(updated.ImageUrl);
         return await JsonOk(req, updated, PluckItJsonContext.Default.ClothingItem);
+    }
+
+    // ── GET /api/wardrobe/{id}/wear-history ─────────────────────────────────
+
+    [Function(nameof(GetWearHistory))]
+    public async Task<HttpResponseData> GetWearHistory(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "wardrobe/{id}/wear-history")] HttpRequestData req,
+        string id,
+        CancellationToken cancellationToken)
+    {
+        var (authed, userId) = await TryGetUserIdAsync(req);
+        if (!authed)
+            return req.CreateResponse(HttpStatusCode.Unauthorized);
+
+        var item = await repo.GetByIdAsync(id, userId!, cancellationToken);
+        if (item is null)
+            return req.CreateResponse(HttpStatusCode.NotFound);
+
+        var qs = ParseQueryString(req.Url);
+        DateTimeOffset? from = TryParseDateParam(qs.GetValueOrDefault("from"));
+        DateTimeOffset? to = TryParseDateParam(qs.GetValueOrDefault("to"), endOfDay: true);
+
+        var eventsInRange = await wearHistoryRepo.GetByItemAsync(
+            id,
+            userId!,
+            from,
+            to,
+            maxResults: 1000,
+            cancellationToken: cancellationToken);
+
+        var allTracked = await wearHistoryRepo.GetByItemAsync(
+            id,
+            userId!,
+            from: null,
+            to: null,
+            maxResults: 5000,
+            cancellationToken: cancellationToken);
+
+        var trackedFrom = allTracked.Count > 0
+            ? allTracked.Min(e => e.OccurredAt)
+            : (DateTimeOffset?)null;
+        var legacyUntrackedCount = Math.Max(item.WearCount - allTracked.Count, 0);
+
+        var response = new WearHistoryResponse
+        {
+            ItemId = id,
+            Events = eventsInRange,
+            Summary = new WearHistorySummary
+            {
+                TotalInRange = eventsInRange.Count,
+                TrackedFrom = trackedFrom,
+                LegacyUntrackedCount = legacyUntrackedCount,
+            },
+        };
+
+        return await JsonOk(req, response, PluckItJsonContext.Default.WearHistoryResponse);
+    }
+
+    // ── POST /api/wardrobe/styling-activity ─────────────────────────────────
+
+    [Function(nameof(RecordStylingActivity))]
+    public async Task<HttpResponseData> RecordStylingActivity(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "wardrobe/styling-activity")] HttpRequestData req,
+        CancellationToken cancellationToken)
+    {
+        var (authed, userId) = await TryGetUserIdAsync(req);
+        if (!authed)
+            return req.CreateResponse(HttpStatusCode.Unauthorized);
+
+        StylingActivityRequest? body;
+        try
+        {
+            body = await JsonSerializer.DeserializeAsync(
+                req.Body, PluckItJsonContext.Default.StylingActivityRequest, cancellationToken);
+        }
+        catch
+        {
+            return await JsonError(req, HttpStatusCode.BadRequest, "Invalid request body.");
+        }
+
+        if (body is null || string.IsNullOrWhiteSpace(body.ItemId))
+            return await JsonError(req, HttpStatusCode.BadRequest, "itemId is required.");
+
+        var item = await repo.GetByIdAsync(body.ItemId, userId!, cancellationToken);
+        if (item is null)
+            return req.CreateResponse(HttpStatusCode.NotFound);
+
+        if (!string.IsNullOrWhiteSpace(body.ClientEventId))
+        {
+            var existing = await stylingActivityRepo.GetByClientEventIdAsync(
+                userId!,
+                body.ClientEventId,
+                cancellationToken);
+            if (existing is not null)
+            {
+                return await JsonOk(
+                    req,
+                    new StylingActivityResponse("recorded", existing.Id),
+                    PluckItJsonContext.Default.StylingActivityResponse);
+            }
+        }
+
+        var occurredAt = body.OccurredAt ?? DateTimeOffset.UtcNow;
+        var record = new StylingActivityRecord
+        {
+            Id = string.IsNullOrWhiteSpace(body.ClientEventId)
+                ? $"sty-{Guid.NewGuid():N}"
+                : body.ClientEventId!,
+            UserId = userId!,
+            ItemId = body.ItemId,
+            ClientEventId = body.ClientEventId,
+            ActivityType = body.ActivityType,
+            Source = body.Source,
+            OccurredAt = occurredAt,
+            Status = WearSuggestionStatus.Pending,
+            SuggestionMessage = "You added this to styling yesterday — mark as worn?",
+            ExpiresAt = occurredAt.AddDays(3),
+            LastUpdatedAt = DateTimeOffset.UtcNow,
+        };
+
+        var saved = await stylingActivityRepo.UpsertAsync(record, cancellationToken);
+        return await JsonOk(
+            req,
+            new StylingActivityResponse("recorded", saved.Id),
+            PluckItJsonContext.Default.StylingActivityResponse);
+    }
+
+    // ── GET /api/wardrobe/wear-suggestions ──────────────────────────────────
+
+    [Function(nameof(GetWearSuggestions))]
+    public async Task<HttpResponseData> GetWearSuggestions(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "wardrobe/wear-suggestions")] HttpRequestData req,
+        CancellationToken cancellationToken)
+    {
+        var (authed, userId) = await TryGetUserIdAsync(req);
+        if (!authed)
+            return req.CreateResponse(HttpStatusCode.Unauthorized);
+
+        var pending = await stylingActivityRepo.GetPendingSuggestionsAsync(
+            userId!,
+            DateTimeOffset.UtcNow,
+            maxResults: 20,
+            cancellationToken: cancellationToken);
+
+        var suggestions = new List<WearSuggestionItem>();
+        foreach (var activity in pending)
+        {
+            var item = await repo.GetByIdAsync(activity.ItemId, userId!, cancellationToken);
+            if (item is null)
+                continue;
+
+            if (item.LastWornAt.HasValue && item.LastWornAt.Value >= activity.OccurredAt)
+            {
+                await stylingActivityRepo.UpdateSuggestionStatusAsync(
+                    activity.Id,
+                    userId!,
+                    WearSuggestionStatus.Expired,
+                    cancellationToken: cancellationToken);
+                continue;
+            }
+
+            suggestions.Add(new WearSuggestionItem
+            {
+                SuggestionId = activity.Id,
+                ItemId = activity.ItemId,
+                Message = string.IsNullOrWhiteSpace(activity.SuggestionMessage)
+                    ? "You added this item to styling recently — mark as worn?"
+                    : activity.SuggestionMessage!,
+                ActivityAt = activity.OccurredAt,
+                ExpiresAt = activity.ExpiresAt,
+            });
+        }
+
+        return await JsonOk(
+            req,
+            new WearSuggestionsResponse { Suggestions = suggestions },
+            PluckItJsonContext.Default.WearSuggestionsResponse);
+    }
+
+    // ── PATCH /api/wardrobe/wear-suggestions/{suggestionId} ─────────────────
+
+    [Function(nameof(UpdateWearSuggestionStatus))]
+    public async Task<HttpResponseData> UpdateWearSuggestionStatus(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "wardrobe/wear-suggestions/{suggestionId}")]
+        HttpRequestData req,
+        string suggestionId,
+        CancellationToken cancellationToken)
+    {
+        var (authed, userId) = await TryGetUserIdAsync(req);
+        if (!authed)
+            return req.CreateResponse(HttpStatusCode.Unauthorized);
+
+        UpdateWearSuggestionStatusRequest? body;
+        try
+        {
+            body = await JsonSerializer.DeserializeAsync(
+                req.Body, PluckItJsonContext.Default.UpdateWearSuggestionStatusRequest, cancellationToken);
+        }
+        catch
+        {
+            return await JsonError(req, HttpStatusCode.BadRequest, "Invalid request body.");
+        }
+
+        if (body is null)
+            return await JsonError(req, HttpStatusCode.BadRequest, "Request body is required.");
+
+        var updated = await stylingActivityRepo.UpdateSuggestionStatusAsync(
+            suggestionId,
+            userId!,
+            body.Status,
+            cancellationToken: cancellationToken);
+        if (updated is null)
+            return req.CreateResponse(HttpStatusCode.NotFound);
+
+        return await JsonOk(
+            req,
+            new UpdateWearSuggestionStatusResponse("updated"),
+            PluckItJsonContext.Default.UpdateWearSuggestionStatusResponse);
     }
 
     // ── POST /api/wardrobe/upload ────────────────────────────────────────────
@@ -399,6 +672,25 @@ public class WardrobeFunctions(
         await response.WriteStringAsync(
             JsonSerializer.Serialize(new ErrorResponse(message), PluckItJsonContext.Default.ErrorResponse));
         return response;
+    }
+
+    private static DateTimeOffset? TryParseDateParam(string? value, bool endOfDay = false)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        if (DateTimeOffset.TryParse(value, out var dto))
+            return dto;
+
+        if (DateOnly.TryParse(value, out var date))
+        {
+            var dt = endOfDay
+                ? date.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc)
+                : date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            return new DateTimeOffset(dt);
+        }
+
+        return null;
     }
 
     /// <summary>Parses a URL query string into a dictionary without System.Web dependency.</summary>

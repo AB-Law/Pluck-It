@@ -54,6 +54,20 @@ var host = new HostBuilder()
                 cosmosDatabase,
                 cosmosContainer));
 
+        var cosmosWearEventsContainer = config["Cosmos:WearEventsContainer"] ?? "WearEvents";
+        services.AddSingleton<IWearHistoryRepository>(sp =>
+            new WearHistoryRepository(
+                sp.GetRequiredService<CosmosClient>(),
+                cosmosDatabase,
+                cosmosWearEventsContainer));
+
+        var cosmosStylingActivityContainer = config["Cosmos:StylingActivityContainer"] ?? "StylingActivity";
+        services.AddSingleton<IStylingActivityRepository>(sp =>
+            new StylingActivityRepository(
+                sp.GetRequiredService<CosmosClient>(),
+                cosmosDatabase,
+                cosmosStylingActivityContainer));
+
         var cosmosUserProfilesContainer = config["Cosmos:UserProfilesContainer"] ?? "UserProfiles";
         services.AddSingleton<IUserProfileRepository>(sp =>
             new UserProfileRepository(

@@ -4,7 +4,12 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { WardrobeService } from '../../core/services/wardrobe.service';
 import { UserProfileService } from '../../core/services/user-profile.service';
-import { ClothingItem, ItemCondition, WardrobeQuery } from '../../core/models/clothing-item.model';
+import {
+  ClothingItem,
+  ItemCondition,
+  WardrobeQuery,
+  WearSuggestionItem,
+} from '../../core/models/clothing-item.model';
 import type { WardrobeSortField } from '../../core/models/clothing-item.model';
 import { VaultSidebarComponent, VaultFilters, SmartGroup } from './vault-sidebar.component';
 import { VaultCardComponent } from './vault-card.component';
@@ -13,6 +18,9 @@ import { StatCardComponent } from '../../shared/stat-card.component';
 import { ReviewItemModalComponent } from '../closet/review-item-modal.component';
 import { AddToCollectionModalComponent } from '../collections/add-to-collection-modal.component';
 import { matchesItem } from '../../core/utils/search.utils';
+import { VaultInsightsService } from '../../core/services/vault-insights.service';
+import { VaultInsightsPanelComponent } from './vault-insights-panel.component';
+import { CpwIntelItem, VaultInsightsResponse } from '../../core/models/vault-insights.model';
 
 @Component({
   selector: 'app-vault',
@@ -24,6 +32,7 @@ import { matchesItem } from '../../core/utils/search.utils';
     VaultSidebarComponent,
     VaultCardComponent,
     ItemDetailDrawerComponent,
+    VaultInsightsPanelComponent,
     StatCardComponent,
     ReviewItemModalComponent,
     AddToCollectionModalComponent,
@@ -117,6 +126,28 @@ import { matchesItem } from '../../core/utils/search.utils';
             />
           </div>
 
+          @if (wearSuggestions().length > 0) {
+            <div class="mb-6 space-y-2">
+              @for (s of wearSuggestions(); track s.suggestionId) {
+                <div class="flex items-center justify-between gap-3 rounded-lg border border-primary/30 bg-primary/10 p-3">
+                  <p class="text-xs text-primary font-mono">{{ s.message }}</p>
+                  <div class="flex items-center gap-2">
+                    <button
+                      class="rounded border border-primary/40 px-2 py-1 text-[11px] font-bold text-primary hover:bg-primary/20"
+                      (click)="acceptSuggestion(s)"
+                    >Mark Worn</button>
+                    <button
+                      class="rounded border border-border-chrome px-2 py-1 text-[11px] font-bold text-slate-400 hover:text-white"
+                      (click)="dismissSuggestion(s)"
+                    >Dismiss</button>
+                  </div>
+                </div>
+              }
+            </div>
+          }
+
+          <app-vault-insights-panel [insights]="insights()" />
+
           <!-- Loading state -->
           @if (loading()) {
             <div class="flex items-center justify-center py-20 text-slate-500">
@@ -140,7 +171,10 @@ import { matchesItem } from '../../core/utils/search.utils';
                 [item]="item"
                 [currency]="currency()"
                 [isSelected]="selectedItem()?.id === item.id"
+                [cpwBadge]="cpwBadgeFor(item.id)"
+                [breakEvenReached]="breakEvenFor(item.id)"
                 (selectToggled)="onCardSelect(item)"
+                (wearIncrementRequested)="onCardWear($event)"
               />
             }
           </div>
@@ -211,6 +245,9 @@ export class VaultComponent implements OnInit {
   protected hasMore      = signal(false);
   protected nextToken    = signal<string | null>(null);
   protected searchQuery  = signal('');
+  protected wearSuggestions = signal<WearSuggestionItem[]>([]);
+  protected insights = signal<VaultInsightsResponse | null>(null);
+  protected loadingInsights = signal(false);
 
   protected readonly activeFilters = signal<VaultFilters>({
     group:      'all',
@@ -224,6 +261,7 @@ export class VaultComponent implements OnInit {
 
   constructor(
     private wardrobeService: WardrobeService,
+    private vaultInsightsService: VaultInsightsService,
     private profileService: UserProfileService,
     private router: Router,
     private route: ActivatedRoute,
@@ -247,6 +285,8 @@ export class VaultComponent implements OnInit {
     };
     this.activeFilters.set(restored);
     this.loadItems(restored);
+    this.loadWearSuggestions();
+    this.loadInsights();
   }
 
   // ── Computed stats ──────────────────────────────────────────────────────
@@ -290,6 +330,9 @@ export class VaultComponent implements OnInit {
   readonly knownBrands = computed(() =>
     [...new Set(this.allItems().map(i => i.brand).filter(Boolean) as string[])]);
 
+  readonly cpwIntelMap = computed(() =>
+    new Map((this.insights()?.cpwIntel ?? []).map(row => [row.itemId, row])));
+
   // ── Actions ───────────────────────────────────────────────────────────────
 
   onFiltersChange(f: VaultFilters): void {
@@ -317,6 +360,23 @@ export class VaultComponent implements OnInit {
     this.selectedItem.set(this.selectedItem()?.id === item.id ? null : item);
   }
 
+  onCardWear(item: ClothingItem): void {
+    const optimistic = { ...item, wearCount: (item.wearCount ?? 0) + 1 };
+    this.allItems.update(list => list.map(i => i.id === item.id ? optimistic : i));
+    if (this.selectedItem()?.id === item.id) this.selectedItem.set(optimistic);
+
+    const rand = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    this.wardrobeService.logWear(item.id, {
+      source: 'vault_card',
+      clientEventId: `wear-${rand}`,
+    }).subscribe({
+      next: updated => this.onWearLogged(updated),
+      error: () => this.allItems.update(list => list.map(i => i.id === item.id ? item : i)),
+    });
+  }
+
   openEditModal(item: ClothingItem): void { this.editingItem.set(item); }
   openShareModal(item: ClothingItem): void { this.sharingItem.set(item); }
 
@@ -331,9 +391,64 @@ export class VaultComponent implements OnInit {
   onWearLogged(updated: ClothingItem): void {
     this.allItems.update(list => list.map(i => i.id === updated.id ? updated : i));
     this.selectedItem.set(updated);
+    this.loadInsights();
+    this.loadWearSuggestions();
+  }
+
+  acceptSuggestion(s: WearSuggestionItem): void {
+    const rand = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    this.wardrobeService.logWear(s.itemId, {
+      source: 'suggestion_prompt',
+      clientEventId: `wear-${rand}`,
+      stylingActivityId: s.suggestionId,
+    }).subscribe({
+      next: updated => {
+        this.onWearLogged(updated);
+        this.wearSuggestions.update(list => list.filter(x => x.suggestionId !== s.suggestionId));
+      },
+      error: () => {},
+    });
+  }
+
+  dismissSuggestion(s: WearSuggestionItem): void {
+    this.wardrobeService.updateWearSuggestionStatus(s.suggestionId, { status: 'Dismissed' }).subscribe({
+      next: () => this.wearSuggestions.update(list => list.filter(x => x.suggestionId !== s.suggestionId)),
+      error: () => {},
+    });
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
+
+  cpwBadgeFor(itemId: string): CpwIntelItem['badge'] {
+    return this.cpwIntelMap().get(itemId)?.badge ?? 'unknown';
+  }
+
+  breakEvenFor(itemId: string): boolean {
+    return this.cpwIntelMap().get(itemId)?.breakEvenReached ?? false;
+  }
+
+  private loadWearSuggestions(): void {
+    this.wardrobeService.getWearSuggestions().subscribe({
+      next: res => this.wearSuggestions.set(res.suggestions ?? []),
+      error: () => this.wearSuggestions.set([]),
+    });
+  }
+
+  private loadInsights(): void {
+    this.loadingInsights.set(true);
+    this.vaultInsightsService.getInsights(90, 100).subscribe({
+      next: res => {
+        this.insights.set(res);
+        this.loadingInsights.set(false);
+      },
+      error: () => {
+        this.insights.set(null);
+        this.loadingInsights.set(false);
+      },
+    });
+  }
 
   private loadItems(filters: VaultFilters): void {
     this.loading.set(true);

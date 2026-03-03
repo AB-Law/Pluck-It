@@ -4,6 +4,8 @@ code in function_app.py or agents/ runs.  All unit tests mock I/O at the
 Cosmos / OpenAI boundary; no real external services are contacted.
 """
 import os
+import sys
+import types
 
 # ── Environment stubs — must be set before any app imports ──────────────────
 os.environ.setdefault("AZURE_OPENAI_ENDPOINT",    "https://test.openai.azure.com/")
@@ -13,6 +15,8 @@ os.environ.setdefault("COSMOS_DB_ENDPOINT",       "https://localhost:8081")
 os.environ.setdefault("COSMOS_DB_KEY",            "test-cosmos-key==")
 os.environ.setdefault("COSMOS_DB_DATABASE",       "PluckIt")
 os.environ.setdefault("COSMOS_DB_CONTAINER",      "Wardrobe")
+os.environ.setdefault("COSMOS_DB_WEAR_EVENTS_CONTAINER", "WearEvents")
+os.environ.setdefault("COSMOS_DB_STYLING_ACTIVITY_CONTAINER", "StylingActivity")
 os.environ.setdefault("COSMOS_DB_USER_PROFILES_CONTAINER", "UserProfiles")
 os.environ.setdefault("COSMOS_DB_CONVERSATIONS_CONTAINER", "Conversations")
 os.environ.setdefault("COSMOS_DB_DIGESTS_CONTAINER",       "Digests")
@@ -24,6 +28,68 @@ os.environ.setdefault("UPLOADS_CONTAINER_NAME",   "uploads")
 os.environ.setdefault("ARCHIVE_CONTAINER_NAME",   "archive")
 os.environ.setdefault("LOCAL_DEV_USER_ID",        "test-user-001")
 os.environ.setdefault("CORS_ALLOWED_ORIGINS",     "*")
+
+# ── Optional azure sdk stubs for local unit runs without azure packages ─────
+try:
+    import azure.functions  # type: ignore # noqa: F401
+except Exception:
+    azure_mod = types.ModuleType("azure")
+    functions_mod = types.ModuleType("azure.functions")
+    cosmos_mod = types.ModuleType("azure.cosmos")
+    cosmos_aio_mod = types.ModuleType("azure.cosmos.aio")
+
+    class _DummyAsgiFunctionApp:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def function_name(self, *args, **kwargs):
+            def _decorator(fn):
+                return fn
+            return _decorator
+
+        def blob_trigger(self, *args, **kwargs):
+            def _decorator(fn):
+                return fn
+            return _decorator
+
+        def timer_trigger(self, *args, **kwargs):
+            def _decorator(fn):
+                return fn
+            return _decorator
+
+    class _AuthLevel:
+        ANONYMOUS = "anonymous"
+
+    functions_mod.AsgiFunctionApp = _DummyAsgiFunctionApp
+    functions_mod.AuthLevel = _AuthLevel
+    functions_mod.InputStream = object
+    functions_mod.TimerRequest = object
+    cosmos_mod.CosmosClient = object
+    cosmos_mod.PartitionKey = object
+    cosmos_aio_mod.CosmosClient = object
+
+    sys.modules.setdefault("azure", azure_mod)
+    sys.modules.setdefault("azure.functions", functions_mod)
+    sys.modules.setdefault("azure.cosmos", cosmos_mod)
+    sys.modules.setdefault("azure.cosmos.aio", cosmos_aio_mod)
+
+if "pillow_heif" not in sys.modules:
+    pillow_heif_mod = types.ModuleType("pillow_heif")
+
+    def _register_heif_opener() -> None:
+        return None
+
+    pillow_heif_mod.register_heif_opener = _register_heif_opener
+    sys.modules.setdefault("pillow_heif", pillow_heif_mod)
+
+if "feedparser" not in sys.modules:
+    feedparser_mod = types.ModuleType("feedparser")
+
+    def _parse(*args, **kwargs):
+        return {"entries": []}
+
+    feedparser_mod.parse = _parse
+    sys.modules.setdefault("feedparser", feedparser_mod)
 
 import asyncio
 from collections.abc import AsyncIterator

@@ -90,6 +90,12 @@ public class ClothingItem
   /// </summary>
   public List<WearEvent> WearEvents { get; set; } = [];
 
+  /// <summary>
+  /// Last client-supplied wear action id processed for this item.
+  /// Used as a lightweight idempotency guard for repeated PATCH /wardrobe/{id}/wear calls.
+  /// </summary>
+  public string? LastWearActionId { get; set; }
+
   /// <summary>Estimated current resale/market value in the item's OriginalCurrency.</summary>
   public decimal? EstimatedMarketValue { get; set; }
 
@@ -105,4 +111,3 @@ public class ClothingItem
   /// </summary>
   public IReadOnlyCollection<string>? AestheticTags { get; set; }
 }
-

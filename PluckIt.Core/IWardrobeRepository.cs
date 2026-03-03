@@ -38,7 +38,7 @@ public interface IWardrobeRepository
     string itemId,
     string userId,
     WearEvent ev,
+    string? clientEventId = null,
     int maxEvents = 30,
     CancellationToken cancellationToken = default);
 }
-

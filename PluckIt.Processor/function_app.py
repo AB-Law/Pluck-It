@@ -10,6 +10,7 @@ Endpoints:
   GET  /api/chat/memory         — retrieve user's conversation memory summary
   PUT  /api/chat/memory         — update user's conversation memory summary
   GET  /api/digest/latest       — most recent wardrobe digest suggestions
+  GET  /api/insights/vault      — deterministic vault insights + CPW intelligence
   POST /api/digest/run          — manually trigger digest generation (dev/testing)
   GET  /api/digest/feedback     — fetch feedback already given for a digest
   POST /api/digest/feedback     — record thumbs-up/down on a digest suggestion
@@ -443,6 +444,26 @@ async def get_latest_digest(user_id: str = Depends(get_user_id)):
         raise HTTPException(status_code=500, detail="Could not load digest.")
 
 
+@fastapi_app.get("/api/insights/vault")
+async def get_vault_insights(
+    user_id: str = Depends(get_user_id),
+    windowDays: int = 90,
+    targetCpw: float = 100.0,
+):
+    """Return deterministic behavior + CPW insights for the vault surface."""
+    from agents.vault_insights import compute_vault_insights
+    try:
+        result = await compute_vault_insights(
+            user_id=user_id,
+            window_days=windowDays,
+            target_cpw=targetCpw,
+        )
+        return result
+    except Exception as exc:
+        logger.exception("Failed to compute vault insights for user %s: %s", user_id, exc)
+        raise HTTPException(status_code=500, detail="Could not compute vault insights.")
+
+
 class DigestFeedbackRequest(BaseModel):
     digestId: str
     suggestionIndex: int
@@ -626,5 +647,4 @@ async def get_mood(mood_id: str):
     except Exception as exc:
         logger.exception("Failed to load mood %s: %s", mood_id, exc)
         raise HTTPException(status_code=404, detail="Mood not found.")
-
 

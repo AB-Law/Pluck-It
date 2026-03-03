@@ -22,6 +22,75 @@ export interface WearEvent {
   weatherSnapshot?: WeatherSnapshot | null;
 }
 
+export interface WearLogPayload {
+  clientEventId?: string | null;
+  source?: string | null;
+  occurredAt?: string | null;
+  occasion?: string | null;
+  stylingActivityId?: string | null;
+  weatherSnapshot?: WeatherSnapshot | null;
+}
+
+export interface WearHistoryRecord {
+  id: string;
+  userId: string;
+  itemId: string;
+  occurredAt: string;
+  source?: string | null;
+  occasion?: string | null;
+  weatherSnapshot?: WeatherSnapshot | null;
+  stylingActivityId?: string | null;
+  createdAt: string;
+}
+
+export interface WearHistorySummary {
+  totalInRange: number;
+  trackedFrom?: string | null;
+  legacyUntrackedCount: number;
+}
+
+export interface WearHistoryResponse {
+  itemId: string;
+  events: WearHistoryRecord[];
+  summary: WearHistorySummary;
+}
+
+export type StylingActivityType = 'AddedToStyleBoard';
+export type WearSuggestionStatus = 'Pending' | 'Accepted' | 'Dismissed' | 'Expired';
+
+export interface StylingActivityRequest {
+  clientEventId?: string | null;
+  itemId: string;
+  activityType?: StylingActivityType;
+  source?: string | null;
+  occurredAt?: string | null;
+}
+
+export interface StylingActivityResponse {
+  status: string;
+  activityId: string;
+}
+
+export interface WearSuggestionItem {
+  suggestionId: string;
+  itemId: string;
+  message: string;
+  activityAt: string;
+  expiresAt?: string | null;
+}
+
+export interface WearSuggestionsResponse {
+  suggestions: WearSuggestionItem[];
+}
+
+export interface UpdateWearSuggestionStatusRequest {
+  status: WearSuggestionStatus;
+}
+
+export interface UpdateWearSuggestionStatusResponse {
+  status: string;
+}
+
 /**
  * Category-aware sizing. Only the relevant fields are set per category type:
  * - Tops / Knitwear / Outerwear / Dresses / Activewear / Swimwear / Underwear → letter

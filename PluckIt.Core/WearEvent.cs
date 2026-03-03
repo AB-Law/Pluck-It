@@ -42,8 +42,29 @@ public record WearEvent(
 /// </summary>
 public class WearLogRequest
 {
+    /// <summary>
+    /// Optional client-generated idempotency key for log-wear requests.
+    /// Duplicate keys for the same item should not increment wearCount twice.
+    /// </summary>
+    public string? ClientEventId { get; set; }
+
+    /// <summary>
+    /// Optional action source for analytics, e.g. "vault_card", "item_drawer", "suggestion_prompt".
+    /// </summary>
+    public string? Source { get; set; }
+
+    /// <summary>
+    /// Optional explicit occurrence timestamp. If omitted, server uses DateTimeOffset.UtcNow.
+    /// </summary>
+    public DateTimeOffset? OccurredAt { get; set; }
+
     /// <summary>Occasion context for this wear, e.g. "casual", "work", "formal".</summary>
     public string? Occasion { get; set; }
+
+    /// <summary>
+    /// Optional styling activity id that triggered this wear log (for suggestion acceptance tracking).
+    /// </summary>
+    public string? StylingActivityId { get; set; }
 
     /// <summary>
     /// Optional weather conditions at the time of wear, supplied by the client.
