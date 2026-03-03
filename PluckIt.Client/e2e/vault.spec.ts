@@ -12,27 +12,91 @@ import { test, expect } from '@playwright/test';
 test.describe('Vault / Wardrobe', () => {
   test.beforeEach(async ({ page }) => {
     // Intercept API calls so tests are hermetic even without a running backend
-    await page.route('**/api/wardrobe**', route => {
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify([
-          {
+    await page.route('**/api/wardrobe**', async route => {
+      const url = route.request().url();
+      const method = route.request().method();
+
+      if (url.includes('/wear-suggestions') && method === 'GET') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ suggestions: [] }),
+        });
+      }
+      if (url.includes('/wear-history') && method === 'GET') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            itemId: 'item-001',
+            events: [],
+            summary: { totalInRange: 0, legacyUntrackedCount: 0 },
+          }),
+        });
+      }
+      if (url.includes('/wear') && method === 'PATCH') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
             id: 'item-001',
             imageUrl: 'https://via.placeholder.com/150',
             category: 'Tops',
             tags: ['casual'],
             colours: [{ name: 'White', hex: '#FFFFFF' }],
             brand: 'Zara',
-            wearCount: 3,
+            wearCount: 4,
             dateAdded: '2025-01-01T00:00:00Z',
             price: null,
             notes: null,
             purchaseDate: null,
             condition: null,
             estimatedMarketValue: null,
+          }),
+        });
+      }
+
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          items: [
+            {
+              id: 'item-001',
+              imageUrl: 'https://via.placeholder.com/150',
+              category: 'Tops',
+              tags: ['casual'],
+              colours: [{ name: 'White', hex: '#FFFFFF' }],
+              brand: 'Zara',
+              wearCount: 3,
+              dateAdded: '2025-01-01T00:00:00Z',
+              price: null,
+              notes: null,
+              purchaseDate: null,
+              condition: null,
+              estimatedMarketValue: null,
+            },
+          ],
+          nextContinuationToken: null,
+        }),
+      });
+    });
+
+    await page.route('**/api/insights/vault**', route => {
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          generatedAt: '2026-03-04T10:00:00Z',
+          currency: 'USD',
+          insufficientData: false,
+          behavioralInsights: {
+            blackWearSharePct: 63,
+            unworn90dPct: 40,
+            mostExpensiveUnworn: { itemId: 'item-001', amount: 199, currency: 'USD' },
           },
-        ]),
+          cpwIntel: [],
+        }),
       });
     });
 

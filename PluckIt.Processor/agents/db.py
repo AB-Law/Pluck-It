@@ -57,6 +57,14 @@ def get_moods_container_sync():
     return _sync_container("COSMOS_DB_MOODS_CONTAINER", "Moods")
 
 
+def get_wear_events_container_sync():
+    return _sync_container("COSMOS_DB_WEAR_EVENTS_CONTAINER", "WearEvents")
+
+
+def get_styling_activity_container_sync():
+    return _sync_container("COSMOS_DB_STYLING_ACTIVITY_CONTAINER", "StylingActivity")
+
+
 # ── Async client (used in FastAPI/LangGraph routes) ──────────────────────────
 # We keep a module-level instance; Azure Functions reuses the worker process
 # so this is effectively a singleton within a worker.
@@ -98,6 +106,14 @@ def get_digests_container():
 
 def get_moods_container():
     return _async_container("COSMOS_DB_MOODS_CONTAINER", "Moods")
+
+
+def get_wear_events_container():
+    return _async_container("COSMOS_DB_WEAR_EVENTS_CONTAINER", "WearEvents")
+
+
+def get_styling_activity_container():
+    return _async_container("COSMOS_DB_STYLING_ACTIVITY_CONTAINER", "StylingActivity")
 
 
 def get_digest_feedback_container():

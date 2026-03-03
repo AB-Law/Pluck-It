@@ -4,6 +4,7 @@ Unit tests for FastAPI routes in function_app.py:
   - GET  /api/chat/memory
   - PUT  /api/chat/memory
   - GET  /api/digest/latest
+  - GET  /api/insights/vault
   - POST /api/digest/run
   - GET  /api/digest/feedback
   - POST /api/digest/feedback
@@ -68,6 +69,24 @@ async def test_get_latest_digest_returns_suggestions(async_client, mock_digests_
 
     # 200 with a digest document, or 200 with {"digest": null} if container is empty
     assert response.status_code in (200, 404, 500)
+
+
+@pytest.mark.unit
+async def test_get_vault_insights_returns_payload(async_client):
+    fake = {
+        "generatedAt": "2026-03-04T10:00:00Z",
+        "currency": "INR",
+        "insufficientData": False,
+        "behavioralInsights": {"blackWearSharePct": 63.0},
+        "cpwIntel": [],
+    }
+    with patch("agents.vault_insights.compute_vault_insights", new=AsyncMock(return_value=fake)):
+        response = await async_client.get("/api/insights/vault?windowDays=90&targetCpw=100")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["currency"] == "INR"
+    assert data["behavioralInsights"]["blackWearSharePct"] == 63.0
 
 
 # ── POST /api/digest/run ─────────────────────────────────────────────────────

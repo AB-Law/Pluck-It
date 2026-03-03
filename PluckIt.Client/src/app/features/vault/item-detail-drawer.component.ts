@@ -1,8 +1,9 @@
-import { Component, input, output, signal, computed, inject } from '@angular/core';
+import { Component, input, output, signal, computed, inject, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ClothingItem } from '../../core/models/clothing-item.model';
+import { ClothingItem, WearHistoryRecord, WearHistorySummary } from '../../core/models/clothing-item.model';
 import { WardrobeService } from '../../core/services/wardrobe.service';
 import { UserProfileService } from '../../core/services/user-profile.service';
+import { WearHistoryCalendarComponent } from './wear-history-calendar.component';
 
 const CARE_ICON_MAP: Record<string, { icon: string; label: string }> = {
   dry_clean: { icon: 'dry_cleaning',         label: 'Dry Clean Only' },
@@ -14,7 +15,7 @@ const CARE_ICON_MAP: Record<string, { icon: string; label: string }> = {
 @Component({
   selector: 'app-item-detail-drawer',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, WearHistoryCalendarComponent],
   template: `
     <!-- Slide-in panel — driven by CSS translate transition -->
     <aside
@@ -109,6 +110,19 @@ const CARE_ICON_MAP: Record<string, { icon: string; label: string }> = {
               </div>
             }
 
+            <!-- Wear History Calendar -->
+            <div>
+              <h5 class="mb-2 text-xs font-bold uppercase tracking-widest text-slate-500">Wear History</h5>
+              @if (wearHistoryLoading()) {
+                <p class="text-[11px] text-slate-500 font-mono">Loading timeline…</p>
+              } @else {
+                <app-wear-history-calendar
+                  [events]="wearHistoryEvents()"
+                  [summary]="wearHistorySummary()"
+                />
+              }
+            </div>
+
             <!-- Actions -->
             <div class="pt-2 space-y-3">
 
@@ -117,6 +131,7 @@ const CARE_ICON_MAP: Record<string, { icon: string; label: string }> = {
                 class="w-full flex items-center justify-center gap-2 rounded-lg border border-primary/40 py-2.5 text-sm font-bold text-primary hover:bg-primary/10 transition-colors"
                 [disabled]="logWearWorking()"
                 (click)="logWear(itm)"
+                aria-label="Log Wear"
               >
                 <span class="material-symbols-outlined text-sm">add_circle</span>
                 {{ logWearWorking() ? 'Logging…' : 'Log Wear (+1)' }}
@@ -154,9 +169,32 @@ export class ItemDetailDrawerComponent {
   wearLogged       = output<ClothingItem>();
 
   protected logWearWorking = signal(false);
+  protected wearHistoryLoading = signal(false);
+  protected wearHistoryEvents = signal<WearHistoryRecord[]>([]);
+  protected wearHistorySummary = signal<WearHistorySummary | null>(null);
 
   private wardrobeService = inject(WardrobeService);
   private profileService  = inject(UserProfileService);
+
+  constructor() {
+    effect(() => {
+      const itm = this.item();
+      if (!itm) {
+        this.wearHistoryEvents.set([]);
+        this.wearHistorySummary.set(null);
+        return;
+      }
+      this.wearHistoryLoading.set(true);
+      this.wardrobeService.getWearHistory(itm.id).subscribe({
+        next: res => {
+          this.wearHistoryEvents.set(res.events ?? []);
+          this.wearHistorySummary.set(res.summary ?? null);
+          this.wearHistoryLoading.set(false);
+        },
+        error: () => this.wearHistoryLoading.set(false),
+      });
+    });
+  }
 
   private get currency(): string {
     return this.profileService.getOrDefault().currencyCode;
@@ -187,10 +225,22 @@ export class ItemDetailDrawerComponent {
   logWear(itm: ClothingItem): void {
     if (this.logWearWorking()) return;
     this.logWearWorking.set(true);
-    this.wardrobeService.logWear(itm.id).subscribe({
+    const rand = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    this.wardrobeService.logWear(itm.id, {
+      source: 'item_drawer',
+      clientEventId: `wear-${rand}`,
+    }).subscribe({
       next: updated => {
         this.wearLogged.emit(updated);
         this.logWearWorking.set(false);
+        this.wardrobeService.getWearHistory(itm.id).subscribe({
+          next: res => {
+            this.wearHistoryEvents.set(res.events ?? []);
+            this.wearHistorySummary.set(res.summary ?? null);
+          },
+        });
       },
       error: () => this.logWearWorking.set(false),
     });

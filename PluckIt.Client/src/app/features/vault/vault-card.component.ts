@@ -1,6 +1,7 @@
 import { Component, input, output, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ClothingItem } from '../../core/models/clothing-item.model';
+import { CpwBadgeLevel } from '../../core/models/vault-insights.model';
 
 @Component({
   selector: 'app-vault-card',
@@ -30,10 +31,22 @@ import { ClothingItem } from '../../core/models/clothing-item.model';
             SELECTED
           </div>
         } @else {
-          <div class="absolute left-2 top-2 rounded bg-primary/20 px-2 py-1 text-[10px] font-bold text-primary backdrop-blur-md font-mono">
+          <div
+            class="absolute left-2 top-2 rounded px-2 py-1 text-[10px] font-bold backdrop-blur-md font-mono border"
+            [class]="cpwBadgeClass()"
+          >
             CPW: {{ cpwDisplay() }}
           </div>
         }
+
+        <button
+          class="absolute right-2 top-2 rounded border border-primary/40 bg-black/70 px-2 py-1 text-[10px] font-bold text-primary hover:bg-primary/10"
+          (click)="onQuickWear($event)"
+          aria-label="Log wear"
+          title="Log wear (+1)"
+        >
+          +1 Wear
+        </button>
       </div>
 
       <!-- Metadata -->
@@ -49,6 +62,11 @@ import { ClothingItem } from '../../core/models/clothing-item.model';
         <span class="text-slate-400">Val: {{ valueDisplay() }}</span>
         <span class="text-slate-500">{{ item().wearCount }} Wears</span>
       </div>
+      @if (breakEvenReached()) {
+        <div class="mt-2 rounded bg-emerald-900/40 px-2 py-1 text-[10px] font-mono text-emerald-300 border border-emerald-700/50">
+          You’ve broken even on this item
+        </div>
+      }
     </div>
   `,
 })
@@ -56,8 +74,11 @@ export class VaultCardComponent {
   item       = input.required<ClothingItem>();
   currency   = input<string>('USD');
   isSelected = input<boolean>(false);
+  cpwBadge   = input<CpwBadgeLevel>('unknown');
+  breakEvenReached = input<boolean>(false);
 
   selectToggled = output<string>();
+  wearIncrementRequested = output<ClothingItem>();
 
   readonly cpwDisplay = computed(() => {
     const price = this.item().price?.amount;
@@ -76,6 +97,21 @@ export class VaultCardComponent {
     return this.item().aestheticTags?.[0] ?? this.item().category ?? null;
   });
 
+  readonly cpwBadgeClass = computed(() => {
+    switch (this.cpwBadge()) {
+      case 'low':
+        return 'bg-emerald-900/40 text-emerald-300 border-emerald-700/60';
+      case 'medium':
+        return 'bg-amber-900/40 text-amber-300 border-amber-700/60';
+      case 'high':
+        return 'bg-red-900/40 text-red-300 border-red-700/60';
+      case 'unworn':
+        return 'bg-slate-800/80 text-slate-300 border-slate-600';
+      default:
+        return 'bg-primary/20 text-primary border-primary/40';
+    }
+  });
+
   private formatCurrency(val: number): string {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -87,5 +123,10 @@ export class VaultCardComponent {
   onDragStart(e: DragEvent): void {
     e.dataTransfer?.setData('text/plain', this.item().id);
     e.dataTransfer?.setData('application/pluckit-item', this.item().id);
+  }
+
+  onQuickWear(event: MouseEvent): void {
+    event.stopPropagation();
+    this.wearIncrementRequested.emit(this.item());
   }
 }

@@ -48,11 +48,17 @@ public sealed class WardrobeFunctionsTests
         DateAdded   = dt ?? DateTimeOffset.UtcNow.AddDays(-1),
     };
 
-    private WardrobeFunctions CreateSut(InMemoryWardrobeRepository? repo = null, FakeBlobSasService? sas = null)
+    private WardrobeFunctions CreateSut(
+        InMemoryWardrobeRepository? repo = null,
+        FakeBlobSasService? sas = null,
+        InMemoryWearHistoryRepository? wearHistoryRepo = null,
+        InMemoryStylingActivityRepository? stylingActivityRepo = null)
     {
         var cfg = TestConfiguration.WithDevUser(UserId);
         return new WardrobeFunctions(
             repo  ?? new InMemoryWardrobeRepository(),
+            wearHistoryRepo ?? new InMemoryWearHistoryRepository(),
+            stylingActivityRepo ?? new InMemoryStylingActivityRepository(),
             sas   ?? new FakeBlobSasService(),
             new FakeClothingMetadataService(),
             TestFactory.CreateHttpClientFactory(),
@@ -91,6 +97,8 @@ public sealed class WardrobeFunctionsTests
     {
         var sut = new WardrobeFunctions(
             new InMemoryWardrobeRepository(),
+            new InMemoryWearHistoryRepository(),
+            new InMemoryStylingActivityRepository(),
             new FakeBlobSasService(),
             new FakeClothingMetadataService(),
             TestFactory.CreateHttpClientFactory(),
@@ -701,6 +709,104 @@ public sealed class WardrobeFunctionsTests
             TestRequest.Patch("http://localhost/api/wardrobe/ghost/wear"), "ghost", CancellationToken.None);
 
         result.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task LogWear_WithClientEventId_IsIdempotent()
+    {
+        var item = MakeItem("wear-idem", wearCount: 1);
+        var repo = new InMemoryWardrobeRepository().WithItems(item);
+        var history = new InMemoryWearHistoryRepository();
+        var sut = CreateSut(repo: repo, wearHistoryRepo: history);
+
+        var body = JsonSerializer.Serialize(new WearLogRequest
+        {
+            ClientEventId = "evt-001",
+            Source = WearLogSources.VaultCard,
+        }, PluckItJsonContext.Default.WearLogRequest);
+
+        var res1 = await sut.LogWear(
+            TestRequest.Patch("http://localhost/api/wardrobe/wear-idem/wear", body),
+            "wear-idem",
+            CancellationToken.None);
+        var res2 = await sut.LogWear(
+            TestRequest.Patch("http://localhost/api/wardrobe/wear-idem/wear", body),
+            "wear-idem",
+            CancellationToken.None);
+
+        res1.StatusCode.ShouldBe(HttpStatusCode.OK);
+        res2.StatusCode.ShouldBe(HttpStatusCode.OK);
+        repo.AllItems.Single(i => i.Id == "wear-idem").WearCount.ShouldBe(2);
+        history.Records.Count.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task GetWearHistory_ReturnsLegacyUntrackedCount()
+    {
+        var item = MakeItem("hist-1", wearCount: 5);
+        var repo = new InMemoryWardrobeRepository().WithItems(item);
+        var history = new InMemoryWearHistoryRepository();
+        await history.AddAsync(new WearHistoryRecord
+        {
+            Id = "wh-1",
+            UserId = UserId,
+            ItemId = "hist-1",
+            OccurredAt = DateTimeOffset.UtcNow.AddDays(-1),
+        });
+        await history.AddAsync(new WearHistoryRecord
+        {
+            Id = "wh-2",
+            UserId = UserId,
+            ItemId = "hist-1",
+            OccurredAt = DateTimeOffset.UtcNow.AddDays(-3),
+        });
+        var sut = CreateSut(repo: repo, wearHistoryRepo: history);
+
+        var response = await sut.GetWearHistory(
+            TestRequest.Get("http://localhost/api/wardrobe/hist-1/wear-history"),
+            "hist-1",
+            CancellationToken.None) as Helpers.TestHttpResponseData;
+
+        response!.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var parsed = JsonSerializer.Deserialize<WearHistoryResponse>(
+            response.ReadBodyAsString(),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+        parsed.Summary.LegacyUntrackedCount.ShouldBe(3);
+        parsed.Summary.TotalInRange.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task RecordStylingActivity_ThenGetSuggestions_ReturnsSuggestion()
+    {
+        var item = MakeItem("sty-1", wearCount: 0);
+        var repo = new InMemoryWardrobeRepository().WithItems(item);
+        var activityRepo = new InMemoryStylingActivityRepository();
+        var sut = CreateSut(repo: repo, stylingActivityRepo: activityRepo);
+
+        var body = JsonSerializer.Serialize(new StylingActivityRequest
+        {
+            ItemId = "sty-1",
+            ClientEventId = "sty-event-1",
+            Source = "dashboard_drag_drop",
+            ActivityType = StylingActivityType.AddedToStyleBoard,
+            OccurredAt = DateTimeOffset.UtcNow.AddDays(-1),
+        }, PluckItJsonContext.Default.StylingActivityRequest);
+
+        var recordResponse = await sut.RecordStylingActivity(
+            TestRequest.Post("http://localhost/api/wardrobe/styling-activity", body),
+            CancellationToken.None);
+        recordResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        var suggestionsResponse = await sut.GetWearSuggestions(
+            TestRequest.Get("http://localhost/api/wardrobe/wear-suggestions"),
+            CancellationToken.None) as Helpers.TestHttpResponseData;
+        suggestionsResponse!.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        var suggestions = JsonSerializer.Deserialize<WearSuggestionsResponse>(
+            suggestionsResponse.ReadBodyAsString(),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+        suggestions.Suggestions.Count.ShouldBe(1);
+        suggestions.Suggestions[0].ItemId.ShouldBe("sty-1");
     }
 
     // ── SaveItem ─────────────────────────────────────────────────────────────

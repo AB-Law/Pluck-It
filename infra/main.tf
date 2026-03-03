@@ -207,6 +207,69 @@ resource "azurerm_cosmosdb_sql_container" "wardrobe" {
   }
 }
 
+# Full wear-event history (append-only). Partitioned by user for cheap
+# per-user history scans and per-item timeline queries.
+resource "azurerm_cosmosdb_sql_container" "wear_events" {
+  name                  = "WearEvents"
+  resource_group_name   = azurerm_resource_group.rg_pluckit_archive.name
+  account_name          = azurerm_cosmosdb_account.pluckit.name
+  database_name         = azurerm_cosmosdb_sql_database.pluckit.name
+  partition_key_paths   = ["/userId"]
+  partition_key_version = 1
+
+  indexing_policy {
+    indexing_mode = "consistent"
+
+    included_path { path = "/*" }
+    included_path { path = "/itemId/?" }
+    included_path { path = "/occurredAt/?" }
+    included_path { path = "/source/?" }
+
+    composite_index {
+      index {
+        path  = "/itemId"
+        order = "ascending"
+      }
+      index {
+        path  = "/occurredAt"
+        order = "descending"
+      }
+    }
+  }
+}
+
+# Styling activity + wear-suggestion lifecycle.
+resource "azurerm_cosmosdb_sql_container" "styling_activity" {
+  name                  = "StylingActivity"
+  resource_group_name   = azurerm_resource_group.rg_pluckit_archive.name
+  account_name          = azurerm_cosmosdb_account.pluckit.name
+  database_name         = azurerm_cosmosdb_sql_database.pluckit.name
+  partition_key_paths   = ["/userId"]
+  partition_key_version = 1
+  default_ttl           = 7776000 # 90 days
+
+  indexing_policy {
+    indexing_mode = "consistent"
+
+    included_path { path = "/*" }
+    included_path { path = "/itemId/?" }
+    included_path { path = "/status/?" }
+    included_path { path = "/occurredAt/?" }
+    included_path { path = "/clientEventId/?" }
+
+    composite_index {
+      index {
+        path  = "/status"
+        order = "ascending"
+      }
+      index {
+        path  = "/occurredAt"
+        order = "descending"
+      }
+    }
+  }
+}
+
 resource "azurerm_cosmosdb_sql_container" "user_profiles" {
   name                  = "UserProfiles"
   resource_group_name   = azurerm_resource_group.rg_pluckit_archive.name
@@ -442,6 +505,8 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
     "Cosmos__Key"                           = azurerm_cosmosdb_account.pluckit.primary_key
     "Cosmos__Database"                      = azurerm_cosmosdb_sql_database.pluckit.name
     "Cosmos__Container"                     = azurerm_cosmosdb_sql_container.wardrobe.name
+    "Cosmos__WearEventsContainer"           = azurerm_cosmosdb_sql_container.wear_events.name
+    "Cosmos__StylingActivityContainer"      = azurerm_cosmosdb_sql_container.styling_activity.name
     "Cosmos__UserProfilesContainer"         = azurerm_cosmosdb_sql_container.user_profiles.name
     "AI__Endpoint"                          = var.ai_gpt4o_endpoint
     "AI__ApiKey"                            = var.ai_api_key
@@ -453,6 +518,7 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
     # Google OAuth Client ID — used by GoogleTokenValidator to verify GIS ID tokens.
     # The client secret is NOT needed; verification uses Google's public JWKS only.
     "GoogleAuth__ClientId" = var.google_oauth_client_id
+    "FEATURE_WEAR_SUGGESTIONS" = "true"
   }
 }
 
@@ -534,6 +600,8 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
     "COSMOS_DB_KEY"                         = azurerm_cosmosdb_account.pluckit.primary_key
     "COSMOS_DB_DATABASE"                    = azurerm_cosmosdb_sql_database.pluckit.name
     "COSMOS_DB_CONTAINER"                   = azurerm_cosmosdb_sql_container.wardrobe.name
+    "COSMOS_DB_WEAR_EVENTS_CONTAINER"       = azurerm_cosmosdb_sql_container.wear_events.name
+    "COSMOS_DB_STYLING_ACTIVITY_CONTAINER"  = azurerm_cosmosdb_sql_container.styling_activity.name
     "COSMOS_DB_USER_PROFILES_CONTAINER"     = azurerm_cosmosdb_sql_container.user_profiles.name
     "COSMOS_DB_CONVERSATIONS_CONTAINER"     = azurerm_cosmosdb_sql_container.conversations.name
     "COSMOS_DB_DIGESTS_CONTAINER"           = azurerm_cosmosdb_sql_container.digests.name
@@ -547,6 +615,6 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
     "AZURE_OPENAI_EMBEDDING_DEPLOYMENT" = "text-embedding-3-small"
     # Google OAuth client ID — used to validate bearer tokens from Angular
     "GOOGLE_CLIENT_ID" = var.google_oauth_client_id
+    "FEATURE_VAULT_INSIGHTS" = "true"
   }
 }
-

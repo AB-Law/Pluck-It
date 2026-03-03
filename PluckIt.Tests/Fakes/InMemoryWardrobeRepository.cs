@@ -124,6 +124,7 @@ public sealed class InMemoryWardrobeRepository : IWardrobeRepository
         string itemId,
         string userId,
         WearEvent ev,
+        string? clientEventId = null,
         int maxEvents = 30,
         CancellationToken cancellationToken = default)
     {
@@ -132,6 +133,11 @@ public sealed class InMemoryWardrobeRepository : IWardrobeRepository
             string.Equals(i.UserId, userId, StringComparison.OrdinalIgnoreCase));
         if (item is null) return Task.FromResult<ClothingItem?>(null);
 
+        if (!string.IsNullOrWhiteSpace(clientEventId) &&
+            string.Equals(item.LastWearActionId, clientEventId, StringComparison.Ordinal))
+            return Task.FromResult<ClothingItem?>(item);
+
+        item.WearEvents ??= [];
         item.WearEvents.Add(ev);
         if (item.WearEvents.Count > maxEvents)
         {
@@ -141,6 +147,8 @@ public sealed class InMemoryWardrobeRepository : IWardrobeRepository
         }
         item.WearCount  += 1;
         item.LastWornAt  = ev.OccurredAt;
+        if (!string.IsNullOrWhiteSpace(clientEventId))
+            item.LastWearActionId = clientEventId;
         return Task.FromResult<ClothingItem?>(item);
     }
 
@@ -161,4 +169,3 @@ public sealed class InMemoryWardrobeRepository : IWardrobeRepository
         catch { return 0; }
     }
 }
-

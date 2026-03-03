@@ -108,6 +108,14 @@ public static class TestRequest
     public static TestHttpRequestData Patch(string url)
         => new(CreateMockContext(), HttpMethod.Patch, url);
 
+    /// <summary>PATCH request with a JSON body.</summary>
+    public static TestHttpRequestData Patch(string url, string jsonBody)
+    {
+        var body = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(jsonBody));
+        return new TestHttpRequestData(CreateMockContext(), HttpMethod.Patch, url, body,
+            new Dictionary<string, string> { ["Content-Type"] = "application/json" });
+    }
+
     /// <summary>DELETE request.</summary>
     public static TestHttpRequestData Delete(string url)
         => new(CreateMockContext(), HttpMethod.Delete, url);

@@ -2,7 +2,18 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
-import { ClothingItem, WardrobeQuery, WardrobePagedResponse } from '../models/clothing-item.model';
+import {
+  ClothingItem,
+  WardrobeQuery,
+  WardrobePagedResponse,
+  WearLogPayload,
+  WearHistoryResponse,
+  StylingActivityRequest,
+  StylingActivityResponse,
+  WearSuggestionsResponse,
+  UpdateWearSuggestionStatusRequest,
+  UpdateWearSuggestionStatusResponse,
+} from '../models/clothing-item.model';
 
 @Injectable({ providedIn: 'root' })
 export class WardrobeService {
@@ -62,7 +73,32 @@ export class WardrobeService {
   }
 
   /** Increment WearCount by 1 and return the updated item */
-  logWear(id: string): Observable<ClothingItem> {
-    return this.http.patch<ClothingItem>(`${this.base}/api/wardrobe/${id}/wear`, null);
+  logWear(id: string, payload?: WearLogPayload): Observable<ClothingItem> {
+    return this.http.patch<ClothingItem>(`${this.base}/api/wardrobe/${id}/wear`, payload ?? null);
+  }
+
+  getWearHistory(id: string, from?: string, to?: string): Observable<WearHistoryResponse> {
+    let qp = new HttpParams();
+    if (from) qp = qp.set('from', from);
+    if (to) qp = qp.set('to', to);
+    return this.http.get<WearHistoryResponse>(`${this.base}/api/wardrobe/${id}/wear-history`, { params: qp });
+  }
+
+  recordStylingActivity(payload: StylingActivityRequest): Observable<StylingActivityResponse> {
+    return this.http.post<StylingActivityResponse>(`${this.base}/api/wardrobe/styling-activity`, payload);
+  }
+
+  getWearSuggestions(): Observable<WearSuggestionsResponse> {
+    return this.http.get<WearSuggestionsResponse>(`${this.base}/api/wardrobe/wear-suggestions`);
+  }
+
+  updateWearSuggestionStatus(
+    suggestionId: string,
+    payload: UpdateWearSuggestionStatusRequest,
+  ): Observable<UpdateWearSuggestionStatusResponse> {
+    return this.http.patch<UpdateWearSuggestionStatusResponse>(
+      `${this.base}/api/wardrobe/wear-suggestions/${suggestionId}`,
+      payload,
+    );
   }
 }

@@ -185,6 +185,7 @@ public class WardrobeRepository : IWardrobeRepository
     string itemId,
     string userId,
     WearEvent ev,
+    string? clientEventId = null,
     int maxEvents = 30,
     CancellationToken cancellationToken = default)
   {
@@ -192,8 +193,13 @@ public class WardrobeRepository : IWardrobeRepository
     var item = await GetByIdAsync(itemId, userId, cancellationToken);
     if (item is null) return null;
 
+    // Idempotency: duplicate client event ids must not increment twice.
+    if (!string.IsNullOrWhiteSpace(clientEventId) &&
+        string.Equals(item.LastWearActionId, clientEventId, StringComparison.Ordinal))
+      return item;
+
     // Build new events list: append + trim oldest beyond maxEvents
-    var events = new List<WearEvent>(item.WearEvents) { ev };
+    var events = new List<WearEvent>(item.WearEvents ?? []) { ev };
     if (events.Count > maxEvents)
       events = events.OrderByDescending(e => e.OccurredAt).Take(maxEvents).ToList();
 
@@ -208,6 +214,8 @@ public class WardrobeRepository : IWardrobeRepository
       PatchOperation.Set("/lastWornAt", ev.OccurredAt),
       PatchOperation.Set("/wearEvents", events),
     };
+    if (!string.IsNullOrWhiteSpace(clientEventId))
+      patchOps.Add(PatchOperation.Set("/lastWearActionId", clientEventId));
 
     var response = await Container.PatchItemAsync<ClothingItem>(
       itemId,
@@ -218,4 +226,3 @@ public class WardrobeRepository : IWardrobeRepository
     return response.Resource;
   }
 }
-

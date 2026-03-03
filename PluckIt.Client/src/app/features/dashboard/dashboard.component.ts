@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 import { UserProfileService } from '../../core/services/user-profile.service';
+import { WardrobeService } from '../../core/services/wardrobe.service';
 import { WardrobeComponent } from '../closet/closet.component';
 import { StylistPanelComponent } from '../stylist/stylist.component';
 import { ProfilePanelComponent } from '../profile/profile-panel.component';
@@ -193,6 +194,7 @@ export class DashboardComponent implements OnInit {
   constructor(
     protected readonly auth: AuthService,
     private readonly profileService: UserProfileService,
+    private readonly wardrobeService: WardrobeService,
     private readonly router: Router,
   ) {}
 
@@ -208,9 +210,13 @@ export class DashboardComponent implements OnInit {
   }
 
   toggleItemSelection(id: string): void {
+    const currentlySelected = this.selectedIds().includes(id);
     this.selectedIds.update(ids =>
-      ids.includes(id) ? ids.filter(i => i !== id) : [...ids, id]
+      currentlySelected ? ids.filter(i => i !== id) : [...ids, id]
     );
+    if (!currentlySelected) {
+      this.recordStylingActivity(id, 'dashboard_toggle');
+    }
   }
 
   onDragOver(event: DragEvent): void {
@@ -228,7 +234,24 @@ export class DashboardComponent implements OnInit {
     const id = event.dataTransfer?.getData('text/plain')
             ?? event.dataTransfer?.getData('application/pluckit-item');
     if (id) {
+      const exists = this.selectedIds().includes(id);
       this.selectedIds.update(ids => ids.includes(id) ? ids : [...ids, id]);
+      if (!exists) {
+        this.recordStylingActivity(id, 'dashboard_drag_drop');
+      }
     }
+  }
+
+  private recordStylingActivity(itemId: string, source: string): void {
+    const rand = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    this.wardrobeService.recordStylingActivity({
+      itemId,
+      source,
+      activityType: 'AddedToStyleBoard',
+      clientEventId: `sty-${rand}`,
+      occurredAt: new Date().toISOString(),
+    }).subscribe({ error: () => {} });
   }
 }
