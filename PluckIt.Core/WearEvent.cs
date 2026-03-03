@@ -46,9 +46,9 @@ public class WearLogRequest
     public string? Occasion { get; set; }
 
     /// <summary>
-    /// Weather conditions at the time of wear.
-    /// When null, the LogWear function will attempt to fetch current weather from
-    /// the user's profile locationCity via Open-Meteo. If that also fails, stored as null.
+    /// Optional weather conditions at the time of wear, supplied by the client.
+    /// When null, no weather information is stored and the server does not attempt
+    /// to fetch current weather from the user's profile or any external service.
     /// </summary>
     public WeatherSnapshot? WeatherSnapshot { get; set; }
 }

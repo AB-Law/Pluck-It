@@ -24,7 +24,7 @@ import json
 import logging
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 # Point rembg at the bundled model directory so it never downloads at runtime.
@@ -412,7 +412,7 @@ async def run_digest_now(user_id: str = Depends(get_user_id), force: bool = True
         return {"status": "ok", "digest": result}
     except Exception as exc:
         logger.exception("Manual digest run failed for user %s: %s", user_id, exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Could not run digest.")
 
 
 @fastapi_app.get("/api/digest/latest")
@@ -503,7 +503,7 @@ async def post_digest_feedback(
         "suggestionIndex": body.suggestionIndex,
         "suggestionDescription": body.suggestionDescription,
         "signal": body.signal,
-        "createdAt": datetime.utcnow().isoformat() + "Z",
+        "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
     try:
         await container.upsert_item(doc)

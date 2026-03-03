@@ -90,7 +90,8 @@ public class UserProfile
   /// <summary>
   /// AI-inferred climate zone based on LocationCity and seasonal wear patterns.
   /// e.g. "temperate", "tropical", "continental", "arid".
-  /// Null until inferred. Invalidated when LocationCity changes.
+  /// Null until inferred. Callers should clear or recompute this when LocationCity changes;
+  /// this class does not perform invalidation automatically.
   /// </summary>
   public string? ClimateZone { get; set; }
 }

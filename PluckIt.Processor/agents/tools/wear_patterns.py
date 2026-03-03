@@ -129,9 +129,16 @@ async def get_wear_patterns(query: str = "", config: RunnableConfig = None) -> s
         category = (item.get("category") or "other").lower()
         category_wear[category] += wear_count
 
-        # Extract occasion and climate signals from up to the last 10 wear events
+        # Extract occasion and climate signals from the most recent wear events.
+        # Sort explicitly by occurredAt descending — the write path trims with
+        # OrderByDescending so list order is not guaranteed oldest→newest.
         wear_events = item.get("wearEvents") or []
-        for ev in wear_events[-10:]:
+        sorted_wear_events = sorted(
+            wear_events,
+            key=lambda e: e.get("occurredAt") or "",
+            reverse=True,
+        )
+        for ev in sorted_wear_events[:10]:
             if ev.get("occasion"):
                 occasions_counter[ev["occasion"].lower()] += 1
             snap = ev.get("weatherSnapshot")

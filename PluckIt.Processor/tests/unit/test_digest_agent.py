@@ -112,10 +112,14 @@ def test_run_digest_runs_when_hash_changed():
     fake_llm = MagicMock()
     fake_llm.invoke = MagicMock(return_value=fake_llm_response)
 
+    sync_feedback = MagicMock()
+    sync_feedback.query_items = MagicMock(return_value=iter([]))
+
     with (
         patch("agents.digest_agent.get_wardrobe_container_sync", return_value=sync_wardrobe),
         patch("agents.digest_agent.get_user_profiles_container_sync", return_value=sync_profiles),
         patch("agents.digest_agent.get_digests_container_sync", return_value=sync_digests),
+        patch("agents.digest_agent.get_digest_feedback_container_sync", return_value=sync_feedback),
         patch("agents.digest_agent._build_digest_llm", return_value=fake_llm),
     ):
         from agents.digest_agent import run_digest_for_user
@@ -152,3 +156,96 @@ def test_run_digest_handles_empty_wardrobe():
 
     # Empty wardrobe: hash computed and compared; nothing to generate
     assert result is None
+
+
+# ── Feedback integration ─────────────────────────────────────────────────────
+
+@pytest.mark.unit
+def test_run_digest_includes_liked_feedback_in_prompt():
+    """Liked/disliked feedback should appear in the LLM prompt."""
+    item_ids = ["id-a", "id-b"]
+
+    fake_items = [
+        {"id": i, "category": "Tops", "colours": [], "tags": [], "brand": None}
+        for i in item_ids
+    ]
+
+    sync_wardrobe = MagicMock()
+    sync_wardrobe.query_items = MagicMock(return_value=iter(fake_items))
+
+    sync_profiles = MagicMock()
+    sync_profiles.read_item = MagicMock(return_value={
+        "id": "test-user",
+        "wardrobeHashAtLastDigest": "old-hash",
+        "stylePreferences": ["minimalist"],
+    })
+    sync_profiles.upsert_item = MagicMock()
+
+    sync_digests = MagicMock()
+    sync_digests.upsert_item = MagicMock()
+
+    # Simulate feedback: one liked, one disliked
+    sync_feedback = MagicMock()
+    sync_feedback.query_items = MagicMock(return_value=iter([
+        {"signal": "up",   "suggestionDescription": "A navy cashmere sweater"},
+        {"signal": "down", "suggestionDescription": "A graphic tee"},
+    ]))
+
+    captured_prompts: list[str] = []
+
+    fake_llm_response = MagicMock()
+    fake_llm_response.content = json.dumps([{"item": "White Oxford shirt", "rationale": "Gap"}])
+    fake_llm = MagicMock()
+
+    def _capture_invoke(messages):
+        for msg in messages:
+            captured_prompts.append(msg.content)
+        return fake_llm_response
+
+    fake_llm.invoke = _capture_invoke
+
+    with (
+        patch("agents.digest_agent.get_wardrobe_container_sync", return_value=sync_wardrobe),
+        patch("agents.digest_agent.get_user_profiles_container_sync", return_value=sync_profiles),
+        patch("agents.digest_agent.get_digests_container_sync", return_value=sync_digests),
+        patch("agents.digest_agent.get_digest_feedback_container_sync", return_value=sync_feedback),
+        patch("agents.digest_agent._build_digest_llm", return_value=fake_llm),
+    ):
+        from agents.digest_agent import run_digest_for_user
+        result = run_digest_for_user("test-user")
+
+    assert result is not None
+    full_prompt = " ".join(captured_prompts)
+    assert "navy cashmere sweater" in full_prompt, "Liked feedback must appear in prompt"
+    assert "graphic tee" in full_prompt, "Disliked feedback must appear in prompt"
+
+
+@pytest.mark.unit
+def test_run_digest_skips_when_recommendation_opt_out():
+    """User with recommendationOptIn=False should get None without any LLM call."""
+    item_ids = ["id-1", "id-2"]
+    fake_items = [{"id": i, "category": "Tops"} for i in item_ids]
+
+    sync_wardrobe = MagicMock()
+    sync_wardrobe.query_items = MagicMock(return_value=iter(fake_items))
+
+    sync_profiles = MagicMock()
+    sync_profiles.read_item = MagicMock(return_value={
+        "id": "test-user",
+        "wardrobeHashAtLastDigest": "old-hash",
+        "recommendationOptIn": False,
+        "stylePreferences": [],
+    })
+
+    fake_llm = MagicMock()
+
+    with (
+        patch("agents.digest_agent.get_wardrobe_container_sync", return_value=sync_wardrobe),
+        patch("agents.digest_agent.get_user_profiles_container_sync", return_value=sync_profiles),
+        patch("agents.digest_agent._build_digest_llm", return_value=fake_llm),
+    ):
+        from agents.digest_agent import run_digest_for_user
+        result = run_digest_for_user("test-user")
+
+    assert result is None, "Opted-out user should return None"
+    fake_llm.invoke.assert_not_called()

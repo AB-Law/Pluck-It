@@ -197,10 +197,14 @@ public class WardrobeRepository : IWardrobeRepository
     if (events.Count > maxEvents)
       events = events.OrderByDescending(e => e.OccurredAt).Take(maxEvents).ToList();
 
+    // Compute new wear count from the current item to avoid relying on Increment
+    // for missing fields — Cosmos Patch Increment fails if the field doesn't exist.
+    var newWearCount = item.WearCount + 1;
+
     // Apply all changes via Cosmos Patch API (atomic, no full-document round-trip for the write)
     var patchOps = new List<PatchOperation>
     {
-      PatchOperation.Increment("/wearCount", 1),
+      PatchOperation.Set("/wearCount", newWearCount),
       PatchOperation.Set("/lastWornAt", ev.OccurredAt),
       PatchOperation.Set("/wearEvents", events),
     };

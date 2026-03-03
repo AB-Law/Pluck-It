@@ -183,11 +183,19 @@ def run_digest_for_user(user_id: str, force: bool = False) -> Optional[dict]:
         score = _recency_score(wear_count, last_worn)
         cat = (item.get("category") or "other").lower()
 
-        # Collect climate signals from wear events
-        for ev in (item.get("wearEvents") or [])[-5:]:
-            snap = ev.get("weatherSnapshot") or {}
-            if snap.get("conditions"):
-                wear_conditions.append(snap["conditions"].lower())
+        # Collect climate signals from the most recent wear events,
+        # sorted explicitly by occurredAt to avoid relying on list order.
+        wear_events = item.get("wearEvents") or []
+        if wear_events:
+            sorted_events = sorted(
+                wear_events,
+                key=lambda ev: ev.get("occurredAt") or "",
+                reverse=True,
+            )
+            for ev in sorted_events[:5]:
+                snap = ev.get("weatherSnapshot") or {}
+                if snap.get("conditions"):
+                    wear_conditions.append(snap["conditions"].lower())
 
         price_obj = item.get("price") or {}
         price_amount = price_obj.get("amount")
