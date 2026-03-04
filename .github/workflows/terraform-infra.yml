@@ -62,14 +62,7 @@ jobs:
           swa_repository_token = "${{ secrets.SWA_REPOSITORY_TOKEN }}"
           OUTER
 
-            python3 - <<'PY'
-            import os
-            url = os.environ['SEGMENTATION_ENDPOINT_URL'].strip()
-            token = os.environ['SEGMENTATION_SHARED_TOKEN'].strip()
-            with open('terraform.auto.tfvars', 'a') as f:
-              f.write(f'segmentation_endpoint_url = "{url}"\n')
-              f.write(f'segmentation_shared_token = "{token}"\n')
-            PY
+          python3 -c "import os; u=os.environ['SEGMENTATION_ENDPOINT_URL'].strip(); t=os.environ['SEGMENTATION_SHARED_TOKEN'].strip(); open('terraform.auto.tfvars','a').write('segmentation_endpoint_url = \"'+u+'\"\nsegmentation_shared_token = \"'+t+'\"\n')"
 
           if [ -n "$CORS_ALLOWED_ORIGINS" ]; then
             echo "cors_allowed_origins = $CORS_ALLOWED_ORIGINS" >> terraform.auto.tfvars
