@@ -62,8 +62,8 @@ jobs:
           swa_repository_token = "${{ secrets.SWA_REPOSITORY_TOKEN }}"
           OUTER
 
-          echo "segmentation_endpoint_url = \"$SEGMENTATION_ENDPOINT_URL\"" >> terraform.auto.tfvars
-          echo "segmentation_shared_token = \"$SEGMENTATION_SHARED_TOKEN\"" >> terraform.auto.tfvars
+          echo "segmentation_endpoint_url = \"$(echo "$SEGMENTATION_ENDPOINT_URL" | tr -d '\n\r')\"" >> terraform.auto.tfvars
+          echo "segmentation_shared_token = \"$(echo "$SEGMENTATION_SHARED_TOKEN" | tr -d '\n\r')\"" >> terraform.auto.tfvars
 
           if [ -n "$CORS_ALLOWED_ORIGINS" ]; then
             echo "cors_allowed_origins = $CORS_ALLOWED_ORIGINS" >> terraform.auto.tfvars
