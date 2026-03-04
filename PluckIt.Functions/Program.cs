@@ -100,14 +100,18 @@ var host = new HostBuilder()
         // ── Python Processor HTTP forwarding ──────────────────────────────────
         var processorBaseUrl = config["Processor:BaseUrl"] ?? "http://localhost:7071";
         services.AddHttpClient("processor", client =>
-            client.BaseAddress = new Uri(processorBaseUrl));
+        {
+            client.BaseAddress = new Uri(processorBaseUrl);
+            client.Timeout = TimeSpan.FromSeconds(130);
+        });
 
         // ── Blob SAS URL generator ────────────────────────────────────────────
         var blobAccountName = config["BlobStorage:AccountName"] ?? "";
         var blobAccountKey = config["BlobStorage:AccountKey"] ?? "";
         var blobArchiveContainer = config["BlobStorage:ArchiveContainer"] ?? "archive";
+        var blobUploadsContainer = config["BlobStorage:UploadsContainer"] ?? "uploads";
         services.AddSingleton<IBlobSasService>(
-            new BlobSasService(blobAccountName, blobAccountKey, blobArchiveContainer));
+            new BlobSasService(blobAccountName, blobAccountKey, blobArchiveContainer, blobUploadsContainer));
     })
     .Build();
 

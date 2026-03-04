@@ -16,7 +16,7 @@ from preprocess import load_rgb_image, resize_max_side
 APP_NAME = "pluckit-birefnet-segmentation"
 logger = logging.getLogger(__name__)
 
-DEFAULT_SCALEDOWN_WINDOW_SECONDS = int(os.getenv("SCALEDOWN_WINDOW_SECONDS", "15"))
+DEFAULT_SCALEDOWN_WINDOW_SECONDS = int(os.getenv("SCALEDOWN_WINDOW_SECONDS", "60"))
 DEFAULT_MAX_IMAGE_MB = int(os.getenv("MAX_IMAGE_MB", "10"))
 DEFAULT_MAX_DIM = int(os.getenv("MAX_IMAGE_DIM", "1536"))
 DEFAULT_MASK_THRESHOLD = float(os.getenv("MASK_THRESHOLD", "0.5"))

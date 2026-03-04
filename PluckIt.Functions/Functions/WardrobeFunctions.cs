@@ -162,6 +162,9 @@ public class WardrobeFunctions(
         // Best-effort blob delete — orphan cleanup Function will catch any misses
         if (!string.IsNullOrEmpty(existing.ImageUrl))
             await sasService.DeleteBlobAsync(existing.ImageUrl, cancellationToken);
+        // Also delete raw upload blob if this was a draft
+        if (!string.IsNullOrEmpty(existing.RawImageBlobUrl))
+            await sasService.DeleteBlobAsync(existing.RawImageBlobUrl, cancellationToken);
 
         return req.CreateResponse(HttpStatusCode.NoContent);
     }
@@ -510,7 +513,6 @@ public class WardrobeFunctions(
         }
         else
         {
-            // Accept raw octet-stream
             using var ms = new MemoryStream();
             await req.Body.CopyToAsync(ms, cancellationToken);
             imageBytes = ms.ToArray();
@@ -519,73 +521,296 @@ public class WardrobeFunctions(
                 return await JsonError(req, HttpStatusCode.BadRequest, "No image provided.");
         }
 
+        var itemId = $"upload-{Guid.NewGuid():N}";
+        var now = DateTimeOffset.UtcNow;
+
+        // Upload raw bytes to blob for retry capability
+        string rawBlobUrl;
+        try
+        {
+            rawBlobUrl = await sasService.UploadRawAsync($"{userId}/{itemId}", imageBytes, mediaType, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to upload raw image to blob storage.");
+            return await JsonError(req, HttpStatusCode.ServiceUnavailable, "Could not store image. Please try again.");
+        }
+
+        // Write Processing draft atomically — CancellationToken.None so a client disconnect
+        // cannot orphan the blob without a tracking document.
+        var draftDoc = new ClothingItem
+        {
+            Id = itemId,
+            UserId = userId!,
+            RawImageBlobUrl = rawBlobUrl,
+            DraftStatus = DraftStatus.Processing,
+            DraftCreatedAt = now,
+            DraftUpdatedAt = now,
+        };
+        await repo.UpsertAsync(draftDoc, CancellationToken.None);
+        logger.LogInformation("Draft {ItemId} created for user {UserId}, status Processing.", itemId, userId);
+
+        // Run the processing pipeline synchronously from the caller's perspective.
+        // Terminal state is always written with CancellationToken.None inside the pipeline.
+        var result = await RunProcessingPipelineAsync(
+            itemId, userId!, imageBytes, mediaType, cancellationToken);
+
+        if (result is null)
+        {
+            // Pipeline failed — Cosmos already updated to Failed.
+            // Return 422 so Angular error handler can show the failed chip immediately.
+            var failedItem = await repo.GetByIdAsync(itemId, userId!, CancellationToken.None);
+            if (failedItem is not null)
+                return await JsonUnprocessable(req, failedItem, PluckItJsonContext.Default.ClothingItem);
+            return await JsonError(req, HttpStatusCode.UnprocessableEntity, "Image processing failed.");
+        }
+
+        return await JsonOk(req, result, PluckItJsonContext.Default.ClothingItem);
+    }
+
+    // ── GET /api/wardrobe/drafts ─────────────────────────────────────────────
+
+    [Function(nameof(GetDraftItems))]
+    public async Task<HttpResponseData> GetDraftItems(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "wardrobe/drafts")] HttpRequestData req,
+        CancellationToken cancellationToken)
+    {
+        var (authed, userId) = await TryGetUserIdAsync(req);
+        if (!authed)
+            return req.CreateResponse(HttpStatusCode.Unauthorized);
+
+        var qs = ParseQueryString(req.Url);
+        var pageSize = int.TryParse(qs.GetValueOrDefault("pageSize"), out var s) ? Math.Clamp(s, 1, 50) : 50;
+        var continuationToken = qs.GetValueOrDefault("continuationToken");
+
+        var result = await repo.GetDraftsAsync(userId!, pageSize, continuationToken, cancellationToken);
+
+        // Enrich Ready drafts with SAS image URLs for preview
+        foreach (var item in result.Items)
+            if (!string.IsNullOrEmpty(item.ImageUrl))
+                item.ImageUrl = sasService.GenerateSasUrl(item.ImageUrl);
+
+        return await JsonOk(req, result, PluckItJsonContext.Default.WardrobeDraftsResult);
+    }
+
+    // ── PATCH /api/wardrobe/drafts/{id}/accept ───────────────────────────────
+
+    [Function(nameof(AcceptDraft))]
+    public async Task<HttpResponseData> AcceptDraft(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "wardrobe/drafts/{id}/accept")] HttpRequestData req,
+        string id,
+        CancellationToken cancellationToken)
+    {
+        var (authed, userId) = await TryGetUserIdAsync(req);
+        if (!authed)
+            return req.CreateResponse(HttpStatusCode.Unauthorized);
+
+        // Read item first to capture rawImageBlobUrl before AcceptDraftAsync removes it
+        var existing = await repo.GetByIdAsync(id, userId!, cancellationToken);
+        if (existing is null)
+            return req.CreateResponse(HttpStatusCode.NotFound);
+
+        var rawUrl = existing.RawImageBlobUrl;
+        var accepted = await repo.AcceptDraftAsync(id, userId!, DateTimeOffset.UtcNow, cancellationToken);
+        if (accepted is null)
+            return await JsonError(req, HttpStatusCode.Conflict,
+                "Draft is not in Ready state. It may have already been accepted or is still processing.");
+
+        // Best-effort: delete raw upload blob — no longer needed after acceptance
+        if (!string.IsNullOrEmpty(rawUrl))
+            await sasService.DeleteBlobAsync(rawUrl, CancellationToken.None);
+
+        accepted.ImageUrl = sasService.GenerateSasUrl(accepted.ImageUrl);
+        return await JsonOk(req, accepted, PluckItJsonContext.Default.ClothingItem);
+    }
+
+    // ── POST /api/wardrobe/drafts/{id}/retry ─────────────────────────────────
+
+    [Function(nameof(RetryDraft))]
+    public async Task<HttpResponseData> RetryDraft(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "wardrobe/drafts/{id}/retry")] HttpRequestData req,
+        string id,
+        CancellationToken cancellationToken)
+    {
+        var (authed, userId) = await TryGetUserIdAsync(req);
+        if (!authed)
+            return req.CreateResponse(HttpStatusCode.Unauthorized);
+
+        var item = await repo.GetByIdAsync(id, userId!, cancellationToken);
+        if (item is null)
+            return req.CreateResponse(HttpStatusCode.NotFound);
+
+        if (item.DraftStatus != DraftStatus.Failed)
+            return await JsonError(req, HttpStatusCode.Conflict, "Only Failed drafts can be retried.");
+
+        if (string.IsNullOrEmpty(item.RawImageBlobUrl))
+            return await JsonError(req, HttpStatusCode.Gone, "Raw image no longer available for retry.");
+
+        // Transition back to Processing via full upsert (guarded by the Failed check above)
+        var now = DateTimeOffset.UtcNow;
+        item.DraftStatus = DraftStatus.Processing;
+        item.DraftUpdatedAt = now;
+        item.DraftError = null;
+        await repo.UpsertAsync(item, CancellationToken.None);
+        logger.LogInformation("Retrying failed draft {ItemId} for user {UserId}.", id, userId);
+
+        // Download raw bytes from blob storage via SDK (no SAS round-trip)
+        byte[] imageBytes;
+        try
+        {
+            imageBytes = await sasService.DownloadRawAsync(item.RawImageBlobUrl, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Could not download raw image for retry of draft {ItemId}.", id);
+            await repo.SetDraftTerminalAsync(id, userId!, DraftStatus.Failed, null, null,
+                "Raw image download failed.", DateTimeOffset.UtcNow, CancellationToken.None);
+            return await JsonError(req, HttpStatusCode.ServiceUnavailable, "Could not retrieve stored image.");
+        }
+
+        // The raw upload blob name carries the original extension; treat as JPEG for the processor
+        const string retryMediaType = "image/jpeg";
+        var result = await RunProcessingPipelineAsync(id, userId!, imageBytes, retryMediaType, cancellationToken);
+
+        if (result is null)
+        {
+            var failedItem = await repo.GetByIdAsync(id, userId!, CancellationToken.None);
+            if (failedItem is not null)
+                return await JsonUnprocessable(req, failedItem, PluckItJsonContext.Default.ClothingItem);
+            return await JsonError(req, HttpStatusCode.UnprocessableEntity, "Retry processing failed.");
+        }
+
+        return await JsonOk(req, result, PluckItJsonContext.Default.ClothingItem);
+    }
+
+    // ── Timer: clean up abandoned / stale drafts (03:00 UTC daily) ───────────
+
+    [Function("CleanupAbandonedDrafts")]
+    public async Task CleanupAbandonedDrafts(
+        [TimerTrigger("0 0 3 * * *")] TimerInfo timer,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        logger.LogInformation("CleanupAbandonedDrafts starting at {Now}.", now);
+
+        // Pass 1: Processing drafts stuck > 2 hours → Failed
+        var cutoff2h = now.AddHours(-2);
+        var abandoned = await repo.GetByDraftStatusAsync(
+            DraftStatus.Processing, cutoff2h, maxItems: 200, cancellationToken);
+        logger.LogInformation("Found {Count} abandoned Processing drafts.", abandoned.Count);
+        foreach (var item in abandoned)
+        {
+            await repo.SetDraftTerminalAsync(
+                item.Id, item.UserId, DraftStatus.Failed,
+                null, null, "Timed out during processing.",
+                now, CancellationToken.None);
+        }
+
+        // Pass 2: Failed drafts older than 7 days → delete doc + blobs
+        var cutoff7d = now.AddDays(-7);
+        var stale = await repo.GetByDraftStatusAsync(
+            DraftStatus.Failed, cutoff7d, maxItems: 200, cancellationToken);
+        logger.LogInformation("Found {Count} stale Failed drafts to purge.", stale.Count);
+        foreach (var item in stale)
+        {
+            await repo.DeleteAsync(item.Id, item.UserId, CancellationToken.None);
+            if (!string.IsNullOrEmpty(item.RawImageBlobUrl))
+                await sasService.DeleteBlobAsync(item.RawImageBlobUrl, CancellationToken.None);
+            if (!string.IsNullOrEmpty(item.ImageUrl))
+                await sasService.DeleteBlobAsync(item.ImageUrl, CancellationToken.None);
+        }
+
+        logger.LogInformation("CleanupAbandonedDrafts: transitioned {A}, purged {S}.",
+            abandoned.Count, stale.Count);
+    }
+
+    // ── Private: shared processing pipeline ──────────────────────────────────
+
+    /// <summary>
+    /// Forwards <paramref name="imageBytes"/> to the Python processor, extracts AI metadata
+    /// from the returned PNG, and writes the terminal state (Ready or Failed) to Cosmos using
+    /// <see cref="CancellationToken.None"/> so client disconnect does not leave orphaned drafts.
+    /// Returns the finalized <see cref="ClothingItem"/> on success, or <c>null</c> on failure.
+    /// </summary>
+    private async Task<ClothingItem?> RunProcessingPipelineAsync(
+        string itemId,
+        string userId,
+        byte[] imageBytes,
+        string mediaType,
+        CancellationToken requestCt)
+    {
         // Forward to Python processor for background removal + blob upload
         using var form = new MultipartFormDataContent();
         var streamContent = new StreamContent(new MemoryStream(imageBytes));
         streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(mediaType);
         form.Add(streamContent, "image", "upload.png");
+        form.Add(new StringContent(itemId), "item_id");
 
         var processorClient = httpClientFactory.CreateClient("processor");
         HttpResponseMessage processorResponse;
         try
         {
-            processorResponse = await processorClient.PostAsync("/api/process-image", form, cancellationToken);
+            // Use a dedicated CTS so a browser disconnect/request cancellation cannot
+            // abort the Modal segmentation call mid-flight. The processor client already
+            // carries a 130 s socket timeout as the hard ceiling.
+            using var processorCts = new CancellationTokenSource(TimeSpan.FromSeconds(125));
+            processorResponse = await processorClient.PostAsync("/api/process-image", form, processorCts.Token);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to reach image processor.");
-            return await JsonError(req, HttpStatusCode.ServiceUnavailable, "Image processor is unavailable.");
+            logger.LogError(ex, "Failed to reach image processor for item {ItemId}.", itemId);
+            await repo.SetDraftTerminalAsync(itemId, userId, DraftStatus.Failed, null, null,
+                "Image processor is unavailable.", DateTimeOffset.UtcNow, CancellationToken.None);
+            return null;
         }
 
         if (!processorResponse.IsSuccessStatusCode)
         {
-            var err = await processorResponse.Content.ReadAsStringAsync(cancellationToken);
-            logger.LogError("Processor returned {Status}: {Body}", (int)processorResponse.StatusCode, err);
-            return await JsonError(req, HttpStatusCode.BadGateway,
-                $"Image processor returned {(int)processorResponse.StatusCode}.");
+            var err = await processorResponse.Content.ReadAsStringAsync(requestCt);
+            logger.LogError("Processor returned {Status} for item {ItemId}: {Body}",
+                (int)processorResponse.StatusCode, itemId, err);
+            await repo.SetDraftTerminalAsync(itemId, userId, DraftStatus.Failed, null, null,
+                $"Processor returned {(int)processorResponse.StatusCode}.", DateTimeOffset.UtcNow, CancellationToken.None);
+            return null;
         }
 
         var processed = await processorResponse.Content
-            .ReadFromJsonAsync(PluckItJsonContext.Default.ProcessorResult, cancellationToken);
+            .ReadFromJsonAsync(PluckItJsonContext.Default.ProcessorResult, CancellationToken.None);
 
         if (processed is null || string.IsNullOrEmpty(processed.ImageUrl))
-            return await JsonError(req, HttpStatusCode.BadGateway, "Image processor returned an unexpected response.");
+        {
+            await repo.SetDraftTerminalAsync(itemId, userId, DraftStatus.Failed, null, null,
+                "Processor returned an unexpected response.", DateTimeOffset.UtcNow, CancellationToken.None);
+            return null;
+        }
 
-        // Always use the processed PNG for AI metadata extraction.
-        // The original upload may be HEIC or another format unsupported by OpenAI Vision,
-        // but the processor guarantees output is a valid PNG.
-        // We generate a short-lived SAS URL and download the PNG bytes via HttpClient.
-        BinaryData imageData;
-        string metaMediaType;
+        // Extract AI metadata from the processed PNG (always PNG output from processor)
+        ClothingMetadata? metadata = null;
         try
         {
             var pngSasUrl = sasService.GenerateSasUrl(processed.ImageUrl, validForMinutes: 5);
             using var sasClient = httpClientFactory.CreateClient();
-            var pngBytes = await sasClient.GetByteArrayAsync(pngSasUrl, cancellationToken);
-            imageData = BinaryData.FromBytes(pngBytes);
-            metaMediaType = "image/png";
+            var pngBytes = await sasClient.GetByteArrayAsync(pngSasUrl, CancellationToken.None);
+            var imageData = BinaryData.FromBytes(pngBytes);
+            metadata = await metadataService.ExtractMetadataAsync(imageData, "image/png", CancellationToken.None);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Could not download processed PNG for metadata extraction; falling back to original bytes.");
-            imageData = BinaryData.FromBytes(imageBytes);
-            metaMediaType = mediaType;
+            logger.LogWarning(ex,
+                "Metadata extraction failed for item {ItemId}; proceeding with empty metadata.", itemId);
         }
 
-        var metadata = await metadataService.ExtractMetadataAsync(imageData, metaMediaType, cancellationToken);
+        // Write Ready terminal state with CancellationToken.None
+        await repo.SetDraftTerminalAsync(
+            itemId, userId, DraftStatus.Ready,
+            processed.ImageUrl, metadata, null,
+            DateTimeOffset.UtcNow, CancellationToken.None);
 
-        var draft = new ClothingItem
-        {
-            Id = processed.Id,
-            UserId = userId!,
-            ImageUrl = sasService.GenerateSasUrl(processed.ImageUrl),
-            Brand = metadata.Brand,
-            Category = metadata.Category,
-            Tags = metadata.Tags,
-            Colours = metadata.Colours,
-        };
-
-        return await JsonOk(req, draft, PluckItJsonContext.Default.ClothingItem);
+        // Return fresh item with SAS URL for immediate display
+        var item = await repo.GetByIdAsync(itemId, userId, CancellationToken.None);
+        if (item is not null)
+            item.ImageUrl = sasService.GenerateSasUrl(item.ImageUrl);
+        return item;
     }
 
     // ── POST /api/wardrobe ──────────────────────────────────────────────────
@@ -659,6 +884,15 @@ public class WardrobeFunctions(
         HttpRequestData req, T body, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo)
     {
         var response = req.CreateResponse(HttpStatusCode.OK);
+        response.Headers.Add("Content-Type", "application/json; charset=utf-8");
+        await response.WriteStringAsync(JsonSerializer.Serialize(body, typeInfo));
+        return response;
+    }
+
+    private static async Task<HttpResponseData> JsonUnprocessable<T>(
+        HttpRequestData req, T body, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo)
+    {
+        var response = req.CreateResponse(HttpStatusCode.UnprocessableEntity);
         response.Headers.Add("Content-Type", "application/json; charset=utf-8");
         await response.WriteStringAsync(JsonSerializer.Serialize(body, typeInfo));
         return response;

@@ -17,6 +17,7 @@ import { Component, ElementRef, EventEmitter, Input, Output, ViewChild } from '@
         #fileInput
         type="file"
         accept="image/*,.heic"
+        multiple
         class="hidden"
         (change)="onFileChange($event)"
       />
@@ -48,7 +49,7 @@ import { Component, ElementRef, EventEmitter, Input, Output, ViewChild } from '@
       <!-- Text -->
       <div class="z-10 relative">
         <p class="text-lg font-semibold text-white">Drop clothing images to scan</p>
-        <p class="text-slate-text text-sm mt-1">AI automatically removes backgrounds and tags attributes.</p>
+        <p class="text-slate-text text-sm mt-1">Select multiple photos — AI removes backgrounds and tags attributes.</p>
       </div>
 
       <!-- Supported formats -->
@@ -56,13 +57,15 @@ import { Component, ElementRef, EventEmitter, Input, Output, ViewChild } from '@
         @for (fmt of ['JPG', 'PNG', 'HEIC']; track fmt) {
           <span class="text-[10px] font-mono uppercase text-slate-500 bg-black/60 border border-[#333] px-2 py-1 rounded">{{ fmt }}</span>
         }
+        <span class="text-[10px] font-mono uppercase text-slate-500 bg-black/60 border border-[#333] px-2 py-1 rounded">MULTI-SELECT</span>
       </div>
     </div>
   `,
 })
 export class UploadItemComponent {
   @Input() uploading = false;
-  @Output() fileSelected = new EventEmitter<File>();
+  /** Emits an array of selected files (one or more). */
+  @Output() fileSelected = new EventEmitter<File[]>();
   @ViewChild('fileInput') fileInput!: ElementRef<HTMLInputElement>;
 
   dragging = false;
@@ -79,15 +82,17 @@ export class UploadItemComponent {
   onDrop(event: DragEvent): void {
     event.preventDefault();
     this.dragging = false;
-    const file = event.dataTransfer?.files[0];
-    if (file && file.type.startsWith('image/')) this.fileSelected.emit(file);
+    const files = Array.from(event.dataTransfer?.files ?? [])
+      .filter(f => f.type.startsWith('image/') || f.name.toLowerCase().endsWith('.heic'));
+    if (files.length > 0) this.fileSelected.emit(files);
   }
 
   onFileChange(event: Event): void {
-    const file = (event.target as HTMLInputElement).files?.[0];
-    if (file) {
-      this.fileSelected.emit(file);
+    const files = Array.from((event.target as HTMLInputElement).files ?? []);
+    if (files.length > 0) {
+      this.fileSelected.emit(files);
       (event.target as HTMLInputElement).value = '';
     }
   }
 }
+

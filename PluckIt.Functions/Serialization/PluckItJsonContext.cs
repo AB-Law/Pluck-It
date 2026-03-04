@@ -52,6 +52,9 @@ namespace PluckIt.Functions.Serialization;
 [JsonSerializable(typeof(ProcessorResult))]
 [JsonSerializable(typeof(HealthResponse))]
 [JsonSerializable(typeof(ErrorResponse))]
+[JsonSerializable(typeof(DraftStatus))]
+[JsonSerializable(typeof(DraftStatus?))]
+[JsonSerializable(typeof(WardrobeDraftsResult))]
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]

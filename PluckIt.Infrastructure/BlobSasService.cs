@@ -15,18 +15,22 @@ public class BlobSasService : IBlobSasService
   private readonly string _accountName;
   private readonly StorageSharedKeyCredential _credential;
   private readonly string _archiveContainer;
+  private readonly string _uploadsContainer;
+  private readonly BlobServiceClient _serviceClient;
 
-  public BlobSasService(string accountName, string accountKey, string archiveContainer)
+  public BlobSasService(string accountName, string accountKey, string archiveContainer,
+      string uploadsContainer = "uploads")
   {
     _accountName = accountName ?? throw new ArgumentNullException(nameof(accountName));
     _credential = new StorageSharedKeyCredential(accountName, accountKey);
     _archiveContainer = archiveContainer ?? throw new ArgumentNullException(nameof(archiveContainer));
+    _uploadsContainer = uploadsContainer;
+    _serviceClient = new BlobServiceClient(
+        new Uri($"https://{accountName}.blob.core.windows.net"), _credential);
   }
 
   private BlobContainerClient ArchiveContainer =>
-    new BlobContainerClient(
-      new Uri($"https://{_accountName}.blob.core.windows.net/{_archiveContainer}"),
-      _credential);
+    _serviceClient.GetBlobContainerClient(_archiveContainer);
 
   public string GenerateSasUrl(string blobUrl, int validForMinutes = 120)
   {
@@ -94,5 +98,32 @@ public class BlobSasService : IBlobSasService
     {
       yield return item.Name;
     }
+  }
+
+  public async Task<string> UploadRawAsync(string blobName, byte[] bytes, string contentType,
+      CancellationToken cancellationToken = default)
+  {
+    var container = _serviceClient.GetBlobContainerClient(_uploadsContainer);
+    var blobClient = container.GetBlobClient(blobName);
+    using var stream = new System.IO.MemoryStream(bytes);
+    await blobClient.UploadAsync(stream,
+        new Azure.Storage.Blobs.Models.BlobUploadOptions
+        {
+            HttpHeaders = new Azure.Storage.Blobs.Models.BlobHttpHeaders
+            { ContentType = contentType }
+        },
+        cancellationToken);
+    return blobClient.Uri.ToString();
+  }
+
+  public async Task<byte[]> DownloadRawAsync(string blobUrl, CancellationToken cancellationToken = default)
+  {
+    var uri = new Uri(blobUrl.Split('?')[0]);
+    var segments = uri.AbsolutePath.TrimStart('/').Split('/', 2);
+    var containerName = segments[0];
+    var blobName = segments.Length > 1 ? segments[1] : throw new ArgumentException("Cannot parse blob name from URL.");
+    var blobClient = _serviceClient.GetBlobContainerClient(containerName).GetBlobClient(blobName);
+    var result = await blobClient.DownloadContentAsync(cancellationToken);
+    return result.Value.Content.ToArray();
   }
 }

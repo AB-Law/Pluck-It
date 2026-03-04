@@ -1,4 +1,4 @@
-import { Component, computed, EventEmitter, input, OnInit, Output, signal, ViewChild } from '@angular/core';
+import { Component, computed, DestroyRef, EventEmitter, inject, input, OnInit, Output, signal, ViewChild } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { WardrobeService } from '../../core/services/wardrobe.service';
 import { ClothingItem } from '../../core/models/clothing-item.model';
@@ -6,7 +6,24 @@ import type { WardrobeSortField } from '../../core/models/clothing-item.model';
 import { UploadItemComponent } from './upload-item.component';
 import { ClothingCardComponent } from './clothing-card.component';
 import { ReviewItemModalComponent } from './review-item-modal.component';
+import { switchMap, interval } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { matchesItem } from '../../core/utils/search.utils';
+import { resizeImageFile } from '../../core/utils/image-utils';
+
+/** A single entry in the client-side upload pipeline. */
+interface UploadQueueItem {
+  /** Transient client ID — not the Cosmos document ID. */
+  localId: string;
+  file: File;
+  status: 'queued' | 'uploading' | 'ready' | 'failed';
+  /** Set once the server persists a Cosmos draft document. */
+  draftId?: string;
+  /** AI-extracted category, populated after processing completes. */
+  category?: string;
+  /** Human-readable error for failed items. */
+  error?: string;
+}
 
 @Component({
   selector: 'app-wardrobe',
@@ -38,6 +55,76 @@ import { matchesItem } from '../../core/utils/search.utils';
         </div>
       }
     </section>
+
+    <!-- ─── Upload Pipeline Strip ──────────────────────────────────────── -->
+    @if (uploadQueue().length > 0 || serverOnlyDrafts().length > 0) {
+      <section class="px-6 md:px-8 py-4 border-b border-border-subtle bg-black/30">
+        <h3 class="text-[10px] font-mono text-slate-500 uppercase tracking-widest mb-3">Upload Pipeline</h3>
+        <div class="flex flex-wrap gap-2">
+
+          <!-- Current-session queue items -->
+          @for (qi of uploadQueue(); track qi.localId) {
+            <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[11px] font-mono transition-all"
+              [class]="qi.status === 'queued'    ? 'bg-[#111] border-[#333] text-slate-400' :
+                       qi.status === 'uploading' ? 'bg-blue-950/50 border-blue-800/60 text-blue-300' :
+                       qi.status === 'ready'     ? 'bg-green-950/40 border-green-800/50 text-green-300' :
+                                                   'bg-red-950/40 border-red-800/50 text-red-300'">
+              @if (qi.status === 'queued') {
+                <span class="material-symbols-outlined" style="font-size:11px">schedule</span>
+              } @else if (qi.status === 'uploading') {
+                <span class="material-symbols-outlined animate-spin" style="font-size:11px">sync</span>
+              } @else if (qi.status === 'ready') {
+                <span class="material-symbols-outlined" style="font-size:11px">check_circle</span>
+              } @else {
+                <span class="material-symbols-outlined" style="font-size:11px">error</span>
+              }
+              <span class="max-w-[100px] truncate">{{ qi.category ?? qi.file.name }}</span>
+              @if (qi.status === 'ready' && qi.draftId) {
+                <button class="ml-1 underline text-green-400 hover:text-green-200"
+                  (click)="onQueueItemReview(qi)">Review</button>
+              }
+              @if (qi.status === 'failed' && qi.draftId) {
+                <button class="ml-1 underline text-yellow-400 hover:text-yellow-200"
+                  (click)="onQueueItemRetry(qi)">Retry</button>
+              }
+              @if (qi.status === 'failed' || qi.status === 'ready') {
+                <button class="ml-1 text-slate-400 hover:text-red-300"
+                  (click)="onQueueItemDismiss(qi)" aria-label="Dismiss">✕</button>
+              }
+            </div>
+          }
+
+          <!-- Server-persisted drafts from previous sessions -->
+          @for (draft of serverOnlyDrafts(); track draft.id) {
+            <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[11px] font-mono transition-all"
+              [class]="draft.draftStatus === 'Ready'
+                ? 'bg-green-950/40 border-green-800/50 text-green-300'
+                : draft.draftStatus === 'Processing' || retryingDraftIds().has(draft.id)
+                ? 'bg-blue-950/50 border-blue-800/60 text-blue-300'
+                : 'bg-red-950/40 border-red-800/50 text-red-300'">
+              @if (draft.draftStatus === 'Ready') {
+                <span class="material-symbols-outlined" style="font-size:11px">check_circle</span>
+              } @else if (draft.draftStatus === 'Processing' || retryingDraftIds().has(draft.id)) {
+                <span class="material-symbols-outlined animate-spin" style="font-size:11px">sync</span>
+              } @else {
+                <span class="material-symbols-outlined" style="font-size:11px">error</span>
+              }
+              <span class="max-w-[100px] truncate">{{ draft.category ?? 'Item' }}</span>
+              @if (draft.draftStatus === 'Ready') {
+                <button class="ml-1 underline text-green-400 hover:text-green-200"
+                  (click)="reviewingDraft.set(draft)">Review</button>
+              }
+              @if (draft.draftStatus === 'Failed' && !retryingDraftIds().has(draft.id)) {
+                <button class="ml-1 underline text-yellow-400 hover:text-yellow-200"
+                  (click)="onServerDraftRetry(draft)">Retry</button>
+              }
+              <button class="ml-1 text-slate-400 hover:text-red-300"
+                (click)="onServerDraftDismiss(draft)" aria-label="Dismiss">✕</button>
+            </div>
+          }
+        </div>
+      </section>
+    }
 
     <!-- ─── Digital Archive ────────────────────────────────────────── -->
     <section class="p-6 md:p-8 flex-1">
@@ -142,14 +229,14 @@ import { matchesItem } from '../../core/utils/search.utils';
       }
     </section>
 
-    <!-- Upload draft modal (create mode) -->
-    @if (draftItem()) {
+    <!-- Draft review modal (create mode) -->
+    @if (reviewingDraft()) {
       <app-review-item-modal
-        [item]="draftItem()"
+        [item]="reviewingDraft()"
         [knownBrands]="knownBrands()"
         [isEditMode]="false"
-        (saved)="onItemSaved($event)"
-        (cancelled)="draftItem.set(null)"
+        (saved)="onDraftReviewSaved($event)"
+        (cancelled)="reviewingDraft.set(null)"
       />
     }
 
@@ -202,19 +289,49 @@ export class WardrobeComponent implements OnInit {
 
   @ViewChild('uploadRef') private uploadRef!: UploadItemComponent;
 
+  // ── Wardrobe archive ─────────────────────────────────────────────────────
   readonly allItems     = signal<ClothingItem[]>([]);
-  readonly draftItem    = signal<ClothingItem | null>(null);
   readonly editingItem  = signal<ClothingItem | null>(null);
   readonly deletingItem = signal<ClothingItem | null>(null);
   readonly loading      = signal(false);
   readonly loadingMore  = signal(false);
   readonly hasMore      = signal(false);
   readonly nextToken    = signal<string | null>(null);
-  readonly uploading    = signal(false);
   readonly uploadError  = signal<string | null>(null);
   readonly selectedCategory = signal<string>('all');
   readonly sortField    = signal<WardrobeSortField>('dateAdded');
   readonly sortDir      = signal<'asc' | 'desc'>('desc');
+
+  // ── Upload pipeline (multi-file queue + persistent server drafts) ────────
+  readonly uploadQueue    = signal<UploadQueueItem[]>([]);
+  readonly drafts         = signal<ClothingItem[]>([]);
+  readonly reviewingDraft = signal<ClothingItem | null>(null);
+  /** IDs of server-only drafts currently being retried (in-flight). */
+  readonly retryingDraftIds = signal<Set<string>>(new Set());
+
+  /** True while at least one item is being uploaded/processed. */
+  readonly uploading = computed(() =>
+    this.uploadQueue().some(q => q.status === 'uploading'),
+  );
+
+  /** IDs of drafts currently tracked in the clientside upload queue. */
+  private readonly _queueDraftIds = computed(() =>
+    new Set(this.uploadQueue().map(q => q.draftId).filter(Boolean) as string[]),
+  );
+
+  /**
+   * Server-persisted drafts from the previous session or a different tab.
+   * Excludes any drafts that are already represented in the current upload queue.
+   */
+  readonly serverOnlyDrafts = computed<ClothingItem[]>(() => {
+    const queueIds = this._queueDraftIds();
+    return this.drafts().filter(d => !queueIds.has(d.id));
+  });
+
+  /** True while the serial queue processor is running. */
+  private _queueRunning = false;
+
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly sortKey = computed(() => `${this.sortField()}:${this.sortDir()}`);
 
@@ -236,7 +353,6 @@ export class WardrobeComponent implements OnInit {
 
   readonly filteredItems = computed<ClothingItem[]>(() => {
     const q = this.searchQuery().toLowerCase().trim();
-    // Category is handled server-side; only apply free-text search client-side
     if (!q) return this.allItems();
     return this.allItems().filter(item => matchesItem(item, q));
   });
@@ -256,6 +372,25 @@ export class WardrobeComponent implements OnInit {
     this.sortField.set(sf);
     this.sortDir.set(sd);
     this.loadItems();
+    this.refreshDrafts();
+
+    // Auto-poll every 5 s while any server-persisted draft is still Processing.
+    interval(5000)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        if (this.serverOnlyDrafts().some(d => d.draftStatus === 'Processing')) {
+          this.refreshDrafts();
+        }
+      });
+
+    // Refresh drafts when the user returns to this tab
+    const visibilityHandler = () => {
+      if (document.visibilityState === 'visible') this.refreshDrafts();
+    };
+    document.addEventListener('visibilitychange', visibilityHandler);
+    this.destroyRef.onDestroy(() =>
+      document.removeEventListener('visibilitychange', visibilityHandler),
+    );
   }
 
   /** Called by DashboardComponent header Upload button */
@@ -292,62 +427,199 @@ export class WardrobeComponent implements OnInit {
     });
   }
 
-  private loadItems(): void {
-    this.loading.set(true);
-    this.nextToken.set(null);
-    this.hasMore.set(false);
-    this.wardrobe.getAll(this.buildQuery()).subscribe({
-      next: res => { this.allItems.set(res.items); this.nextToken.set(res.nextContinuationToken ?? null); this.hasMore.set(!!res.nextContinuationToken); this.loading.set(false); },
-      error: ()  => { this.loading.set(false); }
-    });
-  }
-
-  private buildQuery(continuationToken?: string | null) {
-    const cat = this.selectedCategory();
-    return {
-      category:          cat !== 'all' ? cat : undefined,
-      sortField:         this.sortField(),
-      sortDir:           this.sortDir(),
-      pageSize:          24,
-      continuationToken: continuationToken ?? undefined,
-    };
-  }
-
-  private syncUrl(): void {
-    const cat = this.selectedCategory();
-    const sf  = this.sortField();
-    const sd  = this.sortDir();
-    this.router.navigate([], {
-      queryParams: {
-        category:  cat !== 'all'       ? cat  : null,
-        sortField: sf  !== 'dateAdded' ? sf   : null,
-        sortDir:   sd  !== 'desc'      ? sd   : null,
-      },
-      replaceUrl: true,
-    });
-  }
-
-  onFileSelected(file: File): void {
-    this.uploading.set(true);
+  /** Handles multi-file selection from the upload component. */
+  onFileSelected(files: File[]): void {
     this.uploadError.set(null);
-    this.wardrobe.uploadForDraft(file).subscribe({
-      next: draft => { this.uploading.set(false); this.draftItem.set(draft); },
-      error: err  => {
-        this.uploading.set(false);
-        this.uploadError.set(err?.error?.detail ?? err?.message ?? 'Upload failed. Please try again.');
-      }
+    const newItems: UploadQueueItem[] = files.map(file => ({
+      localId: crypto.randomUUID(),
+      file,
+      status: 'queued' as const,
+    }));
+    this.uploadQueue.update(curr => [...curr, ...newItems]);
+    this.processQueue();
+  }
+
+  // ── Draft pipeline ─────────────────────────────────────────────────────
+
+  private refreshDrafts(): void {
+    this.wardrobe.getDrafts().subscribe({
+      next: res => this.drafts.set(res.items),
+      error: () => { /* silently ignore — queue state is the primary source of truth */ },
     });
   }
 
-  onItemSaved(item: ClothingItem): void {
-    this.wardrobe.save(item).subscribe({
-      next: saved => { this.draftItem.set(null); this.allItems.update(curr => [saved, ...curr]); },
-      error: err  => {
-        this.uploadError.set(err?.error?.detail ?? err?.message ?? 'Save failed. Please try again.');
-        this.draftItem.set(null);
+  /**
+   * Serially processes all queued items. Guarded by `_queueRunning` to prevent
+   * double-invocation when `onFileSelected` is called while a run is in progress.
+   */
+  private async processQueue(): Promise<void> {
+    if (this._queueRunning) return;
+    this._queueRunning = true;
+
+    try {
+      while (true) {
+        const queue = this.uploadQueue();
+        const next = queue.find(q => q.status === 'queued');
+        if (!next) break;
+
+        // Mark as uploading
+        this.uploadQueue.update(curr =>
+          curr.map(q => q.localId === next.localId ? { ...q, status: 'uploading' as const } : q),
+        );
+
+        // Optionally resize before sending (skips HEIC)
+        let fileToSend: File;
+        try {
+          fileToSend = await resizeImageFile(next.file, 1536);
+        } catch {
+          fileToSend = next.file;
+        }
+
+        await new Promise<void>(resolve => {
+          this.wardrobe.uploadForDraft(fileToSend).subscribe({
+            next: (result) => {
+              // 200/201 — draft is Ready
+              this.uploadQueue.update(curr =>
+                curr.map(q => q.localId === next.localId
+                  ? { ...q, status: 'ready' as const, draftId: result.id, category: result.category ?? undefined }
+                  : q),
+              );
+              // Merge into local drafts list
+              this.drafts.update(curr => {
+                const without = curr.filter(d => d.id !== result.id);
+                return [result, ...without];
+              });
+              resolve();
+            },
+            error: (err) => {
+              // 422 means the pipeline ran but failed; the body carries the Failed draft
+              if (err?.status === 422 && err?.error?.id) {
+                const failedDraft = err.error as ClothingItem;
+                this.uploadQueue.update(curr =>
+                  curr.map(q => q.localId === next.localId
+                    ? { ...q, status: 'failed' as const, draftId: failedDraft.id,
+                        error: failedDraft.draftError ?? 'Processing failed' }
+                    : q),
+                );
+                this.drafts.update(curr => {
+                  const without = curr.filter(d => d.id !== failedDraft.id);
+                  return [failedDraft, ...without];
+                });
+              } else {
+                // Network / server error — no Cosmos draft was created
+                this.uploadQueue.update(curr =>
+                  curr.map(q => q.localId === next.localId
+                    ? { ...q, status: 'failed' as const,
+                        error: err?.error?.detail ?? err?.message ?? 'Upload failed' }
+                    : q),
+                );
+              }
+              resolve();
+            },
+          });
+        });
       }
+    } finally {
+      this._queueRunning = false;
+    }
+  }
+
+  // ── Queue item actions ────────────────────────────────────────────────
+
+  onQueueItemReview(qi: UploadQueueItem): void {
+    if (!qi.draftId) return;
+    const draft = this.drafts().find(d => d.id === qi.draftId);
+    if (draft) this.reviewingDraft.set(draft);
+  }
+
+  onQueueItemRetry(qi: UploadQueueItem): void {
+    if (!qi.draftId) return;
+    this.wardrobe.retryDraft(qi.draftId).subscribe({
+      next: result => {
+        this.uploadQueue.update(curr =>
+          curr.map(q => q.localId === qi.localId
+            ? { ...q, status: 'ready' as const, error: undefined }
+            : q),
+        );
+        this.drafts.update(curr =>
+          curr.map(d => d.id === result.id ? result : d),
+        );
+      },
+      error: () => {
+        this.uploadError.set('Retry failed. Please try again.');
+      },
     });
   }
+
+  onQueueItemDismiss(qi: UploadQueueItem): void {
+    if (qi.draftId) {
+      this.wardrobe.dismissDraft(qi.draftId).subscribe({
+        error: () => { /* best-effort */ },
+      });
+      this.drafts.update(curr => curr.filter(d => d.id !== qi.draftId));
+    }
+    this.uploadQueue.update(curr => curr.filter(q => q.localId !== qi.localId));
+  }
+
+  dismissQueueItem(localId: string): void {
+    this.uploadQueue.update(curr => curr.filter(q => q.localId !== localId));
+  }
+
+  // ── Server-only draft actions ─────────────────────────────────────────
+
+  onServerDraftRetry(draft: ClothingItem): void {
+    this.retryingDraftIds.update(s => new Set([...s, draft.id]));
+    this.wardrobe.retryDraft(draft.id).subscribe({
+      next: result => {
+        this.retryingDraftIds.update(s => { s = new Set(s); s.delete(draft.id); return s; });
+        this.drafts.update(curr =>
+          curr.map(d => d.id === result.id ? result : d),
+        );
+      },
+      error: () => {
+        this.retryingDraftIds.update(s => { s = new Set(s); s.delete(draft.id); return s; });
+        this.uploadError.set('Retry failed. Please try again.');
+      },
+    });
+  }
+
+  onServerDraftDismiss(draft: ClothingItem): void {
+    this.wardrobe.dismissDraft(draft.id).subscribe({
+      error: () => { /* best-effort */ },
+    });
+    this.drafts.update(curr => curr.filter(d => d.id !== draft.id));
+  }
+
+  // ── Draft review modal callback ───────────────────────────────────────
+
+  /**
+   * Called when the user clicks Save in the review modal.
+   * Accepts the Ready draft by calling PATCH /api/wardrobe/drafts/{id}/accept,
+   * which moves the item to the main wardrobe by removing draftStatus.
+   */
+  onDraftReviewSaved(item: ClothingItem): void {
+    // First persist the user's reviewed edits, then promote from draft to wardrobe.
+    this.wardrobe.update(item).pipe(
+      switchMap(() => this.wardrobe.acceptDraft(item.id)),
+    ).subscribe({
+      next: accepted => {
+        this.reviewingDraft.set(null);
+        // Remove from draft lists
+        this.drafts.update(curr => curr.filter(d => d.id !== accepted.id));
+        this.uploadQueue.update(curr => curr.filter(q => q.draftId !== accepted.id));
+        // Add to main wardrobe grid
+        this.allItems.update(curr => [accepted, ...curr]);
+      },
+      error: err => {
+        this.uploadError.set(
+          err?.error?.detail ?? err?.message ?? 'Could not accept draft. Please try again.',
+        );
+        this.reviewingDraft.set(null);
+      },
+    });
+  }
+
+  // ── Wardrobe archive actions ──────────────────────────────────────────
 
   onEditItem(item: ClothingItem): void {
     this.editingItem.set(item);
@@ -384,5 +656,48 @@ export class WardrobeComponent implements OnInit {
       }
     });
   }
+
+  // ── Private helpers ───────────────────────────────────────────────────
+
+  private loadItems(): void {
+    this.loading.set(true);
+    this.nextToken.set(null);
+    this.hasMore.set(false);
+    this.wardrobe.getAll(this.buildQuery()).subscribe({
+      next: res => {
+        this.allItems.set(res.items);
+        this.nextToken.set(res.nextContinuationToken ?? null);
+        this.hasMore.set(!!res.nextContinuationToken);
+        this.loading.set(false);
+      },
+      error: () => { this.loading.set(false); }
+    });
+  }
+
+  private buildQuery(continuationToken?: string | null) {
+    const cat = this.selectedCategory();
+    return {
+      category:          cat !== 'all' ? cat : undefined,
+      sortField:         this.sortField(),
+      sortDir:           this.sortDir(),
+      pageSize:          24,
+      continuationToken: continuationToken ?? undefined,
+    };
+  }
+
+  private syncUrl(): void {
+    const cat = this.selectedCategory();
+    const sf  = this.sortField();
+    const sd  = this.sortDir();
+    this.router.navigate([], {
+      queryParams: {
+        category:  cat !== 'all'       ? cat  : null,
+        sortField: sf  !== 'dateAdded' ? sf   : null,
+        sortDir:   sd  !== 'desc'      ? sd   : null,
+      },
+      replaceUrl: true,
+    });
+  }
 }
+
 

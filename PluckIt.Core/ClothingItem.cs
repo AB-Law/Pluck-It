@@ -58,6 +58,18 @@ public enum ItemCondition
   Fair
 }
 
+/// <summary>
+/// Lifecycle state for upload drafts. Null on finalized wardrobe items.
+/// Processing → Ready (success) or Failed (error). Failed → Processing again via retry.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<DraftStatus>))]
+public enum DraftStatus
+{
+  Processing,
+  Ready,
+  Failed
+}
+
 public class ClothingItem
 {
   public string Id { get; set; } = default!;
@@ -110,4 +122,21 @@ public class ClothingItem
   /// Used for Digital Vault smart-group filtering and AI stylist context.
   /// </summary>
   public IReadOnlyCollection<string>? AestheticTags { get; set; }
+
+  // ── Draft lifecycle fields (null on all finalized wardrobe items) ─────────
+
+  /// <summary>Present only while item is an upload draft. Null once accepted.</summary>
+  public DraftStatus? DraftStatus { get; set; }
+
+  /// <summary>Human-readable error message when DraftStatus == Failed.</summary>
+  public string? DraftError { get; set; }
+
+  /// <summary>Raw (unprocessed) image blob URL. Used for server-side retry. Removed on accept.</summary>
+  public string? RawImageBlobUrl { get; set; }
+
+  /// <summary>UTC timestamp when this draft was first created. Used as cleanup baseline.</summary>
+  public DateTimeOffset? DraftCreatedAt { get; set; }
+
+  /// <summary>UTC timestamp of the most recent draft state transition. Used as staleness clock.</summary>
+  public DateTimeOffset? DraftUpdatedAt { get; set; }
 }

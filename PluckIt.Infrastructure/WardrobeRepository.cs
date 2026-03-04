@@ -99,6 +99,9 @@ public class WardrobeRepository : IWardrobeRepository
       parameters.Add("@maxWears", query.MaxWears.Value);
     }
 
+    // Exclude upload drafts — items where draftStatus is defined and non-null
+    conditions.Add("(NOT IS_DEFINED(c.draftStatus) OR IS_NULL(c.draftStatus))");
+
     sql += " WHERE " + string.Join(" AND ", conditions);
 
     // ── Sort ──────────────────────────────────────────────────────────────
@@ -224,5 +227,163 @@ public class WardrobeRepository : IWardrobeRepository
       cancellationToken: cancellationToken);
 
     return response.Resource;
+  }
+
+  public async Task<WardrobeDraftsResult> GetDraftsAsync(
+    string userId,
+    int pageSize = 50,
+    string? continuationToken = null,
+    CancellationToken cancellationToken = default)
+  {
+    const string sql = """
+      SELECT * FROM c
+      WHERE c.userId = @userId
+        AND IS_DEFINED(c.draftStatus)
+        AND NOT IS_NULL(c.draftStatus)
+      ORDER BY c.draftCreatedAt DESC
+      """;
+
+    var queryDefinition = new QueryDefinition(sql)
+        .WithParameter("@userId", userId);
+
+    var clampedSize = Math.Clamp(pageSize, 1, 50);
+    var iterator = Container.GetItemQueryIterator<ClothingItem>(
+      queryDefinition,
+      continuationToken: continuationToken,
+      requestOptions: new QueryRequestOptions
+      {
+        MaxItemCount = clampedSize,
+        PartitionKey = new PartitionKey(userId),
+      });
+
+    if (!iterator.HasMoreResults)
+      return new WardrobeDraftsResult([], null);
+
+    var page = await iterator.ReadNextAsync(cancellationToken);
+    return new WardrobeDraftsResult(page.ToList(), page.ContinuationToken);
+  }
+
+  public async Task<bool> SetDraftTerminalAsync(
+    string itemId,
+    string userId,
+    DraftStatus terminalStatus,
+    string? processedBlobUrl,
+    ClothingMetadata? metadata,
+    string? errorMessage,
+    DateTimeOffset now,
+    CancellationToken cancellationToken = default)
+  {
+    var ops = new List<PatchOperation>
+    {
+      PatchOperation.Set("/draftStatus", terminalStatus.ToString()),
+      PatchOperation.Set("/draftUpdatedAt", now),
+    };
+
+    if (terminalStatus == DraftStatus.Ready)
+    {
+      if (!string.IsNullOrEmpty(processedBlobUrl))
+        ops.Add(PatchOperation.Set("/imageUrl", processedBlobUrl));
+      if (metadata is not null)
+      {
+        ops.Add(PatchOperation.Set("/brand",    (object?)metadata.Brand));
+        ops.Add(PatchOperation.Set("/category", (object?)metadata.Category));
+        ops.Add(PatchOperation.Set("/tags",     metadata.Tags));
+        ops.Add(PatchOperation.Set("/colours",  metadata.Colours));
+      }
+    }
+
+    if (terminalStatus == DraftStatus.Failed)
+      ops.Add(PatchOperation.Set("/draftError", errorMessage ?? "Unknown error"));
+
+    var options = new PatchItemRequestOptions
+    {
+      FilterPredicate = "FROM c WHERE c.draftStatus = 'Processing'"
+    };
+
+    try
+    {
+      await Container.PatchItemAsync<ClothingItem>(
+        itemId, new PartitionKey(userId), ops, options, cancellationToken);
+      return true;
+    }
+    catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.PreconditionFailed)
+    {
+      // Predicate missed — item already transitioned (accepted, retried, or deleted).
+      // Silently discard this late write.
+      return false;
+    }
+  }
+
+  public async Task<ClothingItem?> AcceptDraftAsync(
+    string itemId,
+    string userId,
+    DateTimeOffset finalizedAt,
+    CancellationToken cancellationToken = default)
+  {
+    var ops = new List<PatchOperation>
+    {
+      PatchOperation.Remove("/draftStatus"),
+      PatchOperation.Remove("/draftUpdatedAt"),
+      PatchOperation.Remove("/draftCreatedAt"),
+      PatchOperation.Remove("/rawImageBlobUrl"),
+      PatchOperation.Set("/dateAdded", finalizedAt),
+    };
+
+    // Remove draftError only if it exists (patch Remove on a missing field throws)
+    // We handle this by attempting the full patch; since we know Ready items
+    // never have draftError set, this is safe.
+
+    var options = new PatchItemRequestOptions
+    {
+      FilterPredicate = "FROM c WHERE c.draftStatus = 'Ready'"
+    };
+
+    try
+    {
+      var result = await Container.PatchItemAsync<ClothingItem>(
+        itemId, new PartitionKey(userId), ops, options, cancellationToken);
+      return result.Resource;
+    }
+    catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.PreconditionFailed)
+    {
+      // Item is not in Ready state — race condition or wrong state.
+      return null;
+    }
+  }
+
+  public async Task<IReadOnlyList<ClothingItem>> GetByDraftStatusAsync(
+    DraftStatus status,
+    DateTimeOffset olderThan,
+    int maxItems = 200,
+    CancellationToken cancellationToken = default)
+  {
+    // draftUpdatedAt takes priority; fall back to draftCreatedAt for items that were
+    // never updated (i.e. still stuck in Processing since first write).
+    const string sql = """
+      SELECT * FROM c
+      WHERE IS_DEFINED(c.draftStatus)
+        AND c.draftStatus = @status
+        AND (c.draftUpdatedAt < @cutoff OR (NOT IS_DEFINED(c.draftUpdatedAt) AND c.draftCreatedAt < @cutoff))
+      """;
+
+    var queryDefinition = new QueryDefinition(sql)
+        .WithParameter("@status", status.ToString())
+        .WithParameter("@cutoff", olderThan);
+
+    var iterator = Container.GetItemQueryIterator<ClothingItem>(
+      queryDefinition,
+      requestOptions: new QueryRequestOptions
+      {
+        MaxItemCount = maxItems,
+        // No PartitionKey — cross-partition query intentional for cleanup timer
+      });
+
+    var results = new List<ClothingItem>();
+    while (iterator.HasMoreResults && results.Count < maxItems)
+    {
+      var page = await iterator.ReadNextAsync(cancellationToken);
+      results.AddRange(page);
+    }
+    return results;
   }
 }

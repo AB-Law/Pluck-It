@@ -74,3 +74,10 @@ public record WardrobeQuery
 public record WardrobePagedResult(
     IReadOnlyList<ClothingItem> Items,
     string?                     NextContinuationToken);
+
+/// <summary>
+/// Paged result envelope returned by <see cref="IWardrobeRepository.GetDraftsAsync"/>.
+/// </summary>
+public record WardrobeDraftsResult(
+    IReadOnlyList<ClothingItem> Items,
+    string?                     NextContinuationToken);
