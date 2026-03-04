@@ -1,0 +1,21 @@
+# Local Python env
+.venv/
+venv/
+
+# Bytecode / caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local secrets
+.env
+.env.*
+!.env.example
+
+# Local outputs
+*.log
+bench-results*.txt
+bench-results*.json
+
+# macOS
+.DS_Store
