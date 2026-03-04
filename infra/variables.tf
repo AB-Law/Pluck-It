@@ -66,3 +66,15 @@ variable "swa_repository_token" {
   sensitive   = true
 }
 
+variable "segmentation_endpoint_url" {
+  description = "HTTP endpoint URL for the Modal BiRefNet segmentation service."
+  type        = string
+  default     = ""
+}
+
+variable "segmentation_shared_token" {
+  description = "Shared bearer token for the Modal BiRefNet segmentation service."
+  type        = string
+  sensitive   = true
+  default     = ""
+}

@@ -27,3 +27,7 @@ swa_repository_token  = "ghp_your_github_pat_with_repo_scope"
 google_oauth_client_id = "YOUR_CLIENT_ID.apps.googleusercontent.com"
 # Client secret is no longer used; the variable is kept for backwards compatibility.
 # google_oauth_client_secret = ""
+
+# Modal BiRefNet segmentation service
+segmentation_endpoint_url = "https://your-modal-endpoint.modal.run"
+segmentation_shared_token = "your-shared-bearer-token-here"

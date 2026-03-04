@@ -514,10 +514,11 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
     "BlobStorage__AccountName"              = azurerm_storage_account.sa_pluckit.name
     "BlobStorage__AccountKey"               = azurerm_storage_account.sa_pluckit.primary_access_key
     "BlobStorage__ArchiveContainer"         = azurerm_storage_container.archive.name
+    "BlobStorage__UploadsContainer"         = azurerm_storage_container.uploads.name
     "Processor__BaseUrl"                    = "https://${local.base_name}-processor-func.azurewebsites.net"
     # Google OAuth Client ID — used by GoogleTokenValidator to verify GIS ID tokens.
     # The client secret is NOT needed; verification uses Google's public JWKS only.
-    "GoogleAuth__ClientId" = var.google_oauth_client_id
+    "GoogleAuth__ClientId"     = var.google_oauth_client_id
     "FEATURE_WEAR_SUGGESTIONS" = "true"
   }
 }
@@ -614,7 +615,9 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
     # Embedding model for mood name canonicalization (cross-run dedup)
     "AZURE_OPENAI_EMBEDDING_DEPLOYMENT" = "text-embedding-3-small"
     # Google OAuth client ID — used to validate bearer tokens from Angular
-    "GOOGLE_CLIENT_ID" = var.google_oauth_client_id
-    "FEATURE_VAULT_INSIGHTS" = "true"
+    "GOOGLE_CLIENT_ID"          = var.google_oauth_client_id
+    "FEATURE_VAULT_INSIGHTS"    = "true"
+    "SEGMENTATION_ENDPOINT_URL" = var.segmentation_endpoint_url
+    "SEGMENTATION_SHARED_TOKEN" = var.segmentation_shared_token
   }
 }

@@ -1,0 +1,39 @@
+name: Deploy Modal Segmentation App
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "PluckIt.Segmentation.Modal/**"
+      - ".github/workflows/modal-deploy.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: modal-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: modal deploy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: PluckIt.Segmentation.Modal
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Deploy to Modal
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: modal deploy modal_app.py

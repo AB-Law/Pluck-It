@@ -56,6 +56,8 @@ jobs:
           swa_repository_url = "https://github.com/AB-Law/Pluck-It"
           swa_repository_branch = "main"
           swa_repository_token = "${{ secrets.SWA_REPOSITORY_TOKEN }}"
+          segmentation_endpoint_url = "${{ secrets.SEGMENTATION_ENDPOINT_URL }}"
+          segmentation_shared_token = "${{ secrets.SEGMENTATION_SHARED_TOKEN }}"
           OUTER
           
           CORS_VALUE='${{ secrets.CORS_ALLOWED_ORIGINS }}'
