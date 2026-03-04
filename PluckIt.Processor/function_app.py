@@ -20,6 +20,7 @@ Endpoints:
   GET  /api/health              — processor health check
 """
 
+import asyncio
 import io
 import json
 import logging
@@ -259,7 +260,7 @@ async def process_image(request: Request):
     else:
         base = filename.rsplit(".", 1)[0] if "." in filename else filename
         item_id = f"{base}-{uuid.uuid4().hex[:8]}"
-    output_blob_name = f"{item_id}-transparent.png"
+    output_blob_name = f"{item_id}-transparent.webp"
 
     # ── Check if the archive blob already exists (previous run completed but
     # .NET was disconnected before it could read the response).  Skip
@@ -275,13 +276,16 @@ async def process_image(request: Request):
     try:
         archive_blob.get_blob_properties()
         logger.info("process-image: archive blob already exists for %s, skipping segmentation", item_id)
-        return {"id": item_id, "imageUrl": archive_blob.url}
+        return {"id": item_id, "imageUrl": archive_blob.url, "mediaType": "image/webp"}
     except ResourceNotFoundError:
         pass  # blob doesn't exist yet — proceed with segmentation
 
-    # Attempt Modal BiRefNet first; fall back to rembg on any error
+    # Attempt Modal BiRefNet first; fall back to rembg on any error.
+    # Both functions are CPU/network-bound — run in a thread pool so the asyncio
+    # event loop is never blocked (blocking loop causes gRPC heartbeat misses and
+    # the Functions host kills the Python worker mid-request).
     try:
-        transparent_png = _segment_with_modal(image_bytes)
+        transparent_png = await asyncio.to_thread(_segment_with_modal, image_bytes)
         logger.info("process-image: Modal BiRefNet segmentation succeeded")
     except Exception as modal_ex:
         logger.warning(
@@ -289,20 +293,32 @@ async def process_image(request: Request):
             modal_ex,
         )
         try:
-            transparent_png = _remove_background(image_bytes)
+            transparent_png = await asyncio.to_thread(_remove_background, image_bytes)
         except Exception as ex:
             logger.exception("Background removal failed: %s", ex)
             raise HTTPException(status_code=500, detail=f"Failed to process image: {ex}")
 
+    # Convert transparent RGBA image to lossy WebP with alpha (q=85, method=6).
+    # Pillow 10+ encodes WebP with alpha when the source is RGBA.
+    # method=6 gives maximum compression ratio with acceptable CPU overhead.
     try:
-        archive_blob.upload_blob(transparent_png, overwrite=True, content_type="image/png")
+        with Image.open(io.BytesIO(transparent_png)) as rgba_img:
+            webp_buf = io.BytesIO()
+            rgba_img.save(webp_buf, format="WEBP", quality=85, method=6)
+            transparent_webp = webp_buf.getvalue()
+    except Exception as ex:
+        logger.exception("WebP conversion failed for item %s: %s", item_id, ex)
+        raise HTTPException(status_code=500, detail=f"WebP conversion failed: {ex}")
+
+    try:
+        archive_blob.upload_blob(transparent_webp, overwrite=True, content_type="image/webp")
         archive_url = archive_blob.url
     except Exception as ex:
         logger.exception("Blob upload failed: %s", ex)
         raise HTTPException(status_code=500, detail=f"Failed to upload image: {ex}")
 
-    logger.info("process-image: item %s → %s", item_id, archive_url)
-    return {"id": item_id, "imageUrl": archive_url}
+    logger.info("process-image: item %s → %s (WebP, %d bytes)", item_id, archive_url, len(transparent_webp))
+    return {"id": item_id, "imageUrl": archive_url, "mediaType": "image/webp"}
 
 
 # ── Chat endpoint (SSE streaming) ─────────────────────────────────────────────

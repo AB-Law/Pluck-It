@@ -3,12 +3,14 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure;
 using Azure.AI.OpenAI;
+using Azure.Storage.Queues;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using PluckIt.Core;
 using PluckIt.Functions.Auth;
+using PluckIt.Functions.Queue;
 using PluckIt.Functions.Serialization;
 using PluckIt.Infrastructure;
 
@@ -112,6 +114,28 @@ var host = new HostBuilder()
         var blobUploadsContainer = config["BlobStorage:UploadsContainer"] ?? "uploads";
         services.AddSingleton<IBlobSasService>(
             new BlobSasService(blobAccountName, blobAccountKey, blobArchiveContainer, blobUploadsContainer));
+
+        // ── Image processing job queue ─────────────────────────────────────────
+        // Re-uses the same storage account as blobs (sa_pluckit).
+        // Connection string is read from StorageQueue app setting.
+        var queueConnStr = config["StorageQueue"];
+        if (string.IsNullOrEmpty(queueConnStr))
+        {
+            // Fallback: build from BlobStorage credentials (same account)
+            queueConnStr = $"DefaultEndpointsProtocol=https;AccountName={blobAccountName};AccountKey={blobAccountKey};EndpointSuffix=core.windows.net";
+        }
+        var queueName = config["StorageQueue:QueueName"] ?? "image-processing-jobs";
+        // In dotnet-isolated, host.json "queues" settings are NOT applied to the
+        // effective QueuesOptions (extension bundle is skipped for isolated apps).
+        // The trigger defaults to Base64 QueueMessageEncoding, so the QueueClient
+        // must also use Base64 — otherwise the trigger fails to decode raw JSON,
+        // binding errors occur before Run() is called, and with the default 0-second
+        // VisibilityTimeout all 5 retries happen instantly → poison queue.
+        var queueClient = new QueueClient(queueConnStr, queueName,
+            new QueueClientOptions { MessageEncoding = QueueMessageEncoding.Base64 });
+        // Best-effort queue creation at startup — idempotent, no-ops if already exists.
+        try { queueClient.CreateIfNotExists(); } catch { /* ignore if already exists or offline */ }
+        services.AddSingleton<IImageJobQueue>(new AzureStorageImageJobQueue(queueClient));
     })
     .Build();
 

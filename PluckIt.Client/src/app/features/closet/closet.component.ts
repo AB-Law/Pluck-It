@@ -16,7 +16,7 @@ interface UploadQueueItem {
   /** Transient client ID — not the Cosmos document ID. */
   localId: string;
   file: File;
-  status: 'queued' | 'uploading' | 'ready' | 'failed';
+  status: 'queued' | 'uploading' | 'processing' | 'ready' | 'failed';
   /** Set once the server persists a Cosmos draft document. */
   draftId?: string;
   /** AI-extracted category, populated after processing completes. */
@@ -65,14 +65,17 @@ interface UploadQueueItem {
           <!-- Current-session queue items -->
           @for (qi of uploadQueue(); track qi.localId) {
             <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[11px] font-mono transition-all"
-              [class]="qi.status === 'queued'    ? 'bg-[#111] border-[#333] text-slate-400' :
-                       qi.status === 'uploading' ? 'bg-blue-950/50 border-blue-800/60 text-blue-300' :
-                       qi.status === 'ready'     ? 'bg-green-950/40 border-green-800/50 text-green-300' :
-                                                   'bg-red-950/40 border-red-800/50 text-red-300'">
+              [class]="qi.status === 'queued'     ? 'bg-[#111] border-[#333] text-slate-400' :
+                       qi.status === 'uploading'  ? 'bg-blue-950/50 border-blue-800/60 text-blue-300' :
+                       qi.status === 'processing' ? 'bg-blue-950/40 border-blue-700/50 text-blue-200' :
+                       qi.status === 'ready'      ? 'bg-green-950/40 border-green-800/50 text-green-300' :
+                                                    'bg-red-950/40 border-red-800/50 text-red-300'">
               @if (qi.status === 'queued') {
                 <span class="material-symbols-outlined" style="font-size:11px">schedule</span>
               } @else if (qi.status === 'uploading') {
                 <span class="material-symbols-outlined animate-spin" style="font-size:11px">sync</span>
+              } @else if (qi.status === 'processing') {
+                <span class="material-symbols-outlined animate-pulse" style="font-size:11px">autorenew</span>
               } @else if (qi.status === 'ready') {
                 <span class="material-symbols-outlined" style="font-size:11px">check_circle</span>
               } @else {
@@ -309,7 +312,7 @@ export class WardrobeComponent implements OnInit {
   /** IDs of server-only drafts currently being retried (in-flight). */
   readonly retryingDraftIds = signal<Set<string>>(new Set());
 
-  /** True while at least one item is being uploaded/processed. */
+  /** True while at least one item is actively uploading (scan animation). */
   readonly uploading = computed(() =>
     this.uploadQueue().some(q => q.status === 'uploading'),
   );
@@ -328,8 +331,10 @@ export class WardrobeComponent implements OnInit {
     return this.drafts().filter(d => !queueIds.has(d.id));
   });
 
-  /** True while the serial queue processor is running. */
-  private _queueRunning = false;
+  /** Max concurrent uploads dispatched simultaneously from the client. */
+  private readonly _MAX_CONCURRENT = 4;
+  /** Tracks how many upload+processing tasks are currently in flight. */
+  private _activeUploads = 0;
 
   private readonly destroyRef = inject(DestroyRef);
 
@@ -374,11 +379,14 @@ export class WardrobeComponent implements OnInit {
     this.loadItems();
     this.refreshDrafts();
 
-    // Auto-poll every 5 s while any server-persisted draft is still Processing.
+    // Auto-poll every 5 s while any server-persisted draft or queue item is still Processing.
     interval(5000)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
-        if (this.serverOnlyDrafts().some(d => d.draftStatus === 'Processing')) {
+        const hasProcessing =
+          this.serverOnlyDrafts().some(d => d.draftStatus === 'Processing') ||
+          this.uploadQueue().some(q => q.status === 'processing');
+        if (hasProcessing) {
           this.refreshDrafts();
         }
       });
@@ -436,92 +444,105 @@ export class WardrobeComponent implements OnInit {
       status: 'queued' as const,
     }));
     this.uploadQueue.update(curr => [...curr, ...newItems]);
-    this.processQueue();
+    this._dispatchPendingUploads();
   }
 
   // ── Draft pipeline ─────────────────────────────────────────────────────
 
   private refreshDrafts(): void {
     this.wardrobe.getDrafts().subscribe({
-      next: res => this.drafts.set(res.items),
+      next: res => {
+        this.drafts.set(res.items);
+        this._reconcileQueueWithDrafts(res.items);
+      },
       error: () => { /* silently ignore — queue state is the primary source of truth */ },
     });
   }
 
   /**
-   * Serially processes all queued items. Guarded by `_queueRunning` to prevent
-   * double-invocation when `onFileSelected` is called while a run is in progress.
+   * Reconciles `processing` queue items against the latest server draft list.
+   * Transitions items to `ready` or `failed` once the server reports a terminal state.
    */
-  private async processQueue(): Promise<void> {
-    if (this._queueRunning) return;
-    this._queueRunning = true;
-
-    try {
-      while (true) {
-        const queue = this.uploadQueue();
-        const next = queue.find(q => q.status === 'queued');
-        if (!next) break;
-
-        // Mark as uploading
-        this.uploadQueue.update(curr =>
-          curr.map(q => q.localId === next.localId ? { ...q, status: 'uploading' as const } : q),
-        );
-
-        // Optionally resize before sending (skips HEIC)
-        let fileToSend: File;
-        try {
-          fileToSend = await resizeImageFile(next.file, 1536);
-        } catch {
-          fileToSend = next.file;
+  private _reconcileQueueWithDrafts(serverDrafts: ClothingItem[]): void {
+    const draftMap = new Map(serverDrafts.map(d => [d.id, d]));
+    this.uploadQueue.update(curr =>
+      curr.map(qi => {
+        if (qi.status !== 'processing' || !qi.draftId) return qi;
+        const draft = draftMap.get(qi.draftId);
+        if (!draft) return qi;
+        if (draft.draftStatus === 'Ready') {
+          return { ...qi, status: 'ready' as const, category: draft.category ?? undefined };
         }
+        if (draft.draftStatus === 'Failed') {
+          return { ...qi, status: 'failed' as const, error: draft.draftError ?? 'Processing failed' };
+        }
+        return qi;
+      }),
+    );
+  }
 
-        await new Promise<void>(resolve => {
-          this.wardrobe.uploadForDraft(fileToSend).subscribe({
-            next: (result) => {
-              // 200/201 — draft is Ready
-              this.uploadQueue.update(curr =>
-                curr.map(q => q.localId === next.localId
-                  ? { ...q, status: 'ready' as const, draftId: result.id, category: result.category ?? undefined }
-                  : q),
-              );
-              // Merge into local drafts list
-              this.drafts.update(curr => {
-                const without = curr.filter(d => d.id !== result.id);
-                return [result, ...without];
-              });
-              resolve();
-            },
-            error: (err) => {
-              // 422 means the pipeline ran but failed; the body carries the Failed draft
-              if (err?.status === 422 && err?.error?.id) {
-                const failedDraft = err.error as ClothingItem;
-                this.uploadQueue.update(curr =>
-                  curr.map(q => q.localId === next.localId
-                    ? { ...q, status: 'failed' as const, draftId: failedDraft.id,
-                        error: failedDraft.draftError ?? 'Processing failed' }
-                    : q),
-                );
-                this.drafts.update(curr => {
-                  const without = curr.filter(d => d.id !== failedDraft.id);
-                  return [failedDraft, ...without];
-                });
-              } else {
-                // Network / server error — no Cosmos draft was created
-                this.uploadQueue.update(curr =>
-                  curr.map(q => q.localId === next.localId
-                    ? { ...q, status: 'failed' as const,
-                        error: err?.error?.detail ?? err?.message ?? 'Upload failed' }
-                    : q),
-                );
-              }
-              resolve();
-            },
-          });
-        });
-      }
-    } finally {
-      this._queueRunning = false;
+  /**
+   * Bounded-concurrency upload dispatcher. Starts up to `_MAX_CONCURRENT` uploads
+   * from the queue simultaneously, then as each completes it dispatches the next.
+   * Replaces the old serial `processQueue` guard pattern.
+   */
+  private _dispatchPendingUploads(): void {
+    while (this._activeUploads < this._MAX_CONCURRENT) {
+      const next = this.uploadQueue().find(q => q.status === 'queued');
+      if (!next) break;
+
+      // Optimistically mark uploading before async work begins
+      this.uploadQueue.update(curr =>
+        curr.map(q => q.localId === next.localId ? { ...q, status: 'uploading' as const } : q),
+      );
+      this._activeUploads++;
+
+      this._uploadSingle(next).finally(() => {
+        this._activeUploads--;
+        this._dispatchPendingUploads(); // Fill the slot with the next queued item
+      });
     }
+  }
+
+  /**
+   * Uploads a single file, handles the 202 Accepted response by transitioning the
+   * queue item to `processing`, and relies on polling to detect terminal state.
+   */
+  private async _uploadSingle(qi: UploadQueueItem): Promise<void> {
+    let fileToSend: File;
+    try {
+      fileToSend = await resizeImageFile(qi.file, 1536);
+    } catch {
+      fileToSend = qi.file;
+    }
+
+    await new Promise<void>(resolve => {
+      this.wardrobe.uploadForDraft(fileToSend).subscribe({
+        next: (result) => {
+          // 202 Accepted — draft is Processing; polling will detect Ready/Failed
+          this.uploadQueue.update(curr =>
+            curr.map(q => q.localId === qi.localId
+              ? { ...q, status: 'processing' as const, draftId: result.id }
+              : q),
+          );
+          this.drafts.update(curr => {
+            const without = curr.filter(d => d.id !== result.id);
+            return [result, ...without];
+          });
+          resolve();
+        },
+        error: (err) => {
+          // Network/server error — no reliable draft state; mark failed immediately
+          this.uploadQueue.update(curr =>
+            curr.map(q => q.localId === qi.localId
+              ? { ...q, status: 'failed' as const,
+                  error: err?.error?.error ?? err?.error?.detail ?? err?.message ?? 'Upload failed' }
+              : q),
+          );
+          resolve();
+        },
+      });
+    });
   }
 
   // ── Queue item actions ────────────────────────────────────────────────
@@ -536,9 +557,10 @@ export class WardrobeComponent implements OnInit {
     if (!qi.draftId) return;
     this.wardrobe.retryDraft(qi.draftId).subscribe({
       next: result => {
+        // 202 Accepted — re-enqueued for async processing; polling detects terminal state
         this.uploadQueue.update(curr =>
           curr.map(q => q.localId === qi.localId
-            ? { ...q, status: 'ready' as const, error: undefined }
+            ? { ...q, status: 'processing' as const, error: undefined }
             : q),
         );
         this.drafts.update(curr =>
@@ -571,6 +593,7 @@ export class WardrobeComponent implements OnInit {
     this.retryingDraftIds.update(s => new Set([...s, draft.id]));
     this.wardrobe.retryDraft(draft.id).subscribe({
       next: result => {
+        // 202 Accepted — re-enqueued; polling will detect Ready/Failed
         this.retryingDraftIds.update(s => { s = new Set(s); s.delete(draft.id); return s; });
         this.drafts.update(curr =>
           curr.map(d => d.id === result.id ? result : d),
