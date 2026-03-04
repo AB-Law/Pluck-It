@@ -46,6 +46,10 @@ jobs:
       
       - name: Create terraform.tfvars
         working-directory: infra
+        env:
+          SEGMENTATION_ENDPOINT_URL: ${{ secrets.SEGMENTATION_ENDPOINT_URL }}
+          SEGMENTATION_SHARED_TOKEN: ${{ secrets.SEGMENTATION_SHARED_TOKEN }}
+          CORS_ALLOWED_ORIGINS: ${{ secrets.CORS_ALLOWED_ORIGINS }}
         run: |
           cat > terraform.auto.tfvars <<'OUTER'
           subscription_id = "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
@@ -56,13 +60,13 @@ jobs:
           swa_repository_url = "https://github.com/AB-Law/Pluck-It"
           swa_repository_branch = "main"
           swa_repository_token = "${{ secrets.SWA_REPOSITORY_TOKEN }}"
-          segmentation_endpoint_url = "${{ secrets.SEGMENTATION_ENDPOINT_URL }}"
-          segmentation_shared_token = "${{ secrets.SEGMENTATION_SHARED_TOKEN }}"
           OUTER
-          
-          CORS_VALUE='${{ secrets.CORS_ALLOWED_ORIGINS }}'
-          if [ -n "$CORS_VALUE" ]; then
-            echo "cors_allowed_origins = $CORS_VALUE" >> terraform.auto.tfvars
+
+          printf 'segmentation_endpoint_url = "%s"\n' "$SEGMENTATION_ENDPOINT_URL" >> terraform.auto.tfvars
+          printf 'segmentation_shared_token = "%s"\n' "$SEGMENTATION_SHARED_TOKEN" >> terraform.auto.tfvars
+
+          if [ -n "$CORS_ALLOWED_ORIGINS" ]; then
+            echo "cors_allowed_origins = $CORS_ALLOWED_ORIGINS" >> terraform.auto.tfvars
           else
             echo 'cors_allowed_origins = []' >> terraform.auto.tfvars
           fi
