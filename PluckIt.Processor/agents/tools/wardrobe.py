@@ -13,6 +13,7 @@ never sent to the LLM.
 import json
 import logging
 import os
+import httpx
 from functools import lru_cache
 
 from langchain_core.tools import tool
@@ -142,6 +143,80 @@ async def search_wardrobe(query: str, config: RunnableConfig) -> str:
             f"can identify the closest match:\n" + json.dumps(all_compact, ensure_ascii=False)
         )
 
+    return json.dumps(matched, ensure_ascii=False)
+
+
+@tool
+async def search_wardrobe_semantically(query: str, config: RunnableConfig, count: int = 5) -> str:
+    """
+    Search the user's wardrobe semantically using a natural language query or description 
+    (e.g., 'boss blazers', 'something that goes with a red shirt', 'date night outfit').
+    This uses visual and semantic embeddings rather than keyword matching.
+    Use this tool when users ask for vague, atmospheric, or stylised concepts.
+    Returns a compact JSON list of the closest matching items.
+    """
+    user_id: str = config["configurable"]["user_id"]
+
+    cohere_endpoint = os.environ.get("COHERE_ENDPOINT")
+    cohere_api_key = os.environ.get("COHERE_API_KEY")
+
+    if not cohere_endpoint or not cohere_api_key:
+        logger.warning("Cohere API keys missing; falling back to lexical search_wardrobe.")
+        return await search_wardrobe.invoke({"query": query}, config=config)
+
+    logger.info("search_wardrobe_semantically: query=%r", query)
+
+    query_vector = None
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{cohere_endpoint.rstrip('/')}/v1/embed",
+                headers={"Authorization": f"Bearer {cohere_api_key}"},
+                json={
+                    "input_type": "search_query",
+                    "embedding_types": ["float"],
+                    "texts": [query]
+                },
+                timeout=10.0
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            query_vector = data["embeddings"]["float"][0]
+    except Exception as exc:
+        logger.warning("Failed to generate embedding from Cohere: %s", exc)
+        return "Sorry, I couldn't perform a visual search right now. Please try again later."
+
+    if not query_vector:
+        return "Failed to process the search query visually."
+
+    try:
+        container = get_wardrobe_container()
+        items_raw = []
+        sql = '''
+            SELECT TOP @limit * FROM c 
+            WHERE c.userId = @userId 
+              AND IS_DEFINED(c.imageEmbedding) 
+              AND NOT IS_NULL(c.imageEmbedding)
+            ORDER BY VectorDistance(c.imageEmbedding, @queryVector, false)
+        '''
+        async for page in container.query_items(
+            query=sql,
+            parameters=[
+                {"name": "@userId", "value": user_id},
+                {"name": "@limit", "value": count},
+                {"name": "@queryVector", "value": query_vector}
+            ],
+            enable_cross_partition_query=False
+        ):
+            items_raw.extend(page)
+    except Exception as exc:
+        logger.warning("Vector search error for user %s: %s", user_id, exc)
+        return "Could not access the wardrobe at this time."
+
+    if not items_raw:
+        return f"No visual matches found for '{query}'. Make sure there are uploaded items with generated image embeddings."
+
+    matched = [_compact(item) for item in items_raw]
     return json.dumps(matched, ensure_ascii=False)
 
 

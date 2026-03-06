@@ -356,7 +356,10 @@ export class WardrobeComponent implements OnInit {
     )]
   );
 
+  readonly isSemanticMode = signal(false);
+
   readonly filteredItems = computed<ClothingItem[]>(() => {
+    if (this.isSemanticMode()) return this.allItems();
     const q = this.searchQuery().toLowerCase().trim();
     if (!q) return this.allItems();
     return this.allItems().filter(item => matchesItem(item, q));
@@ -418,6 +421,27 @@ export class WardrobeComponent implements OnInit {
     this.sortDir.set(dir as 'asc' | 'desc');
     this.syncUrl();
     this.loadItems();
+  }
+
+  onSemanticSearch(): void {
+    const q = this.searchQuery().trim();
+    if (!q) {
+      this.isSemanticMode.set(false);
+      this.loadItems();
+      return;
+    }
+    
+    this.loading.set(true);
+    this.hasMore.set(false);
+    this.isSemanticMode.set(true);
+    
+    this.wardrobe.searchSemantic(q).subscribe({
+      next: res => {
+        this.allItems.set(res.items);
+        this.loading.set(false);
+      },
+      error: () => this.loading.set(false)
+    });
   }
 
   loadMore(): void {
@@ -686,6 +710,7 @@ export class WardrobeComponent implements OnInit {
     this.loading.set(true);
     this.nextToken.set(null);
     this.hasMore.set(false);
+    this.isSemanticMode.set(false);
     this.wardrobe.getAll(this.buildQuery()).subscribe({
       next: res => {
         this.allItems.set(res.items);

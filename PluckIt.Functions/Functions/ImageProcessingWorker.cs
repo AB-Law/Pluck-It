@@ -22,6 +22,7 @@ public class ImageProcessingWorker(
     IWardrobeRepository repo,
     IBlobSasService sasService,
     IClothingMetadataService metadataService,
+    IEmbeddingService embeddingService,
     IHttpClientFactory httpClientFactory,
     ILogger<ImageProcessingWorker> logger)
 {
@@ -69,7 +70,7 @@ public class ImageProcessingWorker(
                 await repo.SetDraftTerminalAsync(
                     message.ItemId, message.UserId, DraftStatus.Failed,
                     null, null, "Cosmos read error during idempotency check.",
-                    DateTimeOffset.UtcNow, CancellationToken.None);
+                    DateTimeOffset.UtcNow, cancellationToken: CancellationToken.None);
             }
             catch (Exception writeEx)
             {
@@ -110,7 +111,7 @@ public class ImageProcessingWorker(
                 await repo.SetDraftTerminalAsync(
                     message.ItemId, message.UserId, DraftStatus.Failed,
                     null, null, "Raw image download failed.",
-                    DateTimeOffset.UtcNow, CancellationToken.None);
+                    DateTimeOffset.UtcNow, cancellationToken: CancellationToken.None);
             }
             catch (Exception writeEx)
             {
@@ -142,7 +143,7 @@ public class ImageProcessingWorker(
                 message.ItemId);
             await repo.SetDraftTerminalAsync(
                 message.ItemId, message.UserId, DraftStatus.Failed, null, null,
-                "Internal pipeline error.", DateTimeOffset.UtcNow, CancellationToken.None);
+                "Internal pipeline error.", DateTimeOffset.UtcNow, cancellationToken: CancellationToken.None);
         }
     }
 
@@ -182,7 +183,7 @@ public class ImageProcessingWorker(
             logger.LogError(ex,
                 "ProcessImageJob: processor unreachable for item {ItemId}.", itemId);
             await repo.SetDraftTerminalAsync(itemId, userId, DraftStatus.Failed, null, null,
-                "Image processor is unavailable.", DateTimeOffset.UtcNow, CancellationToken.None);
+                "Image processor is unavailable.", DateTimeOffset.UtcNow, cancellationToken: CancellationToken.None);
             return;
         }
 
@@ -194,7 +195,7 @@ public class ImageProcessingWorker(
                 (int)processorResponse.StatusCode, itemId, body);
             await repo.SetDraftTerminalAsync(itemId, userId, DraftStatus.Failed, null, null,
                 $"Processor returned {(int)processorResponse.StatusCode}.",
-                DateTimeOffset.UtcNow, CancellationToken.None);
+                DateTimeOffset.UtcNow, cancellationToken: CancellationToken.None);
             return;
         }
 
@@ -210,7 +211,7 @@ public class ImageProcessingWorker(
                 "ProcessImageJob: failed to deserialize processor response for item {ItemId}.", itemId);
             await repo.SetDraftTerminalAsync(itemId, userId, DraftStatus.Failed, null, null,
                 "Processor response was not valid JSON.",
-                DateTimeOffset.UtcNow, CancellationToken.None);
+                DateTimeOffset.UtcNow, cancellationToken: CancellationToken.None);
             return;
         }
 
@@ -218,28 +219,41 @@ public class ImageProcessingWorker(
         {
             await repo.SetDraftTerminalAsync(itemId, userId, DraftStatus.Failed, null, null,
                 "Processor returned an unexpected response.",
-                DateTimeOffset.UtcNow, CancellationToken.None);
+                DateTimeOffset.UtcNow, cancellationToken: CancellationToken.None);
             return;
         }
 
         // MediaType is now returned by the processor (image/webp); fall back gracefully.
         var processedMediaType = processed.MediaType ?? "image/webp";
 
-        // ── Extract AI clothing metadata from the processed image ──────────────
+        // ── Extract AI clothing metadata & Embeddings from the processed image ─
         ClothingMetadata? metadata = null;
+        float[]? imageEmbedding = null;
         try
         {
             var processedSasUrl = sasService.GenerateSasUrl(processed.ImageUrl, validForMinutes: 5);
             using var sasClient = httpClientFactory.CreateClient();
             var processedBytes = await sasClient.GetByteArrayAsync(processedSasUrl, CancellationToken.None);
             var imageData = BinaryData.FromBytes(processedBytes);
+            
             metadata = await metadataService.ExtractMetadataAsync(
                 imageData, processedMediaType, CancellationToken.None);
+                
+            try
+            {
+                var b64 = Convert.ToBase64String(processedBytes);
+                var dataUri = $"data:{processedMediaType};base64,{b64}";
+                imageEmbedding = await embeddingService.EmbedImageAsync(dataUri, CancellationToken.None);
+            }
+            catch (Exception embEx)
+            {
+                logger.LogWarning(embEx, "ProcessImageJob: Failed to extract image embedding from Cohere for item {ItemId}.", itemId);
+            }
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex,
-                "ProcessImageJob: metadata extraction failed for item {ItemId}; proceeding with empty metadata.",
+                "ProcessImageJob: AI extraction failed for item {ItemId}; proceeding with empty metadata.",
                 itemId);
         }
 
@@ -251,7 +265,7 @@ public class ImageProcessingWorker(
             await repo.SetDraftTerminalAsync(
                 itemId, userId, DraftStatus.Ready,
                 processed.ImageUrl, metadata, null,
-                DateTimeOffset.UtcNow, CancellationToken.None);
+                DateTimeOffset.UtcNow, imageEmbedding, cancellationToken: CancellationToken.None);
         }
         catch (Exception ex)
         {

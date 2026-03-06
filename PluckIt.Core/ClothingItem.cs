@@ -93,6 +93,10 @@ public class ClothingItem
   /// <summary>Number of times this item has been worn. Incremented via PATCH /wardrobe/{id}/wear.</summary>
   public int WearCount { get; set; } = 0;
 
+  // ── Semantic Search ───────────────────────────────────────────────────────
+  /// <summary>Vector embedding (e.g. 1024-dim from Cohere) representing the visual content of the item.</summary>
+  public float[]? ImageEmbedding { get; set; }
+
   /// <summary>UTC timestamp of the most recent wear event. Null if never worn.</summary>
   public DateTimeOffset? LastWornAt { get; set; }
 

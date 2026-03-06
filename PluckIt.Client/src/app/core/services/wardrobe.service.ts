@@ -47,6 +47,16 @@ export class WardrobeService {
     return this.http.get<WardrobePagedResponse>(`${this.base}/api/wardrobe`, { params: qp });
   }
 
+  /**
+   * Search wardrobe visually/semantically using Cohere vectors.
+   */
+  searchSemantic(q: string, limit: number = 20): Observable<WardrobePagedResponse> {
+    const qp = new HttpParams()
+      .set('q', q)
+      .set('limit', String(limit));
+    return this.http.get<WardrobePagedResponse>(`${this.base}/api/wardrobe/search`, { params: qp });
+  }
+
   getById(id: string): Observable<ClothingItem> {
     return this.http.get<ClothingItem>(`${this.base}/api/wardrobe/${id}`);
   }

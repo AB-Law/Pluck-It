@@ -53,6 +53,7 @@ public interface IWardrobeRepository
     ClothingMetadata? metadata,
     string? errorMessage,
     DateTimeOffset now,
+    float[]? imageEmbedding = null,
     CancellationToken cancellationToken = default);
 
   /// <summary>
@@ -78,6 +79,15 @@ public interface IWardrobeRepository
     WearEvent ev,
     string? clientEventId = null,
     int maxEvents = 30,
+    CancellationToken cancellationToken = default);
+
+  /// <summary>
+  /// Performs a semantic vector search against the user's wardrobe using Cosmos DB VectorDistance.
+  /// </summary>
+  Task<IReadOnlyList<ClothingItem>> SearchSemanticAsync(
+    string userId,
+    float[] queryVector,
+    int limit = 20,
     CancellationToken cancellationToken = default);
 
   /// <summary>

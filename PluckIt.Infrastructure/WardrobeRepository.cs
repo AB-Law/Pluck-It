@@ -229,6 +229,42 @@ public class WardrobeRepository : IWardrobeRepository
     return response.Resource;
   }
 
+  public async Task<IReadOnlyList<ClothingItem>> SearchSemanticAsync(
+    string userId,
+    float[] queryVector,
+    int limit = 20,
+    CancellationToken cancellationToken = default)
+  {
+    var sql = @"
+      SELECT TOP @limit * FROM c
+      WHERE c.userId = @userId
+        AND IS_DEFINED(c.imageEmbedding) 
+        AND NOT IS_NULL(c.imageEmbedding)
+      ORDER BY VectorDistance(c.imageEmbedding, @queryVector, false)
+    ";
+
+    var queryDefinition = new QueryDefinition(sql)
+      .WithParameter("@userId", userId)
+      .WithParameter("@limit", limit)
+      .WithParameter("@queryVector", queryVector);
+
+    var iterator = Container.GetItemQueryIterator<ClothingItem>(
+      queryDefinition,
+      requestOptions: new QueryRequestOptions
+      {
+        PartitionKey = new PartitionKey(userId)
+      });
+
+    var results = new List<ClothingItem>();
+    while (iterator.HasMoreResults)
+    {
+      var page = await iterator.ReadNextAsync(cancellationToken);
+      results.AddRange(page);
+    }
+
+    return results;
+  }
+
   public async Task<WardrobeDraftsResult> GetDraftsAsync(
     string userId,
     int pageSize = 50,
@@ -271,6 +307,7 @@ public class WardrobeRepository : IWardrobeRepository
     ClothingMetadata? metadata,
     string? errorMessage,
     DateTimeOffset now,
+    float[]? imageEmbedding = null,
     CancellationToken cancellationToken = default)
   {
     var ops = new List<PatchOperation>
@@ -289,6 +326,10 @@ public class WardrobeRepository : IWardrobeRepository
         ops.Add(PatchOperation.Set("/category", (object?)metadata.Category));
         ops.Add(PatchOperation.Set("/tags",     metadata.Tags));
         ops.Add(PatchOperation.Set("/colours",  metadata.Colours));
+      }
+      if (imageEmbedding is not null)
+      {
+        ops.Add(PatchOperation.Set("/imageEmbedding", imageEmbedding));
       }
     }
 

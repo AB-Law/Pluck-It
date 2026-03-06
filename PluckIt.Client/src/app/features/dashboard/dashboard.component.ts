@@ -35,7 +35,17 @@ import { DigestPanelComponent } from '../digest/digest-panel.component';
                 class="w-full bg-transparent border-none text-sm text-white placeholder-slate-text outline-none py-2.5 px-3 font-mono"
                 placeholder="Search by brand, color, tag…"
                 [(ngModel)]="searchQuery"
+                (keyup.enter)="wardrobeRef.onSemanticSearch()"
               />
+              @if (searchQuery()) {
+                <button 
+                  class="flex items-center justify-center pr-3 text-primary hover:text-white transition-colors"
+                  (click)="wardrobeRef.onSemanticSearch()"
+                  title="Semantic magic search"
+                >
+                  <span class="material-symbols-outlined" style="font-size:20px">auto_awesome</span>
+                </button>
+              }
             </div>
           </label>
         </div>

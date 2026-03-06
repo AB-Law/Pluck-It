@@ -107,6 +107,10 @@ var host = new HostBuilder()
             client.Timeout = TimeSpan.FromSeconds(130);
         });
 
+        // ── Cohere Image Embeddings for search ────────────────────────────────────────────────
+        services.AddHttpClient("CohereEmbedClient");
+        services.AddSingleton<IEmbeddingService, CohereEmbeddingService>();
+
         // ── Blob SAS URL generator ────────────────────────────────────────────
         var blobAccountName = config["BlobStorage:AccountName"] ?? "";
         var blobAccountKey = config["BlobStorage:AccountKey"] ?? "";

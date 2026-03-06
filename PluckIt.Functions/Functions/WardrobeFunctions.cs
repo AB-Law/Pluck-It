@@ -18,6 +18,7 @@ public class WardrobeFunctions(
     IWearHistoryRepository wearHistoryRepo,
     IStylingActivityRepository stylingActivityRepo,
     IBlobSasService sasService,
+    IEmbeddingService embeddingService,
     IConfiguration config,
     GoogleTokenValidator tokenValidator,
     IImageJobQueue jobQueue,
@@ -87,6 +88,52 @@ public class WardrobeFunctions(
         foreach (var item in paged.Items)
             item.ImageUrl = sasService.GenerateSasUrl(item.ImageUrl);
 
+        return await JsonOk(req, paged, PluckItJsonContext.Default.WardrobePagedResult);
+    }
+
+    // ── GET /api/wardrobe/search ────────────────────────────────────────────
+
+    [Function(nameof(SearchWardrobe))]
+    public async Task<HttpResponseData> SearchWardrobe(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "wardrobe/search")] HttpRequestData req,
+        CancellationToken cancellationToken)
+    {
+        var (authed, userId) = await TryGetUserIdAsync(req);
+        if (!authed)
+            return req.CreateResponse(HttpStatusCode.Unauthorized);
+
+        var qs = ParseQueryString(req.Url);
+        var q = qs.GetValueOrDefault("q");
+        var limitStr = qs.GetValueOrDefault("limit");
+        var limit = int.TryParse(limitStr, out var l) ? Math.Clamp(l, 1, 100) : 20;
+
+        if (string.IsNullOrWhiteSpace(q))
+            return await JsonError(req, HttpStatusCode.BadRequest, "Query parameter 'q' is required for semantic search.");
+
+        // Generate text embedding for the query
+        var queryVector = await embeddingService.EmbedTextAsync(q, cancellationToken);
+        if (queryVector == null || queryVector.Length == 0)
+        {
+            logger.LogWarning("Cohere embed-v-4-0 returned empty vector for query: {Query}", q);
+            return await JsonError(req, HttpStatusCode.ServiceUnavailable, "Failed to generate search embedding.");
+        }
+
+        // Search Cosmos DB using VectorDistance
+        var results = await repo.SearchSemanticAsync(userId!, queryVector, limit, cancellationToken);
+
+        // Enrich with SAS URLs
+        foreach (var item in results)
+        {
+            if (!string.IsNullOrEmpty(item.ImageUrl))
+            {
+                item.ImageUrl = sasService.GenerateSasUrl(item.ImageUrl);
+            }
+        }
+
+        // For consistency with existing GET /wardrobe, we can wrap in a pseudo-paged result 
+        // without a continuation token, or define a new List<ClothingItem> response type.
+        // We will just wrap it so the frontend WardrobePagedResult parser works.
+        var paged = new WardrobePagedResult(results, null);
         return await JsonOk(req, paged, PluckItJsonContext.Default.WardrobePagedResult);
     }
 
@@ -694,7 +741,7 @@ public class WardrobeFunctions(
             await repo.SetDraftTerminalAsync(
                 item.Id, item.UserId, DraftStatus.Failed,
                 null, null, "Timed out during processing.",
-                now, CancellationToken.None);
+                now, cancellationToken: CancellationToken.None);
         }
 
         // Pass 2: Failed drafts older than 7 days → delete doc + blobs

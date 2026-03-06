@@ -23,7 +23,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, System
 from langchain_openai import AzureChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
-from .tools.wardrobe import search_wardrobe, get_wardrobe_summary, _compact
+from .tools.wardrobe import search_wardrobe, search_wardrobe_semantically, get_wardrobe_summary, _compact
 from .tools.weather import get_weather
 from .tools.profile import get_user_profile
 from .tools.gaps import analyze_wardrobe_gaps
@@ -52,7 +52,7 @@ def _build_llm() -> AzureChatOpenAI:
     )
 
 
-TOOLS = [search_wardrobe, get_wardrobe_summary, get_weather, get_user_profile, analyze_wardrobe_gaps, get_trending_moods, get_wear_patterns]
+TOOLS = [search_wardrobe, search_wardrobe_semantically, get_wardrobe_summary, get_weather, get_user_profile, analyze_wardrobe_gaps, get_trending_moods, get_wear_patterns]
 
 _SYSTEM_TEMPLATE = """\
 You are PluckIt AI — a personal stylist with deep knowledge of fashion, colour theory, and personal style.
