@@ -114,11 +114,7 @@ resource "azurerm_cosmosdb_sql_container" "wardrobe" {
     included_path { path = "/condition/?" }
     included_path { path = "/lastWornAt/?" }
 
-    # Vector Policy
-    vector_index {
-      path = "/imageEmbedding"
-      type = "diskANN"
-    }
+
 
     # Composite indexes — required for efficient ORDER BY when combined with
     # range filters inside a partition.  Each group covers one sort dimension.
@@ -220,14 +216,7 @@ resource "azurerm_cosmosdb_sql_container" "wardrobe" {
     }
   }
 
-  vector_embedding_policy {
-    embedding {
-      path      = "/imageEmbedding"
-      data_type = "float32"
-      distance_function = "cosine"
-      dimensions = 1024 # Target embedding dimension for Cohere embed-v-4-0
-    }
-  }
+
 }
 
 # Full wear-event history (append-only). Partitioned by user for cheap
