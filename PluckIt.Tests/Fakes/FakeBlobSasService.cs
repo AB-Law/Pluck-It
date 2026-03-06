@@ -32,6 +32,22 @@ public sealed class FakeBlobSasService : IBlobSasService
         return Task.CompletedTask;
     }
 
+    /// <summary>Blob name → uploaded bytes. Seed or inspect during tests.</summary>
+    public Dictionary<string, byte[]> UploadedBlobs { get; } = [];
+
+    public Task<string> UploadRawAsync(string blobName, byte[] bytes, string contentType, CancellationToken cancellationToken = default)
+    {
+        UploadedBlobs[blobName] = bytes;
+        return Task.FromResult($"https://fake.storage/{blobName}");
+    }
+
+    public Task<byte[]> DownloadRawAsync(string blobUrl, CancellationToken cancellationToken = default)
+    {
+        var name = blobUrl.Split('/').Last();
+        if (UploadedBlobs.TryGetValue(name, out var data)) return Task.FromResult(data);
+        return Task.FromResult(Array.Empty<byte>());
+    }
+
     public async IAsyncEnumerable<string> ListArchiveBlobNamesAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {

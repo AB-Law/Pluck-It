@@ -20,6 +20,7 @@ Endpoints:
   GET  /api/health              — processor health check
 """
 
+import asyncio
 import io
 import json
 import logging
@@ -124,6 +125,32 @@ def _remove_background(image_bytes: bytes) -> bytes:
     return rembg_remove(normalised)
 
 
+def _segment_with_modal(image_bytes: bytes) -> bytes:
+    """
+    Send image to the Modal BiRefNet segmentation service.
+    Returns transparent PNG bytes.
+    Raises on any error so the caller can fall back to rembg.
+    """
+    import httpx
+    endpoint_url = os.getenv("SEGMENTATION_ENDPOINT_URL", "").rstrip("/")
+    token = os.getenv("SEGMENTATION_SHARED_TOKEN", "")
+    if not endpoint_url:
+        raise RuntimeError("SEGMENTATION_ENDPOINT_URL is not configured.")
+    # Normalise to JPEG before sending (BiRefNet endpoint expects JPEG or PNG)
+    normalised = _normalize_image(image_bytes)
+    with httpx.Client(timeout=85.0) as client:
+        resp = client.post(
+            endpoint_url,
+            content=normalised,
+            headers={
+                "Content-Type": "image/jpeg",
+                "Authorization": f"Bearer {token}",
+            },
+        )
+        resp.raise_for_status()
+        return resp.content
+
+
 def _get_blob_service():
     from azure.storage.blob import BlobServiceClient
     account_name = _get_env("STORAGE_ACCOUNT_NAME")
@@ -148,68 +175,6 @@ def _infer_basic_tags(image: Image.Image) -> dict[str, Any]:
     pi = dominant_color_index * 3
     r, g, b = palette[pi], palette[pi + 1], palette[pi + 2]
     return {"color": f"#{r:02x}{g:02x}{b:02x}", "category": "unknown"}
-
-
-# ── Blob trigger: background removal on upload ───────────────────────────────
-
-@app.function_name(name="PluckItBlobProcessor")
-@app.blob_trigger(
-    arg_name="input_blob",
-    path="%UPLOADS_CONTAINER_NAME%/{name}",
-    connection="AzureWebJobsStorage",
-)
-def pluck_it_blob_processor(input_blob: func.InputStream) -> None:
-    logger.info("PluckItBlobProcessor: %s (%d bytes)", input_blob.name, input_blob.length)
-    blob_bytes = input_blob.read()
-
-    try:
-        transparent_png = _remove_background(blob_bytes)
-    except Exception as ex:
-        logger.exception("Background removal failed: %s", ex)
-        return
-
-    archive_container_name = _get_env("ARCHIVE_CONTAINER_NAME")
-    blob_service = _get_blob_service()
-    original_name = input_blob.name.split("/")[-1]
-    base = original_name.rsplit(".", 1)[0] if "." in original_name else original_name
-    output_blob_name = f"{base}-transparent.png"
-
-    from azure.storage.blob import BlobClient
-    archive_blob: BlobClient = blob_service.get_blob_client(
-        container=archive_container_name, blob=output_blob_name
-    )
-    archive_blob.upload_blob(transparent_png, overwrite=True, content_type="image/png")
-    archive_url = archive_blob.url
-
-    try:
-        img = Image.open(io.BytesIO(transparent_png))
-        tags = _infer_basic_tags(img)
-    except Exception:
-        tags = {"color": "unknown", "category": "unknown"}
-
-    from azure.cosmos import CosmosClient, PartitionKey
-    cosmos = CosmosClient(
-        url=_get_env("COSMOS_DB_ENDPOINT"),
-        credential=_get_env("COSMOS_DB_KEY"),
-    )
-    db = cosmos.get_database_client(_get_env("COSMOS_DB_DATABASE", "PluckIt"))
-    container = db.create_container_if_not_exists(
-        id=_get_env("COSMOS_DB_CONTAINER", "Wardrobe"),
-        partition_key=PartitionKey(path="/userId"),
-    )
-    container.upsert_item({
-        "id": base,
-        "imageUrl": archive_url,
-        "tags": [tags.get("color"), tags.get("category")],
-        "brand": None,
-        "category": tags.get("category"),
-        "dateAdded": (
-            input_blob.properties.get("last_modified").isoformat()
-            if hasattr(input_blob, "properties") and input_blob.properties.get("last_modified")
-            else None
-        ),
-    })
-    logger.info("PluckItBlobProcessor: wrote %s → %s", base, archive_url)
 
 
 # ── Timer trigger: weekly wardrobe digest ────────────────────────────────────
@@ -261,12 +226,17 @@ async def health():
 async def process_image(request: Request):
     """
     Accept an image as multipart/form-data (field 'image') or raw bytes.
-    Remove background, archive to blob storage, return {id, imageUrl}.
+    Optional form field 'item_id' sets the blob/Cosmos id directly.
+    Attempts Modal BiRefNet segmentation; falls back to rembg on failure.
+    If the archive blob already exists for item_id (e.g. a retry after a
+    connection-drop), segmentation is skipped and the existing URL is returned.
+    Returns {id, imageUrl}.
     """
     logger.info("process-image: received request")
 
     image_bytes: Optional[bytes] = None
     filename = f"{uuid.uuid4()}.png"
+    provided_item_id: Optional[str] = None
 
     content_type = request.headers.get("content-type", "")
     if "multipart/form-data" in content_type:
@@ -275,37 +245,80 @@ async def process_image(request: Request):
         if file and hasattr(file, "read"):
             image_bytes = await file.read()
             filename = getattr(file, "filename", filename) or filename
+        item_id_field = form.get("item_id")
+        if item_id_field and isinstance(item_id_field, str):
+            provided_item_id = item_id_field.strip() or None
     else:
         image_bytes = await request.body()
 
     if not image_bytes:
         raise HTTPException(status_code=400, detail="No image provided.")
 
-    try:
-        transparent_png = _remove_background(image_bytes)
-    except Exception as ex:
-        logger.exception("Background removal failed: %s", ex)
-        raise HTTPException(status_code=500, detail=f"Failed to process image: {ex}")
+    # Determine item id upfront so we can check for an existing archive blob.
+    if provided_item_id:
+        item_id = provided_item_id
+    else:
+        base = filename.rsplit(".", 1)[0] if "." in filename else filename
+        item_id = f"{base}-{uuid.uuid4().hex[:8]}"
+    output_blob_name = f"{item_id}-transparent.webp"
 
-    base = filename.rsplit(".", 1)[0] if "." in filename else filename
-    item_id = f"{base}-{uuid.uuid4().hex[:8]}"
-    output_blob_name = f"{item_id}-transparent.png"
-
+    # ── Check if the archive blob already exists (previous run completed but
+    # .NET was disconnected before it could read the response).  Skip
+    # segmentation entirely and return the existing URL so we don't waste a
+    # Modal cold-start on a retry.
+    from azure.storage.blob import BlobClient
+    from azure.core.exceptions import ResourceNotFoundError
+    blob_service = _get_blob_service()
+    archive_container = _get_env("ARCHIVE_CONTAINER_NAME")
+    archive_blob: BlobClient = blob_service.get_blob_client(
+        container=archive_container, blob=output_blob_name
+    )
     try:
-        from azure.storage.blob import BlobClient
-        blob_service = _get_blob_service()
-        archive_container = _get_env("ARCHIVE_CONTAINER_NAME")
-        archive_blob: BlobClient = blob_service.get_blob_client(
-            container=archive_container, blob=output_blob_name
+        archive_blob.get_blob_properties()
+        logger.info("process-image: archive blob already exists for %s, skipping segmentation", item_id)
+        return {"id": item_id, "imageUrl": archive_blob.url, "mediaType": "image/webp"}
+    except ResourceNotFoundError:
+        pass  # blob doesn't exist yet — proceed with segmentation
+
+    # Attempt Modal BiRefNet first; fall back to rembg on any error.
+    # Both functions are CPU/network-bound — run in a thread pool so the asyncio
+    # event loop is never blocked (blocking loop causes gRPC heartbeat misses and
+    # the Functions host kills the Python worker mid-request).
+    try:
+        transparent_png = await asyncio.to_thread(_segment_with_modal, image_bytes)
+        logger.info("process-image: Modal BiRefNet segmentation succeeded")
+    except Exception as modal_ex:
+        logger.warning(
+            "process-image: Modal segmentation failed (%s); falling back to rembg",
+            modal_ex,
         )
-        archive_blob.upload_blob(transparent_png, overwrite=True, content_type="image/png")
+        try:
+            transparent_png = await asyncio.to_thread(_remove_background, image_bytes)
+        except Exception as ex:
+            logger.exception("Background removal failed: %s", ex)
+            raise HTTPException(status_code=500, detail=f"Failed to process image: {ex}")
+
+    # Convert transparent RGBA image to lossy WebP with alpha (q=85, method=6).
+    # Pillow 10+ encodes WebP with alpha when the source is RGBA.
+    # method=6 gives maximum compression ratio with acceptable CPU overhead.
+    try:
+        with Image.open(io.BytesIO(transparent_png)) as rgba_img:
+            webp_buf = io.BytesIO()
+            rgba_img.save(webp_buf, format="WEBP", quality=85, method=6)
+            transparent_webp = webp_buf.getvalue()
+    except Exception as ex:
+        logger.exception("WebP conversion failed for item %s: %s", item_id, ex)
+        raise HTTPException(status_code=500, detail=f"WebP conversion failed: {ex}")
+
+    try:
+        archive_blob.upload_blob(transparent_webp, overwrite=True, content_type="image/webp")
         archive_url = archive_blob.url
     except Exception as ex:
         logger.exception("Blob upload failed: %s", ex)
         raise HTTPException(status_code=500, detail=f"Failed to upload image: {ex}")
 
-    logger.info("process-image: item %s → %s", item_id, archive_url)
-    return {"id": item_id, "imageUrl": archive_url}
+    logger.info("process-image: item %s → %s (WebP, %d bytes)", item_id, archive_url, len(transparent_webp))
+    return {"id": item_id, "imageUrl": archive_url, "mediaType": "image/webp"}
 
 
 # ── Chat endpoint (SSE streaming) ─────────────────────────────────────────────

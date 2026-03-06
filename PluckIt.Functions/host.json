@@ -11,5 +11,13 @@
   "extensionBundle": {
     "id": "Microsoft.Azure.Functions.ExtensionBundle",
     "version": "[4.*, 5.0.0)"
+  },
+  "queues": {
+    "maxPollingInterval": "00:00:02",
+    "visibilityTimeout": "00:06:00",
+    "batchSize": 4,
+    "maxDequeueCount": 5,
+    "newBatchThreshold": 2,
+    "messageEncoding": "base64"
   }
 }

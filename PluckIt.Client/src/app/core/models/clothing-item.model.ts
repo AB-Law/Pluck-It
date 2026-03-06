@@ -116,6 +116,9 @@ export interface ClothingPrice {
   purchaseDate?: string | null;
 }
 
+/** Matches the C# DraftStatus enum serialized as PascalCase strings. */
+export type DraftStatus = 'Processing' | 'Ready' | 'Failed';
+
 /** Subjective condition grade. Mirrors the C# ItemCondition enum. */
 export type ItemCondition = 'New' | 'Excellent' | 'Good' | 'Fair';
 
@@ -156,6 +159,21 @@ export interface ClothingItem {
    * Drives Digital Vault smart-group filtering.
    */
   aestheticTags?: string[] | null;
+
+  // ── Upload draft pipeline ──────────────────────────────────────────────
+  /**
+   * Non-null while the item is in the upload pipeline (Processing | Ready | Failed).
+   * Absent (undefined | null) on fully accepted wardrobe items.
+   */
+  draftStatus?: DraftStatus | null;
+  /** Error message set when draftStatus = 'Failed'. */
+  draftError?: string | null;
+  /** Plain URL (no SAS) of the raw upload blob; used for server-side retry. */
+  rawImageBlobUrl?: string | null;
+  /** When the Processing draft was first written to Cosmos. */
+  draftCreatedAt?: string | null;
+  /** Last time the draft status was updated. */
+  draftUpdatedAt?: string | null;
 }
 
 // ─── Wardrobe query / paging types ───────────────────────────────────────────
@@ -188,6 +206,15 @@ export interface WardrobeQuery {
  * Mirrors C# WardrobePagedResult (camelCase serialization).
  */
 export interface WardrobePagedResponse {
+  items:                  ClothingItem[];
+  nextContinuationToken?: string | null;
+}
+
+/**
+ * Draft response envelope returned by GET /api/wardrobe/drafts.
+ * Mirrors C# WardrobeDraftsResult (camelCase serialization).
+ */
+export interface WardrobeDraftsResponse {
   items:                  ClothingItem[];
   nextContinuationToken?: string | null;
 }

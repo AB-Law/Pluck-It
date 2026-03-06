@@ -60,10 +60,9 @@ public sealed class WardrobeFunctionsTests
             wearHistoryRepo ?? new InMemoryWearHistoryRepository(),
             stylingActivityRepo ?? new InMemoryStylingActivityRepository(),
             sas   ?? new FakeBlobSasService(),
-            new FakeClothingMetadataService(),
-            TestFactory.CreateHttpClientFactory(),
             cfg,
             TestFactory.CreateTokenValidator(cfg),
+            new FakeImageJobQueue(),
             TestFactory.NullLogger<WardrobeFunctions>());
     }
 
@@ -100,10 +99,9 @@ public sealed class WardrobeFunctionsTests
             new InMemoryWearHistoryRepository(),
             new InMemoryStylingActivityRepository(),
             new FakeBlobSasService(),
-            new FakeClothingMetadataService(),
-            TestFactory.CreateHttpClientFactory(),
             TestConfiguration.Unauthenticated(),
             TestFactory.CreateTokenValidator(TestConfiguration.Unauthenticated()),
+            new FakeImageJobQueue(),
             TestFactory.NullLogger<WardrobeFunctions>());
 
         var result = await sut.GetWardrobe(TestRequest.Get("http://localhost/api/wardrobe"), CancellationToken.None);

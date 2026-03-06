@@ -6,6 +6,7 @@ import {
   ClothingItem,
   WardrobeQuery,
   WardrobePagedResponse,
+  WardrobeDraftsResponse,
   WearLogPayload,
   WearHistoryResponse,
   StylingActivityRequest,
@@ -50,11 +51,44 @@ export class WardrobeService {
     return this.http.get<ClothingItem>(`${this.base}/api/wardrobe/${id}`);
   }
 
-  /** Upload an image → background removal + AI extraction → returns a draft (not saved yet) */
+  /**
+   * Upload an image — background removal + AI extraction via the processing pipeline.
+   * The server atomically writes a Processing draft in Cosmos before processing begins,
+   * then updates to Ready (201) or Failed (422) on completion.
+   */
   uploadForDraft(file: File): Observable<ClothingItem> {
     const form = new FormData();
     form.append('image', file, file.name);
     return this.http.post<ClothingItem>(`${this.base}/api/wardrobe/upload`, form);
+  }
+
+  /** Fetch all pending/ready/failed draft items (persisted across sessions). */
+  getDrafts(): Observable<WardrobeDraftsResponse> {
+    return this.http.get<WardrobeDraftsResponse>(`${this.base}/api/wardrobe/drafts`);
+  }
+
+  /**
+   * Accept a Ready draft: removes draft metadata, sets dateAdded, returns finalized item.
+   * Returns 409 if the draft is not in Ready state.
+   */
+  acceptDraft(id: string): Observable<ClothingItem> {
+    return this.http.patch<ClothingItem>(`${this.base}/api/wardrobe/drafts/${id}/accept`, {});
+  }
+
+  /**
+   * Retry processing for a Failed draft using the stored raw image blob.
+   * Returns 409 if the draft is not in Failed state.
+   */
+  retryDraft(id: string): Observable<ClothingItem> {
+    return this.http.post<ClothingItem>(`${this.base}/api/wardrobe/drafts/${id}/retry`, {});
+  }
+
+  /**
+   * Dismiss (hard-delete) a draft — removes from Cosmos and deletes associated blobs.
+   * Uses the same DELETE endpoint as regular items.
+   */
+  dismissDraft(id: string): Observable<void> {
+    return this.http.delete<void>(`${this.base}/api/wardrobe/${id}`);
   }
 
   /** Save a user-confirmed item to Cosmos */
@@ -102,3 +136,4 @@ export class WardrobeService {
     );
   }
 }
+

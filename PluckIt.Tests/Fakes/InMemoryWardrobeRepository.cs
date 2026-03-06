@@ -152,6 +152,64 @@ public sealed class InMemoryWardrobeRepository : IWardrobeRepository
         return Task.FromResult<ClothingItem?>(item);
     }
 
+    // ── Draft operations (stubs — sufficient for unit tests) ─────────────────
+
+    public Task<WardrobeDraftsResult> GetDraftsAsync(
+        string userId, int pageSize, string? continuationToken, CancellationToken cancellationToken = default)
+    {
+        var drafts = _store
+            .Where(i => string.Equals(i.UserId, userId, StringComparison.OrdinalIgnoreCase)
+                     && i.DraftStatus.HasValue)
+            .ToList();
+        return Task.FromResult(new WardrobeDraftsResult(drafts, null));
+    }
+
+    public Task<bool> SetDraftTerminalAsync(
+        string id, string userId, DraftStatus status, string? draftError,
+        ClothingMetadata? metadata, string? imageUrl, DateTimeOffset updatedAt,
+        CancellationToken cancellationToken = default)
+    {
+        _ = metadata; // not applied in the in-memory stub
+        var item = _store.FirstOrDefault(i =>
+            string.Equals(i.Id, id, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(i.UserId, userId, StringComparison.OrdinalIgnoreCase) &&
+            i.DraftStatus == DraftStatus.Processing);
+        if (item is null) return Task.FromResult(false);
+        item.DraftStatus    = status;
+        item.DraftError     = draftError;
+        item.DraftUpdatedAt = updatedAt;
+        if (imageUrl is not null) item.ImageUrl = imageUrl;
+        return Task.FromResult(true);
+    }
+
+    public Task<ClothingItem?> AcceptDraftAsync(
+        string id, string userId, DateTimeOffset dateAdded, CancellationToken cancellationToken = default)
+    {
+        var item = _store.FirstOrDefault(i =>
+            string.Equals(i.Id, id, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(i.UserId, userId, StringComparison.OrdinalIgnoreCase) &&
+            i.DraftStatus == DraftStatus.Ready);
+        if (item is null) return Task.FromResult<ClothingItem?>(null);
+        item.DraftStatus    = null;
+        item.DraftError     = null;
+        item.RawImageBlobUrl= null;
+        item.DraftCreatedAt = null;
+        item.DraftUpdatedAt = null;
+        item.DateAdded      = dateAdded;
+        return Task.FromResult<ClothingItem?>(item);
+    }
+
+    public Task<IReadOnlyList<ClothingItem>> GetByDraftStatusAsync(
+        DraftStatus status, DateTimeOffset olderThan, int maxItems, CancellationToken cancellationToken = default)
+    {
+        IReadOnlyList<ClothingItem> result = _store
+            .Where(i => i.DraftStatus == status
+                     && (i.DraftUpdatedAt ?? i.DraftCreatedAt ?? DateTimeOffset.MaxValue) < olderThan)
+            .Take(maxItems)
+            .ToList();
+        return Task.FromResult(result);
+    }
+
     // ── Extra query helpers used by cleanup / digest ─────────────────────────
 
     public IEnumerable<string> AllImageUrls()

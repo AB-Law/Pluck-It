@@ -50,6 +50,14 @@ resource "azurerm_storage_container" "tfstate" {
   container_access_type = "private"
 }
 
+# Queue for async image processing jobs — placed on the same storage account as blobs.
+# Azure Storage Queues have no baseline cost (free tier covers ~70K ops/month; charges
+# kick in at $0.00004 per additional 10K operations, negligible at this scale).
+resource "azurerm_storage_queue" "image_processing_jobs" {
+  name                 = "image-processing-jobs"
+  storage_account_name = azurerm_storage_account.sa_pluckit.name
+}
+
 resource "azurerm_cosmosdb_account" "pluckit" {
   name                = "${local.base_name}-cosmos"
   location            = azurerm_resource_group.rg_pluckit_archive.location
@@ -514,10 +522,14 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
     "BlobStorage__AccountName"              = azurerm_storage_account.sa_pluckit.name
     "BlobStorage__AccountKey"               = azurerm_storage_account.sa_pluckit.primary_access_key
     "BlobStorage__ArchiveContainer"         = azurerm_storage_container.archive.name
+    "BlobStorage__UploadsContainer"         = azurerm_storage_container.uploads.name
     "Processor__BaseUrl"                    = "https://${local.base_name}-processor-func.azurewebsites.net"
+    # Storage Queue connection for the image-processing-jobs queue trigger + enqueue client.
+    # The queue lives on sa_pluckit (same account as archive/uploads blobs).
+    "StorageQueue" = "DefaultEndpointsProtocol=https;AccountName=${azurerm_storage_account.sa_pluckit.name};AccountKey=${azurerm_storage_account.sa_pluckit.primary_access_key};EndpointSuffix=core.windows.net"
     # Google OAuth Client ID — used by GoogleTokenValidator to verify GIS ID tokens.
     # The client secret is NOT needed; verification uses Google's public JWKS only.
-    "GoogleAuth__ClientId" = var.google_oauth_client_id
+    "GoogleAuth__ClientId"     = var.google_oauth_client_id
     "FEATURE_WEAR_SUGGESTIONS" = "true"
   }
 }
@@ -614,7 +626,9 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
     # Embedding model for mood name canonicalization (cross-run dedup)
     "AZURE_OPENAI_EMBEDDING_DEPLOYMENT" = "text-embedding-3-small"
     # Google OAuth client ID — used to validate bearer tokens from Angular
-    "GOOGLE_CLIENT_ID" = var.google_oauth_client_id
-    "FEATURE_VAULT_INSIGHTS" = "true"
+    "GOOGLE_CLIENT_ID"          = var.google_oauth_client_id
+    "FEATURE_VAULT_INSIGHTS"    = "true"
+    "SEGMENTATION_ENDPOINT_URL" = var.segmentation_endpoint_url
+    "SEGMENTATION_SHARED_TOKEN" = var.segmentation_shared_token
   }
 }
