@@ -18,6 +18,8 @@ from typing import Optional
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import AzureChatOpenAI
 
+from .url_security import validate_public_https_url
+
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = """\
@@ -67,7 +69,13 @@ def analyze_image(image_url: str) -> dict:
     """
     _empty: dict = {"styleKeywords": [], "colors": [], "garments": [], "brand": None}
 
-    if not image_url or not image_url.startswith("http"):
+    if not image_url:
+        return _empty
+
+    try:
+        safe_image_url = validate_public_https_url(image_url)
+    except ValueError:
+        logger.warning("Image taste analysis rejected non-public URL: %s", image_url[:80])
         return _empty
 
     try:
@@ -76,7 +84,7 @@ def analyze_image(image_url: str) -> dict:
             content=[
                 {
                     "type": "image_url",
-                    "image_url": {"url": image_url, "detail": "low"},
+                    "image_url": {"url": safe_image_url, "detail": "low"},
                 },
                 {
                     "type": "text",

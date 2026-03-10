@@ -21,6 +21,8 @@ import httpx
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import AzureChatOpenAI
 
+from ..url_security import validate_public_https_url
+
 logger = logging.getLogger(__name__)
 
 _HEADERS = {
@@ -58,12 +60,13 @@ def _build_llm() -> AzureChatOpenAI:
 
 def _fetch_html(url: str) -> str:
     """Fetch the listing page HTML, stripping scripts/styles/SVGs."""
+    safe_url = validate_public_https_url(url)
     try:
-        resp = httpx.get(url, headers=_HEADERS, timeout=_FETCH_TIMEOUT, follow_redirects=True)
+        resp = httpx.get(safe_url, headers=_HEADERS, timeout=_FETCH_TIMEOUT, follow_redirects=True)
         resp.raise_for_status()
         html = resp.text
     except Exception as exc:
-        raise RuntimeError(f"Could not fetch {url}: {exc}") from exc
+        raise RuntimeError(f"Could not fetch {safe_url}: {exc}") from exc
 
     # Strip noisy tags
     for tag in ("script", "style", "svg", "noscript", "iframe"):

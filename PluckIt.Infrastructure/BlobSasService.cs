@@ -17,6 +17,7 @@ public class BlobSasService : IBlobSasService
   private readonly string _archiveContainer;
   private readonly string _uploadsContainer;
   private readonly BlobServiceClient _serviceClient;
+  private readonly HashSet<string> _allowedContainers;
 
   public BlobSasService(string accountName, string accountKey, string archiveContainer,
       string uploadsContainer = "uploads")
@@ -25,6 +26,11 @@ public class BlobSasService : IBlobSasService
     _credential = new StorageSharedKeyCredential(accountName, accountKey);
     _archiveContainer = archiveContainer ?? throw new ArgumentNullException(nameof(archiveContainer));
     _uploadsContainer = uploadsContainer;
+    _allowedContainers = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+      _archiveContainer,
+      _uploadsContainer
+    };
     _serviceClient = new BlobServiceClient(
         new Uri($"https://{accountName}.blob.core.windows.net"), _credential);
   }
@@ -48,6 +54,8 @@ public class BlobSasService : IBlobSasService
 
       var containerName = segments[0];
       var blobName = segments[1];
+      if (!_allowedContainers.Contains(containerName))
+        return blobUrl;
 
       var sasBuilder = new BlobSasBuilder
       {
@@ -59,7 +67,10 @@ public class BlobSasService : IBlobSasService
       sasBuilder.SetPermissions(BlobSasPermissions.Read);
 
       var sasToken = sasBuilder.ToSasQueryParameters(_credential).ToString();
-      return $"{uri.GetLeftPart(UriPartial.Path)}?{sasToken}";
+      var canonicalBlobUri = _serviceClient.GetBlobContainerClient(containerName)
+        .GetBlobClient(blobName)
+        .Uri;
+      return $"{canonicalBlobUri}?{sasToken}";
     }
     catch
     {
