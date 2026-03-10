@@ -77,28 +77,24 @@ def test_is_direct_image_reddit_link():
     assert _is_direct_image("https://www.reddit.com/r/streetwear/comments/abc/") is False
 
 
-# ── _extract_buy_links ────────────────────────────────────────────────────────
+# ── _extract_buy_links (disabled) ─────────────────────────────────────────────
 
 def test_extract_taobao_link():
     text = "Buy here: https://item.taobao.com/item.htm?id=123456789"
     links = _extract_buy_links(text)
-    assert len(links) == 1
-    assert links[0].platform == "taobao"
-    assert "taobao.com" in links[0].url
+    assert links == []
 
 
 def test_extract_yupoo_link():
     text = "Album: https://mybrand.yupoo.com/albums/12345"
     links = _extract_buy_links(text)
-    assert len(links) == 1
-    assert links[0].platform == "yupoo"
+    assert links == []
 
 
 def test_extract_weidian_link():
     text = "Shop: https://weidian.com/item.html?itemID=9876"
     links = _extract_buy_links(text)
-    assert len(links) == 1
-    assert links[0].platform == "weidian"
+    assert links == []
 
 
 def test_extract_multiple_links():
@@ -107,9 +103,7 @@ def test_extract_multiple_links():
         "Yupoo: https://store.yupoo.com/albums/999"
     )
     links = _extract_buy_links(text)
-    platforms = {l.platform for l in links}
-    assert "taobao" in platforms
-    assert "yupoo" in platforms
+    assert links == []
 
 
 def test_extract_no_links():
@@ -120,7 +114,7 @@ def test_extract_deduplicates():
     url = "https://item.taobao.com/item.htm?id=123"
     text = f"{url} and again {url}"
     links = _extract_buy_links(text)
-    assert len(links) == 1
+    assert links == []
 
 
 # ── _extract_tags_from_post ───────────────────────────────────────────────────
@@ -249,7 +243,7 @@ def test_scrape_skips_non_image_post():
     assert items == []
 
 
-def test_scrape_extracts_buy_links():
+def test_scrape_does_not_extract_buy_links():
     posts = [
         _make_post(
             title="Reps haul",
@@ -271,8 +265,7 @@ def test_scrape_extracts_buy_links():
         items = scraper.scrape({"subreddit": "qualityreps", "min_score": 0})
 
     assert len(items) == 1
-    assert len(items[0].buy_links) == 1
-    assert items[0].buy_links[0].platform == "taobao"
+    assert items[0].buy_links == []
 
 
 def test_scrape_http_error_returns_empty():

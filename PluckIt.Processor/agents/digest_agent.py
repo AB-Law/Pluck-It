@@ -133,7 +133,6 @@ def run_digest_for_user(user_id: str, force: bool = False) -> Optional[dict]:
                 "FROM c WHERE c.userId = @userId"
             ),
             parameters=[{"name": "@userId", "value": user_id}],
-            enable_cross_partition_query=True,
         ):
             item_ids.append(item["id"])
             wardrobe_items.append(item)
@@ -197,8 +196,13 @@ def run_digest_for_user(user_id: str, force: bool = False) -> Optional[dict]:
                 if snap.get("conditions"):
                     wear_conditions.append(snap["conditions"].lower())
 
-        price_obj = item.get("price") or {}
-        price_amount = price_obj.get("amount")
+        price_raw = item.get("price")
+        if isinstance(price_raw, dict):
+            price_amount = price_raw.get("amount")
+        elif isinstance(price_raw, (int, float)):
+            price_amount = price_raw  # legacy flat-number format
+        else:
+            price_amount = None
         cpw = round(price_amount / wear_count, 2) if price_amount and wear_count > 0 else None
 
         scored.append({
@@ -225,7 +229,6 @@ def run_digest_for_user(user_id: str, force: bool = False) -> Optional[dict]:
         for fb in feedback_container.query_items(
             query="SELECT * FROM c WHERE c.userId = @userId ORDER BY c.createdAt DESC OFFSET 0 LIMIT 30",
             parameters=[{"name": "@userId", "value": user_id}],
-            enable_cross_partition_query=True,
         ):
             if fb.get("signal") == "up":
                 liked_items.append(fb.get("suggestionDescription", ""))

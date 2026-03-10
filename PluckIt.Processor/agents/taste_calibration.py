@@ -54,7 +54,6 @@ def get_or_create_quiz_session(user_id: str) -> dict:
             "ORDER BY c.createdAt DESC OFFSET 0 LIMIT 1"
         ),
         parameters=[{"name": "@uid", "value": user_id}],
-        enable_cross_partition_query=False,
     ))
     if existing:
         return existing[0]
@@ -74,7 +73,6 @@ def _determine_phase() -> int:
         items_container = get_scraped_items_container_sync()
         results = list(items_container.query_items(
             query="SELECT TOP 1 c.id FROM c WHERE c.userId = 'global'",
-            enable_cross_partition_query=False,
         ))
         return 2 if results else 1
     except Exception:  # noqa: BLE001
@@ -119,7 +117,6 @@ def _load_mood_cards() -> list[dict]:
         container = get_moods_container_sync()
         docs = list(container.query_items(
             query="SELECT * FROM c ORDER BY c.trendScore DESC",
-            enable_cross_partition_query=True,
         ))
         # One card per primaryMood — pick highest trendScore
         seen: dict[str, dict] = {}
@@ -170,7 +167,6 @@ def _load_quiz_images() -> list[dict]:
                 "FROM c WHERE c.userId = 'global' AND c.imageExpired = false "
                 "ORDER BY c.scoreSignal DESC OFFSET 0 LIMIT 100"
             ),
-            enable_cross_partition_query=False,
         ))
         if not docs:
             return []

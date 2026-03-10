@@ -33,12 +33,13 @@ Endpoints:
 """
 
 import asyncio
+import base64
 import io
 import json
 import logging
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 # Point rembg at the bundled model directory so it never downloads at runtime.
@@ -810,7 +811,6 @@ async def list_scraper_sources(user_id: str = Depends(get_user_id)):
         sources = []
         async for doc in sources_container.query_items(
             query="SELECT c.id, c.name, c.sourceType, c.isGlobal, c.lastScrapedAt FROM c WHERE c.isActive = true",
-            enable_cross_partition_query=True,
         ):
             for key in _COSMOS_INTERNAL_KEYS:
                 doc.pop(key, None)
@@ -942,6 +942,202 @@ async def unsubscribe_from_source(
         raise HTTPException(status_code=500, detail="Could not unsubscribe.")
 
     return {"sourceId": source_id, "subscribed": False}
+
+
+@fastapi_app.get("/api/scraper/items")
+async def list_scraped_items(
+    user_id: str = Depends(get_user_id),
+    sortBy: str = "score",
+    pageSize: int = 50,
+    sourceIds: Optional[str] = None,
+    tags: Optional[str] = None,
+    timeRange: str = "all",
+    continuationToken: Optional[str] = None,
+):
+    """List scraped items for the discover feed (global pool)."""
+    from agents.db import get_scraped_items_container
+
+    def _parse_cursor(token: Optional[str]) -> tuple[Optional[Any], Optional[str]]:
+        if not token:
+            return None, None
+        try:
+            raw = base64.urlsafe_b64decode(token.encode()).decode()
+            payload = json.loads(raw)
+            return payload.get("k"), payload.get("id")
+        except Exception:
+            return None, None
+
+    def _encode_cursor(key: Any, doc_id: str) -> Optional[str]:
+        if key is None or not doc_id:
+            return None
+        payload = json.dumps({"k": key, "id": doc_id})
+        return base64.urlsafe_b64encode(payload.encode()).decode()
+
+    def _since_iso(range_key: str) -> Optional[str]:
+        now = datetime.now(timezone.utc)
+        windows = {
+            "1h": timedelta(hours=1),
+            "1d": timedelta(days=1),
+            "7d": timedelta(days=7),
+            "30d": timedelta(days=30),
+        }
+        delta = windows.get(range_key)
+        if delta is None:
+            return None
+        return (now - delta).isoformat()
+
+    container = get_scraped_items_container()
+    try:
+        sortBy = sortBy if sortBy in {"score", "recent"} else "score"
+        order_clause = (
+            "c.userId ASC, c.scoreSignal DESC"
+            if sortBy == "score"
+            else "c.userId ASC, c.scrapedAt DESC"
+        )
+        cursor_key, cursor_id = _parse_cursor(continuationToken)
+        where_clauses = ["c.userId = 'global'"]
+        effective_page_size = max(1, min(pageSize, 100))
+        params: list[dict] = [{"name": "@limit", "value": effective_page_size + 1}]
+
+        source_ids = [s.strip() for s in (sourceIds or "").split(",") if s.strip()]
+        if source_ids:
+            where_clauses.append("ARRAY_CONTAINS(@sourceIds, c.sourceId)")
+            params.append({"name": "@sourceIds", "value": source_ids})
+
+        tag_filters = [t.strip().lower() for t in (tags or "").split(",") if t.strip()]
+        if tag_filters:
+            where_clauses.append(
+                "EXISTS (SELECT VALUE t FROM t IN c.tags WHERE ARRAY_CONTAINS(@tags, LOWER(t)))"
+            )
+            params.append({"name": "@tags", "value": tag_filters})
+
+        since = _since_iso(timeRange)
+        if since:
+            where_clauses.append(
+                "("
+                "(IS_DEFINED(c.sourceCreatedAt) AND c.sourceCreatedAt >= @since)"
+                " OR "
+                "(NOT IS_DEFINED(c.sourceCreatedAt) AND c.scrapedAt >= @since)"
+                ")"
+            )
+            params.append({"name": "@since", "value": since})
+
+        if cursor_key is not None:
+            if sortBy == "score":
+                where_clauses.append("c.scoreSignal < @cursorKey")
+                params.append({"name": "@cursorKey", "value": int(cursor_key)})
+            else:
+                where_clauses.append("c.scrapedAt < @cursorKey")
+                params.append({"name": "@cursorKey", "value": str(cursor_key)})
+
+        query = (
+            f"SELECT * FROM c WHERE {' AND '.join(where_clauses)} "
+            f"ORDER BY {order_clause} OFFSET 0 LIMIT @limit"
+        )
+
+        items = []
+        try:
+            # Fast path for containers partitioned by /userId.
+            iterator = container.query_items(
+                query=query,
+                parameters=params,
+                partition_key="global",
+            )
+            async for doc in iterator:
+                for key in _COSMOS_INTERNAL_KEYS:
+                    doc.pop(key, None)
+                items.append(doc)
+        except Exception:
+            # Fallback for containers partitioned by a different key.
+            iterator = container.query_items(
+                query=query,
+                parameters=params,
+            )
+            async for doc in iterator:
+                for key in _COSMOS_INTERNAL_KEYS:
+                    doc.pop(key, None)
+                items.append(doc)
+
+        has_more = len(items) > effective_page_size
+        page_items = items[:effective_page_size]
+        next_token = None
+        if has_more and page_items:
+            last = page_items[-1]
+            cursor_value = last.get("scoreSignal") if sortBy == "score" else last.get("scrapedAt")
+            next_token = _encode_cursor(cursor_value, last.get("id", ""))
+
+        return {"items": page_items, "nextContinuationToken": next_token}
+    except Exception as exc:
+        logger.exception("list_scraped_items failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Could not load items.")
+
+
+
+
+@fastapi_app.post("/api/scraper/items/{item_id}/feedback")
+async def feedback_scraped_item(
+    item_id: str,
+    body: dict,
+    user_id: str = Depends(get_user_id),
+):
+    """Record like/dislike on a scraped item. signal: 'up' or 'down'."""
+    from agents.db import get_scraped_items_container
+
+    signal = body.get("signal")
+    if signal not in ("up", "down"):
+        raise HTTPException(status_code=400, detail="signal must be 'up' or 'down'")
+
+    # Optional: index into galleryImages for per-image liking in slideshow
+    gallery_image_index: int | None = body.get("galleryImageIndex")
+
+    container = get_scraped_items_container()
+    try:
+        item = await container.read_item(item=item_id, partition_key="global")
+        delta = 1 if signal == "up" else -1
+        item["scoreSignal"] = item.get("scoreSignal", 0) + delta
+        await container.upsert_item(item)
+
+        # On like/dislike: run vision analysis on the image to extract real visual
+        # style descriptors (colors, silhouette, garments) — not just post-text tags.
+        # When a gallery index is provided, analyse that specific image.
+        gallery_images = item.get("galleryImages", [])
+        if (
+            gallery_image_index is not None
+            and isinstance(gallery_image_index, int)
+            and 0 <= gallery_image_index < len(gallery_images)
+        ):
+            image_url: str = gallery_images[gallery_image_index]
+        else:
+            image_url = item.get("imageUrl", "")
+        if image_url and signal == "up":
+            # Run vision analysis synchronously in a thread pool so we can await it
+            # and guarantee it completes before the connection closes.
+            # (asyncio.create_task fire-and-forget is unreliable in ASGI on Functions.)
+            try:
+                from agents.image_taste_analyzer import analyze_image, build_taste_inferred
+                from agents.taste_calibration import _update_user_profile
+                logger.info("Starting vision taste analysis for item %s (url: %s)", item_id, image_url[:60])
+                analysis = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: analyze_image(image_url)
+                )
+                logger.info("Vision analysis result for %s: %s", item_id, analysis)
+                inferred = build_taste_inferred(analysis)
+                if inferred["styleKeywords"] or inferred["brands"]:
+                    await asyncio.get_event_loop().run_in_executor(
+                        None, lambda: _update_user_profile(user_id, inferred)
+                    )
+                    logger.info(
+                        "Taste updated for %s via vision: %s",
+                        user_id, inferred["styleKeywords"][:4],
+                    )
+            except Exception as _vision_exc:  # noqa: BLE001
+                logger.warning("Vision taste update failed for %s: %s", item_id, _vision_exc)
+
+        return {"itemId": item_id, "signal": signal, "scoreSignal": item["scoreSignal"]}
+    except Exception as exc:
+        logger.exception("feedback_scraped_item failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Could not record feedback.")
+
 
 
 @fastapi_app.post("/api/scraper/run/{source_id}")

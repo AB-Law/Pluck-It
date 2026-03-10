@@ -17,6 +17,7 @@ from typing import Optional
 class BuyLink:
     platform: str   # "taobao" | "yupoo" | "weidian" | "weidan" | "unknown"
     url: str
+    label: Optional[str] = None  # product name extracted from comment context
 
 
 @dataclass
@@ -38,7 +39,10 @@ class ScrapedItemRaw:
     tags: list[str]         # extracted from text (title, flair, subreddit)
     buy_links: list[BuyLink] = field(default_factory=list)
     preview_url: Optional[str] = None   # transient only — never persisted
+    gallery_images: list[str] = field(default_factory=list)  # all images for a gallery post
+    comment_text: str = ""              # top comment bodies (for buy-link display)
     score_signal: int = 0               # upvotes / engagement metric
+    source_created_at: Optional[str] = None  # canonical source timestamp (e.g. reddit created_utc)
     brand: Optional[str] = None
     price: Optional[str] = None
 

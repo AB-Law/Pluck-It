@@ -15,24 +15,22 @@ Reddit exposes two kinds of image URLs:
     expiring HMAC token.  We use this URL TRANSIENTLY for pHash computation
     (download while token is valid), then discard it.  Never stored.
 
-Buy-link extraction
-────────────────────
-Subreddits like r/QualityReps contain taobao / yupoo / weidian / weidan links
-in the post body (selftext) and in top-level comments.  We regex-extract these
-and store them as structured BuyLink objects.
+Buy-link extraction is intentionally disabled.
+We only ingest post/image metadata from Reddit.
 """
 
 from __future__ import annotations
 
 import logging
-import re
+import os
 import time
+from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import urlparse
 
 import httpx
 
-from .base import BaseScraper, BuyLink, ScrapedItemRaw
+from .base import BaseScraper, ScrapedItemRaw
 
 logger = logging.getLogger(__name__)
 
@@ -40,23 +38,18 @@ logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://www.reddit.com"
 _HEADERS = {
-    "User-Agent": "PluckIt/1.0",
+    "User-Agent": os.getenv(
+        "REDDIT_USER_AGENT",
+        "script:pluckit-scraper:1.0 (by /u/PluckItBot)",
+    ),
     "Accept": "application/json",
+    "Accept-Language": "en-US,en;q=0.9",
 }
 _TIMEOUT = 15.0
 _REQUEST_DELAY = 2.0          # seconds between requests (polite crawling)
 
 # Direct image extensions hosted on i.redd.it (stable, token-free)
 _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
-
-# Buy-link patterns found in QualityReps-style subreddits
-_BUY_LINK_PATTERNS: list[tuple[str, re.Pattern]] = [
-    ("taobao",  re.compile(r"https?://(?:item\.taobao\.com|taobao\.com)\S+", re.I)),
-    ("yupoo",   re.compile(r"https?://\S+\.yupoo\.com\S*", re.I)),
-    ("weidian", re.compile(r"https?://(?:weidian\.com|weidian\.cc)\S+", re.I)),
-    ("weidan",  re.compile(r"https?://\S*weidan\S*", re.I)),
-    ("1688",    re.compile(r"https?://detail\.1688\.com\S+", re.I)),
-]
 
 # Subreddit → implicit aesthetic tags (avoids needing LLM for tagging)
 _SUBREDDIT_TAGS: dict[str, list[str]] = {
@@ -112,17 +105,9 @@ def _extract_gallery_images(post: dict) -> list[tuple[str, Optional[str]]]:
     return results
 
 
-def _extract_buy_links(text: str) -> list[BuyLink]:
-    """Regex-scan *text* for known buy-link platforms."""
-    links: list[BuyLink] = []
-    seen: set[str] = set()
-    for platform, pattern in _BUY_LINK_PATTERNS:
-        for match in pattern.finditer(text):
-            url = match.group(0).rstrip(")")  # strip trailing ) from markdown links
-            if url not in seen:
-                links.append(BuyLink(platform=platform, url=url))
-                seen.add(url)
-    return links
+def _extract_buy_links(_: str) -> list:
+    """Compatibility shim: buy-link extraction is disabled for Reddit."""
+    return []
 
 
 def _extract_tags_from_post(post: dict, subreddit: str) -> list[str]:
@@ -153,27 +138,6 @@ def _extract_tags_from_post(post: dict, subreddit: str) -> list[str]:
     return list(dict.fromkeys(tags))  # deduplicate, preserve order
 
 
-def _fetch_top_comments_text(subreddit: str, post_id: str, client: httpx.Client) -> str:
-    """Fetch the top-level comment bodies for buy-link extraction."""
-    url = f"{_BASE_URL}/r/{subreddit}/comments/{post_id}.json?limit=10&depth=1"
-    try:
-        time.sleep(_REQUEST_DELAY)
-        resp = client.get(url, headers=_HEADERS, timeout=_TIMEOUT)
-        resp.raise_for_status()
-        data = resp.json()
-        # data[1] contains comments listing
-        comments = data[1]["data"]["children"]
-        texts = [
-            c["data"].get("body", "")
-            for c in comments
-            if c.get("kind") == "t1"
-        ]
-        return "\n".join(texts)
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("Could not fetch comments for %s/%s: %s", subreddit, post_id, exc)
-        return ""
-
-
 # ── Scraper ───────────────────────────────────────────────────────────────────
 
 class RedditScraper(BaseScraper):
@@ -186,13 +150,11 @@ class RedditScraper(BaseScraper):
           sort       (str)   — "hot" | "top" | "new"  (default: "hot")
           limit      (int)   — max posts to fetch      (default: 50, max: 100)
           min_score  (int)   — skip posts below this   (default: 50)
-          fetch_comments (bool) — fetch comments for buy-link extraction (default: False)
         """
         subreddit = config["subreddit"]
         sort = config.get("sort", "hot")
         limit = min(int(config.get("limit", 50)), 100)
         min_score = int(config.get("min_score", 50))
-        fetch_comments: bool = config.get("fetch_comments", False)
         source_id: str = config.get("source_id", f"reddit-{subreddit}")
 
         url = f"{_BASE_URL}/r/{subreddit}/{sort}.json?limit={limit}"
@@ -221,9 +183,7 @@ class RedditScraper(BaseScraper):
                 if post.get("score", 0) < min_score:
                     continue
 
-                items = self._process_post(
-                    post, subreddit, source_id, fetch_comments, client
-                )
+                items = self._process_post(post, subreddit, source_id)
                 results.extend(items)
                 time.sleep(_REQUEST_DELAY)
 
@@ -235,39 +195,42 @@ class RedditScraper(BaseScraper):
         post: dict,
         subreddit: str,
         source_id: str,
-        fetch_comments: bool,
-        client: httpx.Client,
     ) -> list[ScrapedItemRaw]:
         post_url = f"https://www.reddit.com{post.get('permalink', '')}"
         title = (post.get("title") or "").strip()
         description = (post.get("selftext") or "").strip()[:500]
         tags = _extract_tags_from_post(post, subreddit)
         score = post.get("score", 0)
+        created_utc = post.get("created_utc")
+        source_created_at: Optional[str] = None
+        if isinstance(created_utc, (int, float)):
+            source_created_at = datetime.fromtimestamp(created_utc, timezone.utc).isoformat()
 
-        # Buy links from post body
-        buy_links = _extract_buy_links(description)
-
-        # Optionally fetch comment text for buy links (QualityReps-style subs)
-        if fetch_comments and not buy_links:
-            comment_text = _fetch_top_comments_text(subreddit, post["id"], client)
-            buy_links = _extract_buy_links(comment_text)
+        buy_links = []
+        comment_text = ""
 
         results: list[ScrapedItemRaw] = []
 
         # ── Gallery posts ──────────────────────────────────────────────────
+        # Store as ONE item with the first image as cover + all images in gallery_images
         if _is_reddit_gallery(post):
-            for image_url, preview_url in _extract_gallery_images(post):
+            gallery_pairs = _extract_gallery_images(post)
+            if gallery_pairs:
+                first_img, first_preview = gallery_pairs[0]
                 results.append(ScrapedItemRaw(
                     source_id=source_id,
                     source_type=self.source_type,
                     title=title,
                     description=description,
-                    image_url=image_url,
+                    image_url=first_img,
                     product_url=post_url,
                     tags=tags,
                     buy_links=buy_links,
-                    preview_url=preview_url,
+                    preview_url=first_preview,
+                    gallery_images=[img for img, _ in gallery_pairs],
+                    comment_text=comment_text[:1000],
                     score_signal=score,
+                    source_created_at=source_created_at,
                 ))
 
         # ── Single direct image ────────────────────────────────────────────
@@ -291,7 +254,10 @@ class RedditScraper(BaseScraper):
                 tags=tags,
                 buy_links=buy_links,
                 preview_url=preview_url,     # transient, for pHash only
+                gallery_images=[],
+                comment_text=comment_text[:1000],
                 score_signal=score,
+                source_created_at=source_created_at,
             ))
 
         return results

@@ -89,6 +89,7 @@ def _build_document(
     embedding: list[float],
     user_id: str,
 ) -> dict:
+    scraped_at = datetime.now(timezone.utc).isoformat()
     return {
         "id": _item_id(raw),
         "userId": user_id,
@@ -99,14 +100,18 @@ def _build_document(
         "imageUrl": raw.image_url,
         # preview_url is intentionally NOT stored — it carries expiring tokens
         "productUrl": raw.product_url,
-        "buyLinks": [{"platform": bl.platform, "url": bl.url} for bl in raw.buy_links],
+        "buyLinks": [{"platform": bl.platform, "url": bl.url, "label": bl.label} for bl in raw.buy_links],
         "price": raw.price,
         "brand": raw.brand,
         "tags": raw.tags,
+        "galleryImages": raw.gallery_images,   # all images for gallery posts
+        "commentText": raw.comment_text,        # top comment bodies (buy-link source)
         "pHash": phash,
         "embedding": embedding,
-        "scoreSignal": raw.score_signal,
-        "scrapedAt": datetime.now(timezone.utc).isoformat(),
+        "redditScore": raw.score_signal,   # Reddit upvote count — read-only provenance
+        "scoreSignal": 0,                   # our own engagement signal (likes - dislikes)
+        "scrapedAt": scraped_at,
+        "sourceCreatedAt": raw.source_created_at or scraped_at,
         "imageExpired": False,
     }
 

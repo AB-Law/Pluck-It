@@ -19,7 +19,7 @@ from .image_utils import hamming_distance
 
 logger = logging.getLogger(__name__)
 
-PHASH_THRESHOLD = 10  # bits — images are "same" if Hamming distance < this
+PHASH_THRESHOLD = 5  # bits — images are "same" if Hamming distance < this
 
 
 class RunDeduplicator:
@@ -40,7 +40,8 @@ class RunDeduplicator:
     def load_from_cosmos(self, container, partition_key: str) -> None:
         """
         Pre-populate seen URLs and pHashes from an existing Cosmos container.
-        Uses a cross-partition query scoped to partition_key (e.g. "global").
+        Prefer a single-partition query (fast), then fall back to
+        cross-partition if the container partition key differs.
         """
         query = (
             "SELECT c.productUrl, c.pHash FROM c "
@@ -48,11 +49,19 @@ class RunDeduplicator:
         )
         params = [{"name": "@userId", "value": partition_key}]
         try:
-            items = list(container.query_items(
-                query=query,
-                parameters=params,
-                enable_cross_partition_query=False,
-            ))
+            try:
+                items = list(container.query_items(
+                    query=query,
+                    parameters=params,
+                    partition_key=partition_key,
+                    enable_cross_partition_query=False,
+                ))
+            except Exception:
+                items = list(container.query_items(
+                    query=query,
+                    parameters=params,
+                    enable_cross_partition_query=True,
+                ))
             for doc in items:
                 if doc.get("productUrl"):
                     self._seen_urls.add(doc["productUrl"])
