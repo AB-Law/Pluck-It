@@ -21,6 +21,7 @@ import json
 import os
 import re
 import sys
+import time
 from typing import Any, Dict, List, Optional, Tuple
 from urllib import error, request
 
@@ -123,6 +124,7 @@ def call_openrouter(
     system_prompt: str,
     user_prompt: str,
     timeout_seconds: int,
+    max_retries: int = 3,
 ) -> Dict[str, Any]:
     payload = {
         "model": model,
@@ -132,22 +134,32 @@ def call_openrouter(
         ],
         "temperature": 0,
     }
-    req = request.Request(
-        endpoint,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-            "HTTP-Referer": "https://github.com",
-        },
-        method="POST",
-    )
-    with request.urlopen(req, timeout=timeout_seconds) as resp:
-        body = resp.read().decode("utf-8")
+    encoded = json.dumps(payload).encode("utf-8")
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+        "HTTP-Referer": "https://github.com",
+    }
 
-    data = json.loads(body)
-    content = data["choices"][0]["message"]["content"]
-    return extract_json(content)
+    last_exc: Exception = RuntimeError("No attempts made")
+    for attempt in range(1, max_retries + 1):
+        try:
+            req = request.Request(endpoint, data=encoded, headers=headers, method="POST")
+            with request.urlopen(req, timeout=timeout_seconds) as resp:
+                body = resp.read().decode("utf-8")
+            data = json.loads(body)
+            content = data["choices"][0]["message"]["content"]
+            return extract_json(content)
+        except Exception as exc:
+            last_exc = exc
+            if attempt < max_retries:
+                wait = 5 * attempt
+                print(f"[warn] Attempt {attempt}/{max_retries} failed ({exc}), retrying in {wait}s...")
+                time.sleep(wait)
+            else:
+                print(f"[warn] All {max_retries} attempts failed: {exc}")
+
+    raise last_exc
 
 
 def github_get(url: str, token: str, accept: Optional[str] = None) -> Any:
@@ -251,7 +263,7 @@ def main() -> int:
     endpoint = os.environ.get("OPENROUTER_ENDPOINT", "https://openrouter.ai/api/v1/chat/completions")
     modes_str = os.environ.get("OPENROUTER_MODES", "security,bugs,performance")
     max_diff_chars = int(os.environ.get("MAX_DIFF_CHARS", "80000"))
-    timeout_seconds = int(os.environ.get("TIMEOUT_SECONDS", "180"))
+    timeout_seconds = int(os.environ.get("TIMEOUT_SECONDS", "300"))
 
     for name, val in [("GITHUB_TOKEN", token), ("GITHUB_REPOSITORY", repo),
                       ("PR_NUMBER", pr_number), ("OPENROUTER_API_KEY", api_key),
@@ -299,8 +311,9 @@ def main() -> int:
                 timeout_seconds=timeout_seconds,
             )
         except Exception as exc:
-            print(f"[error] {mode} analysis failed: {exc}", file=sys.stderr)
-            return 1
+            print(f"[error] {mode} analysis failed after retries: {exc}", file=sys.stderr)
+            print(f"[info] Skipping {mode} mode and continuing with remaining modes")
+            continue
 
         raw_findings = result.get("findings", []) if isinstance(result, dict) else []
         normalized = [normalize(r, mode) for r in raw_findings if isinstance(r, dict)]
@@ -313,9 +326,12 @@ def main() -> int:
 
     with open("findings.json", "w", encoding="utf-8") as f:
         json.dump(all_findings, f, indent=2)
-    print("[info] Wrote findings.json")
+    print(f"[info] Wrote findings.json ({len(all_findings)} findings)")
 
     return 0
+
+
+
 
 
 if __name__ == "__main__":
