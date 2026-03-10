@@ -692,10 +692,105 @@ async def get_mood(mood_id: str):
         raise HTTPException(status_code=404, detail="Mood not found.")
 
 
+# ── Scraper security helpers ──────────────────────────────────────────────────
+
+import ipaddress
+import socket
+from urllib.parse import urlparse
+
+# Private / reserved ranges that must never be fetched (SSRF prevention).
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network(r) for r in [
+        "0.0.0.0/8",          # "This" network
+        "10.0.0.0/8",         # Private
+        "100.64.0.0/10",      # Shared address space
+        "127.0.0.0/8",        # Loopback
+        "169.254.0.0/16",     # Link-local / Azure IMDS
+        "172.16.0.0/12",      # Private
+        "192.168.0.0/16",     # Private
+        "198.18.0.0/15",      # Benchmarking
+        "198.51.100.0/24",    # Documentation
+        "203.0.113.0/24",     # Documentation
+        "224.0.0.0/4",        # Multicast
+        "240.0.0.0/4",        # Reserved
+        "::1/128",            # IPv6 loopback
+        "fc00::/7",           # IPv6 unique local
+        "fe80::/10",          # IPv6 link-local
+    ]
+]
+
+
+def _validate_scraper_url(url: str) -> None:
+    """
+    Raise HTTPException(400) if *url* is not a safe public HTTPS URL.
+
+    Checks:
+      1. Must use the https scheme.
+      2. Must have a non-empty public hostname (no bare IPs).
+      3. DNS resolution must not point to any private/reserved IP range.
+         This also defeats DNS-rebinding: we resolve before connecting.
+
+    Raises HTTPException(400) on any violation so the caller never reaches
+    the HTTP fetch stage with an unsafe URL.
+    """
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid URL.")
+
+    if parsed.scheme != "https":
+        raise HTTPException(status_code=400, detail="URL must use HTTPS.")
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise HTTPException(status_code=400, detail="URL must have a hostname.")
+
+    # Reject bare IP literals — hostnames only
+    try:
+        ipaddress.ip_address(hostname)
+        raise HTTPException(status_code=400, detail="IP-literal URLs are not permitted.")
+    except ValueError:
+        pass
+
+    # Resolve DNS and check every returned address against blocked ranges
+    try:
+        resolved = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        raise HTTPException(status_code=400, detail="Could not resolve hostname.")
+
+    for *_, sockaddr in resolved:
+        addr_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(addr_str)
+        except ValueError:
+            continue
+        for net in _BLOCKED_NETWORKS:
+            if ip in net:
+                raise HTTPException(
+                    status_code=400,
+                    detail="URL resolves to a private or reserved address.",
+                )
+
+
+def _require_admin(user_id: str = Depends(get_user_id)) -> str:
+    """
+    FastAPI dependency that restricts an endpoint to admin users only.
+
+    Admin user IDs are configured via the ADMIN_USER_IDS environment variable
+    as a comma-separated list.  Returns the user_id if authorised.
+    """
+    raw = os.getenv("ADMIN_USER_IDS", "")
+    admin_ids = {uid.strip() for uid in raw.split(",") if uid.strip()}
+    if not admin_ids or user_id not in admin_ids:
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return user_id
+
+
 # ── Scraper endpoints ─────────────────────────────────────────────────────────
 
-class SuggestSourceRequest(BaseModel):# Human-readable name, e.g. "Zara"
-    url: str            
+class SuggestSourceRequest(BaseModel):
+    name: str           # Human-readable name, e.g. "Zara"
+    url: str
     source_type: str = "brand_site"
 
 
@@ -746,10 +841,13 @@ async def suggest_scraper_source(
     """
     Suggest a new brand site as a scraper source.
     Triggers one-time LLM CSS selector config generation, then stores the source.
+    Only public HTTPS URLs are accepted — private/internal addresses are rejected.
     """
     from agents.db import get_scraper_sources_container
     from agents.scrapers.config_generator import generate_selector_config
     import re
+
+    _validate_scraper_url(body.url)  # raises 400 for unsafe URLs
 
     source_id = "brand-" + re.sub(r"[^a-z0-9]+", "-", body.name.lower()).strip("-")
 
@@ -849,9 +947,9 @@ async def unsubscribe_from_source(
 @fastapi_app.post("/api/scraper/run/{source_id}")
 async def run_scraper_source(
     source_id: str,
-    user_id: str = Depends(get_user_id),
+    _: str = Depends(_require_admin),
 ):
-    """Manually trigger a scrape for a single source (dev/admin)."""
+    """Manually trigger a scrape for a single source. Requires admin access."""
     try:
         count = await asyncio.get_event_loop().run_in_executor(
             None,

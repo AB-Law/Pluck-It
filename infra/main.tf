@@ -417,6 +417,155 @@ resource "azurerm_cosmosdb_sql_container" "digest_feedback" {
   }
 }
 
+# ── Scraper containers ────────────────────────────────────────────────────────
+# ScraperSources: catalog of global and user-created scraper sources.
+# Partitioned by /sourceType (reddit | brand_site | pinterest).
+# No TTL — source configs are long-lived.
+resource "azurerm_cosmosdb_sql_container" "scraper_sources" {
+  name                  = "ScraperSources"
+  resource_group_name   = azurerm_resource_group.rg_pluckit_archive.name
+  account_name          = azurerm_cosmosdb_account.pluckit.name
+  database_name         = azurerm_cosmosdb_sql_database.pluckit.name
+  partition_key_paths   = ["/sourceType"]
+  partition_key_version = 1
+
+  indexing_policy {
+    indexing_mode = "consistent"
+
+    included_path {
+      path = "/*"
+    }
+
+    composite_index {
+      index {
+        path  = "/isGlobal"
+        order = "ascending"
+      }
+      index {
+        path  = "/isActive"
+        order = "ascending"
+      }
+    }
+  }
+}
+
+# ScrapedItems: scraped outfit/product items with embeddings.
+# Partitioned by /userId ("global" for shared sources, userId for personal).
+# TTL of 30 days bounds storage cost — old items age out automatically.
+resource "azurerm_cosmosdb_sql_container" "scraped_items" {
+  name                  = "ScrapedItems"
+  resource_group_name   = azurerm_resource_group.rg_pluckit_archive.name
+  account_name          = azurerm_cosmosdb_account.pluckit.name
+  database_name         = azurerm_cosmosdb_sql_database.pluckit.name
+  partition_key_paths   = ["/userId"]
+  partition_key_version = 1
+  default_ttl           = 2592000 # 30 days in seconds
+
+  indexing_policy {
+    indexing_mode = "consistent"
+
+    included_path {
+      path = "/*"
+    }
+
+    # Efficient dedup lookups and chronological feed queries
+    composite_index {
+      index {
+        path  = "/userId"
+        order = "ascending"
+      }
+      index {
+        path  = "/scrapedAt"
+        order = "descending"
+      }
+    }
+    composite_index {
+      index {
+        path  = "/userId"
+        order = "ascending"
+      }
+      index {
+        path  = "/scoreSignal"
+        order = "descending"
+      }
+    }
+    composite_index {
+      index {
+        path  = "/userId"
+        order = "ascending"
+      }
+      index {
+        path  = "/pHash"
+        order = "ascending"
+      }
+    }
+  }
+}
+
+# UserSourceSubscriptions: which sources each user has subscribed to.
+# Partitioned by /userId for fast per-user subscription lookups.
+resource "azurerm_cosmosdb_sql_container" "user_source_subscriptions" {
+  name                  = "UserSourceSubscriptions"
+  resource_group_name   = azurerm_resource_group.rg_pluckit_archive.name
+  account_name          = azurerm_cosmosdb_account.pluckit.name
+  database_name         = azurerm_cosmosdb_sql_database.pluckit.name
+  partition_key_paths   = ["/userId"]
+  partition_key_version = 1
+
+  indexing_policy {
+    indexing_mode = "consistent"
+
+    included_path {
+      path = "/*"
+    }
+
+    composite_index {
+      index {
+        path  = "/userId"
+        order = "ascending"
+      }
+      index {
+        path  = "/isActive"
+        order = "ascending"
+      }
+    }
+  }
+}
+
+# TasteCalibration: style quiz sessions and inferred taste profiles.
+# Partitioned by /userId. No TTL — quiz results are long-lived profile data.
+resource "azurerm_cosmosdb_sql_container" "taste_calibration" {
+  name                  = "TasteCalibration"
+  resource_group_name   = azurerm_resource_group.rg_pluckit_archive.name
+  account_name          = azurerm_cosmosdb_account.pluckit.name
+  database_name         = azurerm_cosmosdb_sql_database.pluckit.name
+  partition_key_paths   = ["/userId"]
+  partition_key_version = 1
+
+  indexing_policy {
+    indexing_mode = "consistent"
+
+    included_path {
+      path = "/*"
+    }
+
+    composite_index {
+      index {
+        path  = "/userId"
+        order = "ascending"
+      }
+      index {
+        path  = "/isComplete"
+        order = "ascending"
+      }
+      index {
+        path  = "/createdAt"
+        order = "descending"
+      }
+    }
+  }
+}
+
 # ── Logging: Log Analytics Workspace + Application Insights ─────────────────
 # Free tier: 500 MB/day on Log Analytics; first 5 GB/month free on App Insights.
 
@@ -602,23 +751,27 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
   }
 
   app_settings = {
-    "FUNCTIONS_EXTENSION_VERSION"           = "~4"
-    "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.pluckit.connection_string
-    "UPLOADS_CONTAINER_NAME"                = azurerm_storage_container.uploads.name
-    "ARCHIVE_CONTAINER_NAME"                = azurerm_storage_container.archive.name
-    "STORAGE_ACCOUNT_NAME"                  = azurerm_storage_account.sa_pluckit.name
-    "STORAGE_ACCOUNT_KEY"                   = azurerm_storage_account.sa_pluckit.primary_access_key
-    "COSMOS_DB_ENDPOINT"                    = azurerm_cosmosdb_account.pluckit.endpoint
-    "COSMOS_DB_KEY"                         = azurerm_cosmosdb_account.pluckit.primary_key
-    "COSMOS_DB_DATABASE"                    = azurerm_cosmosdb_sql_database.pluckit.name
-    "COSMOS_DB_CONTAINER"                   = azurerm_cosmosdb_sql_container.wardrobe.name
-    "COSMOS_DB_WEAR_EVENTS_CONTAINER"       = azurerm_cosmosdb_sql_container.wear_events.name
-    "COSMOS_DB_STYLING_ACTIVITY_CONTAINER"  = azurerm_cosmosdb_sql_container.styling_activity.name
-    "COSMOS_DB_USER_PROFILES_CONTAINER"     = azurerm_cosmosdb_sql_container.user_profiles.name
-    "COSMOS_DB_CONVERSATIONS_CONTAINER"     = azurerm_cosmosdb_sql_container.conversations.name
-    "COSMOS_DB_DIGESTS_CONTAINER"           = azurerm_cosmosdb_sql_container.digests.name
-    "COSMOS_DB_MOODS_CONTAINER"             = azurerm_cosmosdb_sql_container.moods.name
-    "COSMOS_DB_DIGEST_FEEDBACK_CONTAINER"   = azurerm_cosmosdb_sql_container.digest_feedback.name
+    "FUNCTIONS_EXTENSION_VERSION"                   = "~4"
+    "APPLICATIONINSIGHTS_CONNECTION_STRING"         = azurerm_application_insights.pluckit.connection_string
+    "UPLOADS_CONTAINER_NAME"                        = azurerm_storage_container.uploads.name
+    "ARCHIVE_CONTAINER_NAME"                        = azurerm_storage_container.archive.name
+    "STORAGE_ACCOUNT_NAME"                          = azurerm_storage_account.sa_pluckit.name
+    "STORAGE_ACCOUNT_KEY"                           = azurerm_storage_account.sa_pluckit.primary_access_key
+    "COSMOS_DB_ENDPOINT"                            = azurerm_cosmosdb_account.pluckit.endpoint
+    "COSMOS_DB_KEY"                                 = azurerm_cosmosdb_account.pluckit.primary_key
+    "COSMOS_DB_DATABASE"                            = azurerm_cosmosdb_sql_database.pluckit.name
+    "COSMOS_DB_CONTAINER"                           = azurerm_cosmosdb_sql_container.wardrobe.name
+    "COSMOS_DB_WEAR_EVENTS_CONTAINER"               = azurerm_cosmosdb_sql_container.wear_events.name
+    "COSMOS_DB_STYLING_ACTIVITY_CONTAINER"          = azurerm_cosmosdb_sql_container.styling_activity.name
+    "COSMOS_DB_USER_PROFILES_CONTAINER"             = azurerm_cosmosdb_sql_container.user_profiles.name
+    "COSMOS_DB_CONVERSATIONS_CONTAINER"             = azurerm_cosmosdb_sql_container.conversations.name
+    "COSMOS_DB_DIGESTS_CONTAINER"                   = azurerm_cosmosdb_sql_container.digests.name
+    "COSMOS_DB_MOODS_CONTAINER"                     = azurerm_cosmosdb_sql_container.moods.name
+    "COSMOS_DB_DIGEST_FEEDBACK_CONTAINER"           = azurerm_cosmosdb_sql_container.digest_feedback.name
+    "COSMOS_DB_SCRAPER_SOURCES_CONTAINER"           = azurerm_cosmosdb_sql_container.scraper_sources.name
+    "COSMOS_DB_SCRAPED_ITEMS_CONTAINER"             = azurerm_cosmosdb_sql_container.scraped_items.name
+    "COSMOS_DB_USER_SOURCE_SUBSCRIPTIONS_CONTAINER" = azurerm_cosmosdb_sql_container.user_source_subscriptions.name
+    "COSMOS_DB_TASTE_CALIBRATION_CONTAINER"         = azurerm_cosmosdb_sql_container.taste_calibration.name
     # Azure OpenAI — primary model for chat/agents
     "AZURE_OPENAI_ENDPOINT"   = var.ai_gpt4o_endpoint
     "AZURE_OPENAI_API_KEY"    = var.ai_api_key
