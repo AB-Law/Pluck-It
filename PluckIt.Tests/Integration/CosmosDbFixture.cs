@@ -1,3 +1,5 @@
+using System;
+using System.Net.Http;
 using Microsoft.Azure.Cosmos;
 using Testcontainers.CosmosDb;
 using Xunit;
@@ -25,16 +27,27 @@ public sealed class CosmosDbFixture : IAsyncLifetime
     {
         await _cosmos.StartAsync();
 
+        var allowInsecureTls = string.Equals(
+            Environment.GetEnvironmentVariable("COSMOS_EMULATOR_INSECURE_TLS"),
+            "true",
+            StringComparison.OrdinalIgnoreCase);
+
+        Func<HttpClient>? httpClientFactory = null;
+        if (allowInsecureTls)
+        {
+            httpClientFactory = () => new HttpClient(
+                new HttpClientHandler
+                {
+                    ServerCertificateCustomValidationCallback =
+                        HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+                });
+        }
+
         Client = new CosmosClient(
             _cosmos.GetConnectionString(),
             new CosmosClientOptions
             {
-                HttpClientFactory = () => new HttpClient(
-                    new HttpClientHandler
-                    {
-                        ServerCertificateCustomValidationCallback =
-                            HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-                    }),
+                HttpClientFactory = httpClientFactory,
                 ConnectionMode = ConnectionMode.Gateway,
             });
 

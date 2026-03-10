@@ -31,7 +31,7 @@ os.environ.setdefault("STORAGE_ACCOUNT_KEY",      "dGVzdA==")
 os.environ.setdefault("UPLOADS_CONTAINER_NAME",   "uploads")
 os.environ.setdefault("ARCHIVE_CONTAINER_NAME",   "archive")
 os.environ.setdefault("LOCAL_DEV_USER_ID",        "test-user-001")
-os.environ.setdefault("CORS_ALLOWED_ORIGINS",     "*")
+os.environ.setdefault("CORS_ALLOWED_ORIGINS",     "http://localhost:3000")
 
 # ── Optional azure sdk stubs for local unit runs without azure packages ─────
 try:

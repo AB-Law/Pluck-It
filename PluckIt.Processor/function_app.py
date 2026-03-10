@@ -70,13 +70,16 @@ logger = logging.getLogger(__name__)
 fastapi_app = FastAPI(title="PluckIt Processor", docs_url=None, redoc_url=None)
 
 _ALLOWED_ORIGINS = [o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+if "*" in _ALLOWED_ORIGINS:
+    logger.warning("Ignoring wildcard CORS origin because credentials are enabled.")
+    _ALLOWED_ORIGINS = [o for o in _ALLOWED_ORIGINS if o != "*"]
 if not _ALLOWED_ORIGINS:
-    _ALLOWED_ORIGINS = ["*"]
+    logger.warning("CORS_ALLOWED_ORIGINS is empty; cross-origin browser requests will be blocked.")
 
 fastapi_app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=bool(_ALLOWED_ORIGINS),
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )

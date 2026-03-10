@@ -20,6 +20,8 @@ from typing import Optional
 import httpx
 from PIL import Image
 
+from ..url_security import validate_public_https_url
+
 logger = logging.getLogger(__name__)
 
 _HEADERS = {"User-Agent": "PluckIt/1.0"}
@@ -41,7 +43,8 @@ def compute_phash(url: str) -> Optional[str]:
         return None
 
     try:
-        resp = httpx.get(url, headers=_HEADERS, timeout=_TIMEOUT, follow_redirects=True)
+        safe_url = validate_public_https_url(url)
+        resp = httpx.get(safe_url, headers=_HEADERS, timeout=_TIMEOUT, follow_redirects=True)
         resp.raise_for_status()
 
         img = Image.open(BytesIO(resp.content)).convert("RGB")
