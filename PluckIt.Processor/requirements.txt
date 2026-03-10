@@ -24,3 +24,7 @@ google-auth
 
 # Fashion RSS feed scraping for mood processor
 feedparser
+
+# Fashion content scraper
+imagehash>=4.3.1        # perceptual hashing for image deduplication
+playwright>=1.40.0      # headless browser for JS-heavy brand sites (Phase 3)

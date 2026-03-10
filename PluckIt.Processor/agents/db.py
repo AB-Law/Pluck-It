@@ -122,3 +122,37 @@ def get_digest_feedback_container():
 
 def get_digest_feedback_container_sync():
     return _sync_container("COSMOS_DB_DIGEST_FEEDBACK_CONTAINER", "DigestFeedback")
+
+
+# ── Scraper containers ────────────────────────────────────────────────────────
+
+def get_scraper_sources_container():
+    return _async_container("COSMOS_DB_SCRAPER_SOURCES_CONTAINER", "ScraperSources")
+
+
+def get_scraper_sources_container_sync():
+    return _sync_container("COSMOS_DB_SCRAPER_SOURCES_CONTAINER", "ScraperSources")
+
+
+def get_scraped_items_container():
+    return _async_container("COSMOS_DB_SCRAPED_ITEMS_CONTAINER", "ScrapedItems")
+
+
+def get_scraped_items_container_sync():
+    return _sync_container("COSMOS_DB_SCRAPED_ITEMS_CONTAINER", "ScrapedItems")
+
+
+def get_user_source_subscriptions_container():
+    return _async_container("COSMOS_DB_USER_SOURCE_SUBSCRIPTIONS_CONTAINER", "UserSourceSubscriptions")
+
+
+def get_user_source_subscriptions_container_sync():
+    return _sync_container("COSMOS_DB_USER_SOURCE_SUBSCRIPTIONS_CONTAINER", "UserSourceSubscriptions")
+
+
+def get_taste_calibration_container():
+    return _async_container("COSMOS_DB_TASTE_CALIBRATION_CONTAINER", "TasteCalibration")
+
+
+def get_taste_calibration_container_sync():
+    return _sync_container("COSMOS_DB_TASTE_CALIBRATION_CONTAINER", "TasteCalibration")
