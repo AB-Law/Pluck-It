@@ -1,22 +1,45 @@
-name: Security Review
+name: Code Review (OpenRouter)
 
 permissions:
-  pull-requests: write  # Needed for leaving PR comments
+  pull-requests: write
   contents: read
 
 on:
   pull_request:
 
 jobs:
-  security:
+  review:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 2
-      
-      - uses: anthropics/claude-code-security-review@main
+
+      - uses: actions/setup-python@v5
         with:
-          comment-pr: true
-          claude-api-key: ${{ secrets.CLAUDE_API_KEY }}
+          python-version: '3.11'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install gh CLI
+        run: sudo apt-get update && sudo apt-get install -y gh
+
+      - name: Run OpenRouter analysis
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL: ${{ secrets.OPENROUTER_MODEL }}
+        run: python3 scripts/pr_audit_openrouter.py
+
+      - name: Post PR comments
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: node scripts/comment-pr-findings.js
