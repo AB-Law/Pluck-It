@@ -78,13 +78,13 @@ public class WardrobeRepository : IWardrobeRepository
     if (query.PriceMin.HasValue)
     {
       conditions.Add("c.price.amount >= @priceMin");
-      parameters.Add("@priceMin", (double)query.PriceMin.Value);
+      parameters.Add("@priceMin", query.PriceMin.Value);
     }
 
     if (query.PriceMax.HasValue)
     {
       conditions.Add("c.price.amount <= @priceMax");
-      parameters.Add("@priceMax", (double)query.PriceMax.Value);
+      parameters.Add("@priceMax", query.PriceMax.Value);
     }
 
     if (query.MinWears.HasValue)

@@ -4,6 +4,8 @@ import { FormsModule } from '@angular/forms';
 import { ClothingItem } from '../../core/models/clothing-item.model';
 import { Collection } from '../../core/models/collection.model';
 import { CollectionService } from '../../core/services/collection.service';
+import { forkJoin, of } from 'rxjs';
+import { catchError, map } from 'rxjs/operators';
 
 @Component({
   selector: 'app-add-to-collection-modal',
@@ -67,6 +69,11 @@ import { CollectionService } from '../../core/services/collection.service';
         }
 
         <!-- Actions -->
+        @if (errorMessage()) {
+          <p class="mt-4 rounded-md border border-red-800/60 bg-red-950/30 px-3 py-2 text-xs text-red-300">
+            {{ errorMessage() }}
+          </p>
+        }
         <div class="mt-6 flex gap-3">
           <button
             class="flex-1 rounded-lg border border-border-chrome py-2.5 text-sm font-bold text-slate-300 hover:bg-card-dark transition-colors"
@@ -94,6 +101,7 @@ export class AddToCollectionModalComponent implements OnInit {
   protected loading    = signal(true);
   protected saving     = signal(false);
   protected selectedIds = signal(new Set<string>());
+  protected errorMessage = signal<string | null>(null);
   private collectionService = inject(CollectionService);
 
   readonly collections = computed(() => this.collectionService.collections());
@@ -113,13 +121,30 @@ export class AddToCollectionModalComponent implements OnInit {
   save(): void {
     if (this.saving()) return;
     this.saving.set(true);
+    this.errorMessage.set(null);
     const ids = [...this.selectedIds()];
-    const calls = ids.map(id => this.collectionService.addItem(id, this.item().id));
-    let done = 0;
-    for (const obs of calls) {
-      obs.subscribe({ next: () => { if (++done === calls.length) { this.saving.set(false); this.closed.emit(); } }, error: () => this.saving.set(false) });
+    if (ids.length === 0) {
+      this.saving.set(false);
+      this.closed.emit();
+      return;
     }
-    if (calls.length === 0) { this.saving.set(false); this.closed.emit(); }
+
+    const calls = ids.map(id =>
+      this.collectionService.addItem(id, this.item().id).pipe(
+        map(() => ({ id, ok: true as const })),
+        catchError(() => of({ id, ok: false as const }))
+      )
+    );
+
+    forkJoin(calls).subscribe(results => {
+      this.saving.set(false);
+      const failed = results.filter(r => !r.ok);
+      if (failed.length > 0) {
+        this.errorMessage.set(`Failed to add item to ${failed.length} collection(s). Please retry.`);
+        return;
+      }
+      this.closed.emit();
+    });
   }
 
   onBackdropClick(e: MouseEvent): void {

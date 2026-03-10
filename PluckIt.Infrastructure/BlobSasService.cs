@@ -90,8 +90,12 @@ public class BlobSasService : IBlobSasService
       var segments = uri.AbsolutePath.TrimStart('/').Split('/', 2);
       if (segments.Length < 2) return;
 
+      var containerName = segments[0];
+      if (!_allowedContainers.Contains(containerName))
+        return;
+
       var blobName = segments[1];
-      await ArchiveContainer.GetBlobClient(blobName)
+      await _serviceClient.GetBlobContainerClient(containerName).GetBlobClient(blobName)
         .DeleteIfExistsAsync(cancellationToken: cancellationToken);
     }
     catch

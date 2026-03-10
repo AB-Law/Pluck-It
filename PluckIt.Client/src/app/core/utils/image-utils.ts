@@ -59,6 +59,9 @@ export async function resizeImageFile(
   let blob: Blob;
   if (canvas instanceof OffscreenCanvas) {
     blob = await canvas.convertToBlob({ type: 'image/jpeg', quality });
+    // TS lib definitions may not include OffscreenCanvas.close() in all targets.
+    const closable = canvas as OffscreenCanvas & { close?: () => void };
+    closable.close?.();
   } else {
     blob = await new Promise<Blob>((resolve, reject) => {
       (canvas as HTMLCanvasElement).toBlob(

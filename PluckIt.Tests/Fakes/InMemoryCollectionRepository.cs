@@ -46,7 +46,7 @@ public sealed class InMemoryCollectionRepository : ICollectionRepository
 
     public Task<Collection> UpsertAsync(Collection collection, CancellationToken ct = default)
     {
-        var idx = _store.FindIndex(c => c.Id == collection.Id);
+        var idx = _store.FindIndex(c => c.Id == collection.Id && c.OwnerId == collection.OwnerId);
         if (idx >= 0) _store[idx] = collection;
         else          _store.Add(collection);
         return Task.FromResult(collection);
