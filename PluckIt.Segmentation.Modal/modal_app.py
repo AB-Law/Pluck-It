@@ -125,7 +125,6 @@ async def segment(request: Request) -> Response:
 
     try:
         img = load_rgb_image(image_bytes)
-        img = resize_max_side(img, DEFAULT_MAX_DIM)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

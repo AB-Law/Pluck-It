@@ -36,6 +36,24 @@ SUMMARY_TRIGGER = 12
 _NANO_DEPLOYMENT = os.getenv("AZURE_OPENAI_NANO_DEPLOYMENT",
                               os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini"))
 
+_nano_llm = None
+
+
+def _get_nano_llm():
+    global _nano_llm
+    if _nano_llm is None:
+        from .db import _get_env
+        from langchain_openai import AzureChatOpenAI
+        _nano_llm = AzureChatOpenAI(
+            azure_endpoint=_get_env("AZURE_OPENAI_ENDPOINT"),
+            api_key=_get_env("AZURE_OPENAI_API_KEY"),
+            azure_deployment=_NANO_DEPLOYMENT,
+            api_version="2024-12-01-preview",
+            temperature=0,
+            max_tokens=250,
+        )
+    return _nano_llm
+
 
 @dataclass
 class ConversationMemory:
@@ -86,18 +104,9 @@ async def maybe_summarize(
     if len(messages) < SUMMARY_TRIGGER:
         return None
 
-    from .db import _get_env
-    from langchain_openai import AzureChatOpenAI
     from langchain_core.messages import SystemMessage, HumanMessage as LCHuman
 
-    nano_llm = AzureChatOpenAI(
-        azure_endpoint=_get_env("AZURE_OPENAI_ENDPOINT"),
-        api_key=_get_env("AZURE_OPENAI_API_KEY"),
-        azure_deployment=_NANO_DEPLOYMENT,
-        api_version="2024-12-01-preview",
-        temperature=0,
-        max_tokens=250,
-    )
+    nano_llm = _get_nano_llm()
 
     # Summarise the first half of messages, keep the second half for context
     half = len(messages) // 2

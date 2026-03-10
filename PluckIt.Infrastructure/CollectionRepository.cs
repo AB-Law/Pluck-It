@@ -81,7 +81,7 @@ public class CollectionRepository : ICollectionRepository
     /// <summary>Cross-partition point-query — used when ownerId is unknown (share-link join flow).</summary>
     public async Task<Collection?> FindByIdAsync(string id, CancellationToken ct = default)
     {
-        var query = new QueryDefinition("SELECT * FROM c WHERE c.id = @id")
+        var query = new QueryDefinition("SELECT * FROM c WHERE c.id = @id OFFSET 0 LIMIT 1")
             .WithParameter("@id", id);
 
         var iterator = Container.GetItemQueryIterator<Collection>(query);

@@ -44,15 +44,21 @@ Rules:
 """
 
 
-def _build_llm() -> AzureChatOpenAI:
-    return AzureChatOpenAI(
-        azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
-        api_key=os.environ["AZURE_OPENAI_API_KEY"],
-        azure_deployment=os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini"),
-        api_version="2024-12-01-preview",
-        temperature=0.0,
-        max_tokens=300,
-    )
+_llm: AzureChatOpenAI | None = None
+
+
+def _get_llm() -> AzureChatOpenAI:
+    global _llm
+    if _llm is None:
+        _llm = AzureChatOpenAI(
+            azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+            api_key=os.environ["AZURE_OPENAI_API_KEY"],
+            azure_deployment=os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini"),
+            api_version="2024-12-01-preview",
+            temperature=0.0,
+            max_tokens=300,
+        )
+    return _llm
 
 
 def _parse_json(text: str) -> dict:
@@ -79,7 +85,7 @@ def analyze_image(image_url: str) -> dict:
         return _empty
 
     try:
-        llm = _build_llm()
+        llm = _get_llm()
         message = HumanMessage(
             content=[
                 {
