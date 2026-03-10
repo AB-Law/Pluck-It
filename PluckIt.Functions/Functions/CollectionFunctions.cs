@@ -94,15 +94,15 @@ public class CollectionFunctions(
         var (authed, userId) = await TryGetUserIdAsync(req);
         if (!authed) return req.CreateResponse(HttpStatusCode.Unauthorized);
 
-        // Try owned first; fall back to joined (any ownerId cross-partition)
-        var owned = await repo.GetByOwnerAsync(userId!, ct);
-        var collection = owned.FirstOrDefault(c => c.Id == id);
+        // Try owned first (cheap partition-key point-read); fall back to cross-partition query
+        var collection = await repo.GetByIdAsync(id, userId!, ct);
 
         if (collection is null)
         {
-            // May be another user's public collection
-            var joined = await repo.GetJoinedByUserAsync(userId!, ct);
-            collection = joined.FirstOrDefault(c => c.Id == id);
+            // May be another user's public collection the caller is a member of
+            var found = await repo.FindByIdAsync(id, ct);
+            if (found is not null && found.MemberUserIds.Contains(userId!))
+                collection = found;
         }
 
         if (collection is null) return req.CreateResponse(HttpStatusCode.NotFound);
