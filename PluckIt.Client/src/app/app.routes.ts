@@ -20,5 +20,10 @@ export const routes: Routes = [
     loadComponent: () => import('./features/collections/collections.component').then(m => m.CollectionsComponent),
     canActivate: [authGuard],
   },
+  {
+    path: 'discover',
+    loadComponent: () => import('./features/discover/discover.component').then(m => m.DiscoverComponent),
+    canActivate: [authGuard],
+  },
   { path: '**', redirectTo: '' }
 ];

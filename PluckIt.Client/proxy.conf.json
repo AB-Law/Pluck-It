@@ -6,5 +6,19 @@
     "logLevel": "info",
     "proxyTimeout": 120000,
     "timeout": 120000
+  },
+  "/scraper": {
+    "target": "http://localhost:7071",
+    "secure": false,
+    "changeOrigin": true,
+    "pathRewrite": { "^/scraper": "/api/scraper" },
+    "logLevel": "info"
+  },
+  "/taste": {
+    "target": "http://localhost:7071",
+    "secure": false,
+    "changeOrigin": true,
+    "pathRewrite": { "^/taste": "/api/taste" },
+    "logLevel": "info"
   }
 }

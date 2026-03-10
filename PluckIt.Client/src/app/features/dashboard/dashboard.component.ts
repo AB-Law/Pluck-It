@@ -64,6 +64,13 @@ import { DigestPanelComponent } from '../digest/digest-panel.component';
             <span class="material-symbols-outlined" style="font-size:20px">folder_special</span>
           </a>
 
+          <!-- Discover feed -->
+          <a routerLink="/discover"
+             class="p-2 rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] transition-colors"
+             title="Discover">
+            <span class="material-symbols-outlined" style="font-size:20px">explore</span>
+          </a>
+
           <!-- Weekly Digest -->
           <button class="p-2 rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] transition-colors"
                   (click)="digestOpen.set(true)" title="Weekly Digest">

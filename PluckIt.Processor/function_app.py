@@ -5,28 +5,41 @@ HTTP routes are handled by FastAPI (enabling true SSE streaming).
 Non-HTTP triggers (blob, timer) remain as AsgiFunctionApp decorators.
 
 Endpoints:
-  POST /api/process-image       — background removal (existing, now FastAPI)
-  POST /api/chat                — SSE streaming stylist agent chat
-  GET  /api/chat/memory         — retrieve user's conversation memory summary
-  PUT  /api/chat/memory         — update user's conversation memory summary
-  GET  /api/digest/latest       — most recent wardrobe digest suggestions
-  GET  /api/insights/vault      — deterministic vault insights + CPW intelligence
-  POST /api/digest/run          — manually trigger digest generation (dev/testing)
-  GET  /api/digest/feedback     — fetch feedback already given for a digest
-  POST /api/digest/feedback     — record thumbs-up/down on a digest suggestion
-  GET  /api/moods               — list all fashion trend moods (filter: ?primaryMood=)
-  GET  /api/moods/{mood_id}     — get a single mood by ID
-  POST /api/moods/seed          — one-time sitemap seeder (admin)
-  GET  /api/health              — processor health check
+    POST /api/process-image               — background removal (existing, now FastAPI)
+    POST /api/chat                        — SSE streaming stylist agent chat
+    GET  /api/chat/memory                 — retrieve user's conversation memory summary
+    PUT  /api/chat/memory                 — update user's conversation memory summary
+    GET  /api/digest/latest               — most recent wardrobe digest suggestions
+    GET  /api/insights/vault              — deterministic vault insights + CPW intelligence
+    POST /api/digest/run                  — manually trigger digest generation (dev/testing)
+    GET  /api/digest/feedback             — fetch feedback already given for a digest
+    POST /api/digest/feedback             — record thumbs-up/down on a digest suggestion
+    GET  /api/moods                       — list all fashion trend moods (filter: ?primaryMood=)
+    GET  /api/moods/{mood_id}             — get a single mood by ID
+    POST /api/moods/seed                  — one-time sitemap seeder (admin)
+    GET  /api/health                      — processor health check
+
+  Scraper endpoints:
+  GET  /api/scraper/sources             — list available scraper sources
+  POST /api/scraper/sources             — suggest a new brand site (triggers LLM config gen)
+  POST /api/scraper/subscribe/{source_id}   — subscribe current user to a source
+  DELETE /api/scraper/subscribe/{source_id} — unsubscribe current user from a source
+  POST /api/scraper/run/{source_id}     — on-demand scrape for a single source (dev/admin)
+
+  Taste calibration endpoints:
+  GET  /api/taste/quiz                  — get or create quiz session for current user
+  POST /api/taste/quiz/{session_id}/respond — record a thumbs-up/down response
+  POST /api/taste/quiz/{session_id}/complete — finalise quiz and update style profile
 """
 
 import asyncio
+import base64
 import io
 import json
 import logging
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 # Point rembg at the bundled model directory so it never downloads at runtime.
@@ -211,6 +224,24 @@ def pluck_it_mood_processor(mood_timer: func.TimerRequest) -> None:
         run_mood_processor()
     except Exception as exc:
         logger.exception("Mood processing failed: %s", exc)
+
+
+# ── Timer trigger: daily fashion content scraper ──────────────────────────────
+
+@app.function_name(name="PluckItScraper")
+@app.timer_trigger(
+    arg_name="scraper_timer",
+    schedule="0 0 7 * * *",  # Every day at 07:00 UTC
+    run_on_startup=False,
+    is_carryover=False,
+)
+def pluck_it_scraper(scraper_timer: func.TimerRequest) -> None:
+    logger.info("PluckItScraper: triggered (past_due=%s)", scraper_timer.past_due)
+    try:
+        from agents.scraper_runner import run_global_scrapers
+        run_global_scrapers()
+    except Exception as exc:
+        logger.exception("Scraper run failed: %s", exc)
 
 
 # ── FastAPI routes ────────────────────────────────────────────────────────────
@@ -661,3 +692,541 @@ async def get_mood(mood_id: str):
         logger.exception("Failed to load mood %s: %s", mood_id, exc)
         raise HTTPException(status_code=404, detail="Mood not found.")
 
+
+# ── Scraper security helpers ──────────────────────────────────────────────────
+
+import ipaddress
+import socket
+from urllib.parse import urlparse
+
+# Private / reserved ranges that must never be fetched (SSRF prevention).
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network(r) for r in [
+        "0.0.0.0/8",          # "This" network
+        "10.0.0.0/8",         # Private
+        "100.64.0.0/10",      # Shared address space
+        "127.0.0.0/8",        # Loopback
+        "169.254.0.0/16",     # Link-local / Azure IMDS
+        "172.16.0.0/12",      # Private
+        "192.168.0.0/16",     # Private
+        "198.18.0.0/15",      # Benchmarking
+        "198.51.100.0/24",    # Documentation
+        "203.0.113.0/24",     # Documentation
+        "224.0.0.0/4",        # Multicast
+        "240.0.0.0/4",        # Reserved
+        "::1/128",            # IPv6 loopback
+        "fc00::/7",           # IPv6 unique local
+        "fe80::/10",          # IPv6 link-local
+    ]
+]
+
+
+def _validate_scraper_url(url: str) -> None:
+    """
+    Raise HTTPException(400) if *url* is not a safe public HTTPS URL.
+
+    Checks:
+      1. Must use the https scheme.
+      2. Must have a non-empty public hostname (no bare IPs).
+      3. DNS resolution must not point to any private/reserved IP range.
+         This also defeats DNS-rebinding: we resolve before connecting.
+
+    Raises HTTPException(400) on any violation so the caller never reaches
+    the HTTP fetch stage with an unsafe URL.
+    """
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid URL.")
+
+    if parsed.scheme != "https":
+        raise HTTPException(status_code=400, detail="URL must use HTTPS.")
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise HTTPException(status_code=400, detail="URL must have a hostname.")
+
+    # Reject bare IP literals — hostnames only
+    try:
+        ipaddress.ip_address(hostname)
+        raise HTTPException(status_code=400, detail="IP-literal URLs are not permitted.")
+    except ValueError:
+        pass
+
+    # Resolve DNS and check every returned address against blocked ranges
+    try:
+        resolved = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        raise HTTPException(status_code=400, detail="Could not resolve hostname.")
+
+    for *_, sockaddr in resolved:
+        addr_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(addr_str)
+        except ValueError:
+            continue
+        for net in _BLOCKED_NETWORKS:
+            if ip in net:
+                raise HTTPException(
+                    status_code=400,
+                    detail="URL resolves to a private or reserved address.",
+                )
+
+
+def _require_admin(user_id: str = Depends(get_user_id)) -> str:
+    """
+    FastAPI dependency that restricts an endpoint to admin users only.
+
+    Admin user IDs are configured via the ADMIN_USER_IDS environment variable
+    as a comma-separated list.  Returns the user_id if authorised.
+    """
+    raw = os.getenv("ADMIN_USER_IDS", "")
+    admin_ids = {uid.strip() for uid in raw.split(",") if uid.strip()}
+    if not admin_ids or user_id not in admin_ids:
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return user_id
+
+
+# ── Scraper endpoints ─────────────────────────────────────────────────────────
+
+class SuggestSourceRequest(BaseModel):
+    name: str           # Human-readable name, e.g. "Zara"
+    url: str
+    source_type: str = "brand_site"
+
+
+class SubscribeRequest(BaseModel):
+    pass  # source_id comes from path param
+
+
+@fastapi_app.get("/api/scraper/sources")
+async def list_scraper_sources(user_id: str = Depends(get_user_id)):
+    """List all active scraper sources (global + user-created)."""
+    from agents.db import get_scraper_sources_container, get_user_source_subscriptions_container
+
+    sources_container = get_scraper_sources_container()
+    subs_container = get_user_source_subscriptions_container()
+
+    try:
+        sources = []
+        async for doc in sources_container.query_items(
+            query="SELECT c.id, c.name, c.sourceType, c.isGlobal, c.lastScrapedAt FROM c WHERE c.isActive = true",
+        ):
+            for key in _COSMOS_INTERNAL_KEYS:
+                doc.pop(key, None)
+            sources.append(doc)
+
+        # Load user's subscriptions to annotate each source
+        subscribed_ids: set[str] = set()
+        async for sub in subs_container.query_items(
+            query="SELECT c.sourceId FROM c WHERE c.userId = @uid AND c.isActive = true",
+            parameters=[{"name": "@uid", "value": user_id}],
+        ):
+            subscribed_ids.add(sub["sourceId"])
+
+        for source in sources:
+            source["subscribed"] = source["id"] in subscribed_ids
+
+        return {"sources": sources}
+    except Exception as exc:
+        logger.exception("list_scraper_sources failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Could not load sources.")
+
+
+@fastapi_app.post("/api/scraper/sources", status_code=201)
+async def suggest_scraper_source(
+    body: SuggestSourceRequest,
+    user_id: str = Depends(get_user_id),
+):
+    """
+    Suggest a new brand site as a scraper source.
+    Triggers one-time LLM CSS selector config generation, then stores the source.
+    Only public HTTPS URLs are accepted — private/internal addresses are rejected.
+    """
+    from agents.db import get_scraper_sources_container
+    from agents.scrapers.config_generator import generate_selector_config
+    import re
+
+    _validate_scraper_url(body.url)  # raises 400 for unsafe URLs
+
+    source_id = "brand-" + re.sub(r"[^a-z0-9]+", "-", body.name.lower()).strip("-")
+
+    try:
+        config = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: generate_selector_config(body.url, body.name)
+        )
+    except Exception as exc:
+        logger.exception("Config generation failed for %s: %s", body.url, exc)
+        raise HTTPException(status_code=500, detail="Could not generate scraper config.")
+
+    now = datetime.now(timezone.utc).isoformat()
+    source_doc = {
+        "id": source_id,
+        "sourceType": body.source_type,
+        "name": body.name,
+        "config": config,
+        "isGlobal": False,
+        "isActive": True,
+        "createdAt": now,
+        "lastScrapedAt": None,
+        "createdBy": user_id,
+    }
+
+    container = get_scraper_sources_container()
+    try:
+        await container.upsert_item(source_doc)
+    except Exception as exc:
+        logger.exception("Could not save source %s: %s", source_id, exc)
+        raise HTTPException(status_code=500, detail="Could not save source.")
+
+    return {"sourceId": source_id, "name": body.name, "config": config}
+
+
+@fastapi_app.post("/api/scraper/subscribe/{source_id}", status_code=201)
+async def subscribe_to_source(
+    source_id: str,
+    user_id: str = Depends(get_user_id),
+):
+    """Subscribe the current user to a scraper source."""
+    from agents.db import get_user_source_subscriptions_container
+
+    now = datetime.now(timezone.utc).isoformat()
+    sub_doc = {
+        "id": f"{user_id}-{source_id}",
+        "userId": user_id,
+        "sourceId": source_id,
+        "subscribedAt": now,
+        "isActive": True,
+    }
+
+    container = get_user_source_subscriptions_container()
+    try:
+        await container.upsert_item(sub_doc)
+    except Exception as exc:
+        logger.exception("subscribe_to_source failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Could not subscribe.")
+
+    # Kick off an on-demand scrape in the background
+    async def _bg_scrape():
+        try:
+            await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: __import__(
+                    "agents.scraper_runner", fromlist=["run_for_source"]
+                ).run_for_source(source_id),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Background scrape for %s failed: %s", source_id, exc)
+
+    asyncio.create_task(_bg_scrape())
+
+    return {"sourceId": source_id, "subscribed": True}
+
+
+@fastapi_app.delete("/api/scraper/subscribe/{source_id}")
+async def unsubscribe_from_source(
+    source_id: str,
+    user_id: str = Depends(get_user_id),
+):
+    """Unsubscribe the current user from a scraper source."""
+    from agents.db import get_user_source_subscriptions_container
+
+    container = get_user_source_subscriptions_container()
+    sub_id = f"{user_id}-{source_id}"
+    try:
+        sub = await container.read_item(item=sub_id, partition_key=user_id)
+        sub["isActive"] = False
+        await container.upsert_item(sub)
+    except Exception as exc:
+        logger.exception("unsubscribe_from_source failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Could not unsubscribe.")
+
+    return {"sourceId": source_id, "subscribed": False}
+
+
+@fastapi_app.get("/api/scraper/items")
+async def list_scraped_items(
+    user_id: str = Depends(get_user_id),
+    sortBy: str = "score",
+    pageSize: int = 50,
+    sourceIds: Optional[str] = None,
+    tags: Optional[str] = None,
+    timeRange: str = "all",
+    continuationToken: Optional[str] = None,
+):
+    """List scraped items for the discover feed (global pool)."""
+    from agents.db import get_scraped_items_container
+
+    def _parse_cursor(token: Optional[str]) -> tuple[Optional[Any], Optional[str]]:
+        if not token:
+            return None, None
+        try:
+            raw = base64.urlsafe_b64decode(token.encode()).decode()
+            payload = json.loads(raw)
+            return payload.get("k"), payload.get("id")
+        except Exception:
+            return None, None
+
+    def _encode_cursor(key: Any, doc_id: str) -> Optional[str]:
+        if key is None or not doc_id:
+            return None
+        payload = json.dumps({"k": key, "id": doc_id})
+        return base64.urlsafe_b64encode(payload.encode()).decode()
+
+    def _since_iso(range_key: str) -> Optional[str]:
+        now = datetime.now(timezone.utc)
+        windows = {
+            "1h": timedelta(hours=1),
+            "1d": timedelta(days=1),
+            "7d": timedelta(days=7),
+            "30d": timedelta(days=30),
+        }
+        delta = windows.get(range_key)
+        if delta is None:
+            return None
+        return (now - delta).isoformat()
+
+    container = get_scraped_items_container()
+    try:
+        sortBy = sortBy if sortBy in {"score", "recent"} else "score"
+        order_clause = (
+            "c.userId ASC, c.scoreSignal DESC"
+            if sortBy == "score"
+            else "c.userId ASC, c.scrapedAt DESC"
+        )
+        cursor_key, cursor_id = _parse_cursor(continuationToken)
+        where_clauses = ["c.userId = 'global'"]
+        effective_page_size = max(1, min(pageSize, 100))
+        params: list[dict] = [{"name": "@limit", "value": effective_page_size + 1}]
+
+        source_ids = [s.strip() for s in (sourceIds or "").split(",") if s.strip()]
+        if source_ids:
+            where_clauses.append("ARRAY_CONTAINS(@sourceIds, c.sourceId)")
+            params.append({"name": "@sourceIds", "value": source_ids})
+
+        tag_filters = [t.strip().lower() for t in (tags or "").split(",") if t.strip()]
+        if tag_filters:
+            where_clauses.append(
+                "EXISTS (SELECT VALUE t FROM t IN c.tags WHERE ARRAY_CONTAINS(@tags, LOWER(t)))"
+            )
+            params.append({"name": "@tags", "value": tag_filters})
+
+        since = _since_iso(timeRange)
+        if since:
+            where_clauses.append(
+                "("
+                "(IS_DEFINED(c.sourceCreatedAt) AND c.sourceCreatedAt >= @since)"
+                " OR "
+                "(NOT IS_DEFINED(c.sourceCreatedAt) AND c.scrapedAt >= @since)"
+                ")"
+            )
+            params.append({"name": "@since", "value": since})
+
+        if cursor_key is not None:
+            if sortBy == "score":
+                where_clauses.append("c.scoreSignal < @cursorKey")
+                params.append({"name": "@cursorKey", "value": int(cursor_key)})
+            else:
+                where_clauses.append("c.scrapedAt < @cursorKey")
+                params.append({"name": "@cursorKey", "value": str(cursor_key)})
+
+        query = (
+            f"SELECT * FROM c WHERE {' AND '.join(where_clauses)} "
+            f"ORDER BY {order_clause} OFFSET 0 LIMIT @limit"
+        )
+
+        items = []
+        try:
+            # Fast path for containers partitioned by /userId.
+            iterator = container.query_items(
+                query=query,
+                parameters=params,
+                partition_key="global",
+            )
+            async for doc in iterator:
+                for key in _COSMOS_INTERNAL_KEYS:
+                    doc.pop(key, None)
+                items.append(doc)
+        except Exception:
+            # Fallback for containers partitioned by a different key.
+            iterator = container.query_items(
+                query=query,
+                parameters=params,
+            )
+            async for doc in iterator:
+                for key in _COSMOS_INTERNAL_KEYS:
+                    doc.pop(key, None)
+                items.append(doc)
+
+        has_more = len(items) > effective_page_size
+        page_items = items[:effective_page_size]
+        next_token = None
+        if has_more and page_items:
+            last = page_items[-1]
+            cursor_value = last.get("scoreSignal") if sortBy == "score" else last.get("scrapedAt")
+            next_token = _encode_cursor(cursor_value, last.get("id", ""))
+
+        return {"items": page_items, "nextContinuationToken": next_token}
+    except Exception as exc:
+        logger.exception("list_scraped_items failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Could not load items.")
+
+
+
+
+@fastapi_app.post("/api/scraper/items/{item_id}/feedback")
+async def feedback_scraped_item(
+    item_id: str,
+    body: dict,
+    user_id: str = Depends(get_user_id),
+):
+    """Record like/dislike on a scraped item. signal: 'up' or 'down'."""
+    from agents.db import get_scraped_items_container
+
+    signal = body.get("signal")
+    if signal not in ("up", "down"):
+        raise HTTPException(status_code=400, detail="signal must be 'up' or 'down'")
+
+    # Optional: index into galleryImages for per-image liking in slideshow
+    gallery_image_index: int | None = body.get("galleryImageIndex")
+
+    container = get_scraped_items_container()
+    try:
+        item = await container.read_item(item=item_id, partition_key="global")
+        delta = 1 if signal == "up" else -1
+        item["scoreSignal"] = item.get("scoreSignal", 0) + delta
+        await container.upsert_item(item)
+
+        # On like/dislike: run vision analysis on the image to extract real visual
+        # style descriptors (colors, silhouette, garments) — not just post-text tags.
+        # When a gallery index is provided, analyse that specific image.
+        gallery_images = item.get("galleryImages", [])
+        if (
+            gallery_image_index is not None
+            and isinstance(gallery_image_index, int)
+            and 0 <= gallery_image_index < len(gallery_images)
+        ):
+            image_url: str = gallery_images[gallery_image_index]
+        else:
+            image_url = item.get("imageUrl", "")
+        if image_url and signal == "up":
+            # Run vision analysis synchronously in a thread pool so we can await it
+            # and guarantee it completes before the connection closes.
+            # (asyncio.create_task fire-and-forget is unreliable in ASGI on Functions.)
+            try:
+                from agents.image_taste_analyzer import analyze_image, build_taste_inferred
+                from agents.taste_calibration import _update_user_profile
+                logger.info("Starting vision taste analysis for item %s (url: %s)", item_id, image_url[:60])
+                analysis = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: analyze_image(image_url)
+                )
+                logger.info("Vision analysis result for %s: %s", item_id, analysis)
+                inferred = build_taste_inferred(analysis)
+                if inferred["styleKeywords"] or inferred["brands"]:
+                    await asyncio.get_event_loop().run_in_executor(
+                        None, lambda: _update_user_profile(user_id, inferred)
+                    )
+                    logger.info(
+                        "Taste updated for %s via vision: %s",
+                        user_id, inferred["styleKeywords"][:4],
+                    )
+            except Exception as _vision_exc:  # noqa: BLE001
+                logger.warning("Vision taste update failed for %s: %s", item_id, _vision_exc)
+
+        return {"itemId": item_id, "signal": signal, "scoreSignal": item["scoreSignal"]}
+    except Exception as exc:
+        logger.exception("feedback_scraped_item failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Could not record feedback.")
+
+
+
+@fastapi_app.post("/api/scraper/run/{source_id}")
+async def run_scraper_source(
+    source_id: str,
+    _: str = Depends(_require_admin),
+):
+    """Manually trigger a scrape for a single source. Requires admin access."""
+    try:
+        count = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: __import__(
+                "agents.scraper_runner", fromlist=["run_for_source"]
+            ).run_for_source(source_id),
+        )
+        return {"sourceId": source_id, "newItems": count}
+    except Exception as exc:
+        logger.exception("Manual scrape for %s failed: %s", source_id, exc)
+        raise HTTPException(status_code=500, detail="Scrape failed.")
+
+
+# ── Taste calibration endpoints ───────────────────────────────────────────────
+
+class QuizResponse(BaseModel):
+    signal: str                         # "up" | "down"
+    cardPrimaryMood: Optional[str] = None   # Phase 1
+    scrapedItemId: Optional[str] = None     # Phase 2
+
+
+@fastapi_app.get("/api/taste/quiz")
+async def get_taste_quiz(user_id: str = Depends(get_user_id)):
+    """Get (or create) the active taste quiz session for the current user."""
+    try:
+        session = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: __import__(
+                "agents.taste_calibration", fromlist=["get_or_create_quiz_session"]
+            ).get_or_create_quiz_session(user_id),
+        )
+        for key in _COSMOS_INTERNAL_KEYS:
+            session.pop(key, None)
+        return session
+    except Exception as exc:
+        logger.exception("get_taste_quiz failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Could not load quiz.")
+
+
+@fastapi_app.post("/api/taste/quiz/{session_id}/respond")
+async def record_quiz_response(
+    session_id: str,
+    body: QuizResponse,
+    user_id: str = Depends(get_user_id),
+):
+    """Record a thumbs-up or thumbs-down response in the quiz session."""
+    if body.signal not in ("up", "down"):
+        raise HTTPException(status_code=400, detail="signal must be 'up' or 'down'")
+
+    response_dict = body.model_dump(exclude_none=True)
+    try:
+        session = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: __import__(
+                "agents.taste_calibration", fromlist=["record_response"]
+            ).record_response(user_id, session_id, response_dict),
+        )
+        return {
+            "sessionId": session_id,
+            "responsesRecorded": len(session.get("responses", [])),
+            "targetResponses": session.get("targetResponses", 0),
+        }
+    except Exception as exc:
+        logger.exception("record_quiz_response failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Could not record response.")
+
+
+@fastapi_app.post("/api/taste/quiz/{session_id}/complete")
+async def complete_taste_quiz(
+    session_id: str,
+    user_id: str = Depends(get_user_id),
+):
+    """Finalise the quiz session and update the user's style profile."""
+    try:
+        inferred = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: __import__(
+                "agents.taste_calibration", fromlist=["complete_quiz"]
+            ).complete_quiz(user_id, session_id),
+        )
+        return {"sessionId": session_id, "inferredTastes": inferred}
+    except Exception as exc:
+        logger.exception("complete_taste_quiz failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Could not complete quiz.")
