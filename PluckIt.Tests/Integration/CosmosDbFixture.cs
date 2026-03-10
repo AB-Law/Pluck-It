@@ -32,7 +32,7 @@ public sealed class CosmosDbFixture : IAsyncLifetime
             "true",
             StringComparison.OrdinalIgnoreCase);
 
-        HttpClientFactory? httpClientFactory = null;
+        Func<HttpClient>? httpClientFactory = null;
         if (allowInsecureTls)
         {
             httpClientFactory = () => new HttpClient(
