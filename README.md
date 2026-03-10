@@ -1,17 +1,6 @@
 # PluckIt — AI-Powered Digital Wardrobe
 
-**PluckIt** is a digital wardrobe application that lets you catalogue your clothing, track wear history, and receive AI-driven outfit suggestions from a personal stylist agent. It is fully deployed to Azure and live at **[pluckit.omakashay.com](https://pluckit.omakashay.com)**.
-
----
-
-## Live Deployment
-
-| Service | URL |
-|---|---|
-| Frontend (SWA) | https://pluckit.omakashay.com |
-| .NET API (Functions) | https://pluckit-prod-api-func.azurewebsites.net |
-| Python Processor (Functions) | https://pluckit-prod-processor-func.azurewebsites.net |
-| BiRefNet Segmentation (Modal) | `https://ab-law--pluckit-birefnet-segmentation-segment.modal.run` |
+**PluckIt** is a digital wardrobe application that lets you catalogue your clothing, track wear history, and receive AI-driven outfit suggestions from a personal stylist agent. It is fully deployed to Azure.
 
 ---
 
@@ -172,8 +161,8 @@ All resources are in resource group **PluckIt-RG** (West Europe).
 | Resource | Name | Notes |
 |---|---|---|
 | Resource Group | `PluckIt-RG` | All resources co-located |
-| Storage Account (app data) | `pluckitprodsa8dedj4` | Blobs, queues, tfstate |
-| Storage Account (Functions) | `pluckitprodfunc…` | Deployment package blobs only |
+| Storage Account (app data) | *(see infra/backend.tf)* | Blobs, queues, tfstate |
+| Storage Account (Functions) | *(see infra/main.tf)* | Deployment package blobs only |
 | Cosmos DB Account | `pluckit-prod-cosmos` | Free tier, Session consistency |
 | Cosmos DB Database | `PluckIt` | Shared 1,000 RU/s throughput |
 | Cosmos Containers | Wardrobe, WearEvents, StylingActivity, UserProfiles, Conversations, Digests, Moods, DigestFeedback, Collections | See `infra/main.tf` for partition keys and index policies |
