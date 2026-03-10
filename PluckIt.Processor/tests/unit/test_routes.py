@@ -67,8 +67,7 @@ async def test_get_latest_digest_returns_suggestions(async_client, mock_digests_
     with patch("agents.db.get_digests_container", return_value=mock_digests_container):
         response = await async_client.get("/api/digest/latest")
 
-    # 200 with a digest document, or 200 with {"digest": null} if container is empty
-    assert response.status_code in (200, 404, 500)
+    assert response.status_code == 200
 
 
 @pytest.mark.unit

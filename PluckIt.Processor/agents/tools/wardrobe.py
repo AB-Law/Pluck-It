@@ -27,12 +27,19 @@ logger = logging.getLogger(__name__)
 _SEARCH_LIMIT = 30
 
 
+def _get_env(name: str, default: str | None = None) -> str:
+    value = os.getenv(name, default)
+    if value is None:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
+
+
 @lru_cache(maxsize=1)
 def _get_llm() -> AzureChatOpenAI:
     return AzureChatOpenAI(
-        azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
-        api_key=os.environ["AZURE_OPENAI_API_KEY"],
-        azure_deployment=os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini"),
+        azure_endpoint=_get_env("AZURE_OPENAI_ENDPOINT"),
+        api_key=_get_env("AZURE_OPENAI_API_KEY"),
+        azure_deployment=_get_env("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini"),
         api_version="2024-12-01-preview",
         temperature=0,
     )

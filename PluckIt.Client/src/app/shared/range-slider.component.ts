@@ -63,8 +63,16 @@ export class RangeSliderComponent implements OnInit {
 
   private dragging: 'low' | 'high' | null = null;
 
-  get lowPct(): number  { return ((this.value()[0] - this.min()) / (this.max() - this.min())) * 100; }
-  get highPct(): number { return ((this.value()[1] - this.min()) / (this.max() - this.min())) * 100; }
+  get lowPct(): number  {
+    const range = this.max() - this.min();
+    if (range <= 0) return 0;
+    return ((this.value()[0] - this.min()) / range) * 100;
+  }
+  get highPct(): number {
+    const range = this.max() - this.min();
+    if (range <= 0) return 0;
+    return ((this.value()[1] - this.min()) / range) * 100;
+  }
 
   ngOnInit(): void {}
 
@@ -84,11 +92,11 @@ export class RangeSliderComponent implements OnInit {
     const [low, high] = this.value();
 
     if (this.dragging === 'low') {
-      const newLow = Math.min(stepped, high - this.step());
+      const newLow = Math.max(this.min(), Math.min(stepped, high - this.step()));
       this.value.set([newLow, high]);
       this.valueChange.emit([newLow, high]);
     } else {
-      const newHigh = Math.max(stepped, low + this.step());
+      const newHigh = Math.min(this.max(), Math.max(stepped, low + this.step()));
       this.value.set([low, newHigh]);
       this.valueChange.emit([low, newHigh]);
     }
@@ -106,12 +114,14 @@ export class RangeSliderComponent implements OnInit {
       const [low, high] = this.value();
       const midpoint = (low + high) / 2;
       if (stepped < midpoint) {
-        this.value.set([stepped, high]);
-        this.valueChange.emit([stepped, high]);
+        const newLow = Math.max(this.min(), Math.min(stepped, high - this.step()));
+        this.value.set([newLow, high]);
+        this.valueChange.emit([newLow, high]);
         this.dragging = 'low';
       } else {
-        this.value.set([low, stepped]);
-        this.valueChange.emit([low, stepped]);
+        const newHigh = Math.min(this.max(), Math.max(stepped, low + this.step()));
+        this.value.set([low, newHigh]);
+        this.valueChange.emit([low, newHigh]);
         this.dragging = 'high';
       }
     }

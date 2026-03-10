@@ -16,7 +16,7 @@ def cutout_png_bytes(
     if mask.shape != (h, w):
         raise ValueError(f"Mask shape {mask.shape} does not match image {(h, w)}")
 
-    threshold = float(max(0.0, min(0.99, threshold)))
+    threshold = float(max(0.0, min(1.0, threshold)))
     scaled = (mask.astype(np.float32) - threshold) / max(1e-6, 1.0 - threshold)
     alpha = np.clip(scaled, 0.0, 1.0)
     alpha_u8 = (alpha * 255.0).astype(np.uint8)

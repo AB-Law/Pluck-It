@@ -59,6 +59,7 @@ export async function resizeImageFile(
   let blob: Blob;
   if (canvas instanceof OffscreenCanvas) {
     blob = await canvas.convertToBlob({ type: 'image/jpeg', quality });
+    canvas.close();
   } else {
     blob = await new Promise<Blob>((resolve, reject) => {
       (canvas as HTMLCanvasElement).toBlob(

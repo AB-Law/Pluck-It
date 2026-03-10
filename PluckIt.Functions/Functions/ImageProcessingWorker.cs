@@ -140,9 +140,18 @@ public class ImageProcessingWorker(
             logger.LogError(ex,
                 "ProcessImageJob: unhandled exception in pipeline for item {ItemId}; marking Failed.",
                 message.ItemId);
-            await repo.SetDraftTerminalAsync(
-                message.ItemId, message.UserId, DraftStatus.Failed, null, null,
-                "Internal pipeline error.", DateTimeOffset.UtcNow, CancellationToken.None);
+            try
+            {
+                await repo.SetDraftTerminalAsync(
+                    message.ItemId, message.UserId, DraftStatus.Failed, null, null,
+                    "Internal pipeline error.", DateTimeOffset.UtcNow, CancellationToken.None);
+            }
+            catch (Exception writeEx)
+            {
+                logger.LogError(writeEx,
+                    "ProcessImageJob: also failed to mark item {ItemId} as Failed after pipeline error.",
+                    message.ItemId);
+            }
         }
     }
 

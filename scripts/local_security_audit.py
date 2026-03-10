@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a local security-focused repo audit against an OpenAI-compatible endpoint (e.g., LM Studio)."""
+"""Run a local repo audit (security, bugs, or performance) against an OpenAI-compatible endpoint."""
 
 from __future__ import annotations
 
@@ -54,12 +54,27 @@ DEFAULT_EXTENSIONS = {
     ".md",
 }
 
-SYSTEM_PROMPT = (
-    "You are a senior application security engineer. "
-    "Review only the provided repository snippets for concrete vulnerabilities. "
-    "Prefer precision over recall. Avoid speculative findings. "
-    "Return JSON only."
-)
+SYSTEM_PROMPTS = {
+    "security": (
+        "You are a senior application security engineer. "
+        "Review only the provided repository snippets for concrete vulnerabilities. "
+        "Prefer precision over recall. Avoid speculative findings. "
+        "Return JSON only."
+    ),
+    "bugs": (
+        "You are a senior software engineer performing a bug hunt. "
+        "Review only the provided repository snippets for concrete implementation bugs and regressions. "
+        "Prefer precision over recall. Avoid speculative findings. "
+        "Return JSON only."
+    ),
+    "performance": (
+        "You are a senior performance engineer. "
+        "Review only the provided repository snippets for concrete performance issues and optimization opportunities. "
+        "Focus on high-impact, realistic improvements (e.g., caching, pagination, batching, query/index usage, reducing N+1 patterns). "
+        "Prefer precision over recall. Avoid speculative findings. "
+        "Return JSON only."
+    ),
+}
 
 
 @dataclass
@@ -87,12 +102,13 @@ class Finding:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Local full-repo security audit via LM Studio/OpenAI-compatible API")
+    parser = argparse.ArgumentParser(description="Local full-repo audit (security, bugs, or performance) via OpenAI-compatible API")
     parser.add_argument("--repo-path", default=".", help="Path to repository to scan")
     parser.add_argument("--endpoint", default="http://127.0.0.1:1234/v1/chat/completions", help="OpenAI-compatible chat completions endpoint")
     parser.add_argument("--endpoints", default="", help="Comma-separated OpenAI-compatible endpoints for parallel processing")
     parser.add_argument("--model", required=True, help="Model id loaded in LM Studio")
     parser.add_argument("--models", default="", help="Comma-separated model ids to round-robin across endpoints/chunks")
+    parser.add_argument("--mode", choices=["security", "bugs", "performance"], default="security", help="Analysis mode")
     parser.add_argument("--api-key", default=os.environ.get("OPENAI_API_KEY", "lm-studio"), help="Bearer token for endpoint")
     parser.add_argument("--workers", type=int, default=1, help="Number of concurrent chunk workers")
     parser.add_argument("--max-file-chars", type=int, default=6000, help="Max chars per file included in prompt")
@@ -188,12 +204,29 @@ def chunk_snippets(snippets: Sequence[Tuple[str, str]], max_chunk_chars: int) ->
     return chunks
 
 
-def build_user_prompt(repo_name: str, chunk_index: int, total_chunks: int, chunk_payload: str) -> str:
+def build_user_prompt(repo_name: str, chunk_index: int, total_chunks: int, chunk_payload: str, mode: str) -> str:
+    if mode == "bugs":
+        focus = "Identify concrete implementation bugs and regressions (HIGH and MEDIUM preferred)."
+        category_example = "logic_error"
+        empty_guidance = 'If no bugs are found, return {{"findings": [], "analysis_summary": ...}}.'
+    elif mode == "performance":
+        focus = (
+            "Identify concrete performance issues and optimization opportunities "
+            "(HIGH and MEDIUM preferred): caching opportunities, missing pagination, N+1 patterns, "
+            "over-fetching, inefficient loops/queries, repeated expensive computation."
+        )
+        category_example = "missing_pagination"
+        empty_guidance = 'If no performance findings are found, return {{"findings": [], "analysis_summary": ...}}.'
+    else:
+        focus = "Identify concrete security vulnerabilities (HIGH and MEDIUM preferred)."
+        category_example = "command_injection"
+        empty_guidance = 'If no vulnerabilities are found, return {{"findings": [], "analysis_summary": ...}}.'
+
     return f"""
 You are reviewing repository "{repo_name}".
 Chunk {chunk_index} of {total_chunks}.
 
-Identify concrete security vulnerabilities (HIGH and MEDIUM preferred).
+{focus}
 Do not report style issues, theoretical concerns, or generic best practices.
 
 Return exactly this JSON schema:
@@ -203,7 +236,7 @@ Return exactly this JSON schema:
       "file": "path/to/file.py",
       "line": 42,
       "severity": "HIGH",
-      "category": "command_injection",
+      "category": "{category_example}",
       "description": "short description",
       "exploit_scenario": "realistic exploit path",
       "recommendation": "specific fix",
@@ -219,7 +252,7 @@ Return exactly this JSON schema:
   }}
 }}
 
-If no vulnerabilities are found, return {{"findings": [], "analysis_summary": ...}}.
+{empty_guidance}
 
 Repository snippets for this chunk:
 {chunk_payload}
@@ -433,12 +466,12 @@ def process_chunk(
     model: str,
     args: argparse.Namespace,
 ) -> Tuple[int, List[Finding]]:
-    prompt = build_user_prompt(repo_name, idx, total_chunks, chunk)
+    prompt = build_user_prompt(repo_name, idx, total_chunks, chunk, args.mode)
     result = call_chat_completion(
         endpoint=endpoint,
         api_key=args.api_key,
         model=model,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=SYSTEM_PROMPTS[args.mode],
         user_prompt=prompt,
         temperature=args.temperature,
         top_p=args.top_p,
@@ -455,13 +488,24 @@ def process_chunk(
 
 def main() -> int:
     args = parse_args()
+    args.api_key = args.api_key.strip()
+    if not args.api_key:
+        print("[error] API key is empty after trimming whitespace.", file=sys.stderr)
+        return 2
+
     repo = Path(args.repo_path).resolve()
 
     if not repo.exists() or not repo.is_dir():
         print(f"[error] Repo path is invalid: {repo}", file=sys.stderr)
         return 2
 
-    output_path = resolve_output_path(repo, args.output)
+    output_arg = args.output
+    if output_arg == "security-findings.local.json":
+        if args.mode == "bugs":
+            output_arg = "bug-findings.local.json"
+        elif args.mode == "performance":
+            output_arg = "performance-findings.local.json"
+    output_path = resolve_output_path(repo, output_arg)
     checkpoint_path = resolve_checkpoint_path(repo, output_path, args.checkpoint)
 
     snippets = build_file_snippets(repo, args)
@@ -581,6 +625,7 @@ def main() -> int:
 
     output = {
         "repo_path": repo.as_posix(),
+        "mode": args.mode,
         "model": args.model,
         "models": models,
         "endpoint": args.endpoint,

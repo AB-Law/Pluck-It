@@ -23,8 +23,7 @@ internal sealed class AotCosmosSerializer : CosmosSerializer
     [UnconditionalSuppressMessage("AOT", "IL3050")]
     public override T FromStream<T>(Stream stream)
     {
-        using (stream)
-            return JsonSerializer.Deserialize<T>(stream, _options)!;
+        return JsonSerializer.Deserialize<T>(stream, _options)!;
     }
 
     [UnconditionalSuppressMessage("Trimming", "IL2026")]

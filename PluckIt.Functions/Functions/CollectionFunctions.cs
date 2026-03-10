@@ -123,15 +123,33 @@ public class CollectionFunctions(
         var existing = await repo.GetByIdAsync(id, userId!, ct);
         if (existing is null) return req.CreateResponse(HttpStatusCode.NotFound);
 
-        Collection? body;
-        try { body = await JsonSerializer.DeserializeAsync(req.Body, PluckItJsonContext.Default.Collection, ct); }
+        try
+        {
+            using var doc = await JsonDocument.ParseAsync(req.Body, cancellationToken: ct);
+            var root = doc.RootElement;
+
+            if (TryGetProperty(root, "name", out var nameEl) &&
+                nameEl.ValueKind != JsonValueKind.Null)
+            {
+                var name = nameEl.GetString();
+                if (!string.IsNullOrWhiteSpace(name))
+                    existing.Name = name;
+            }
+
+            if (TryGetProperty(root, "description", out var descEl))
+            {
+                existing.Description = descEl.ValueKind == JsonValueKind.Null
+                    ? existing.Description
+                    : descEl.GetString() ?? existing.Description;
+            }
+
+            if (TryGetProperty(root, "isPublic", out var publicEl) &&
+                (publicEl.ValueKind == JsonValueKind.True || publicEl.ValueKind == JsonValueKind.False))
+            {
+                existing.IsPublic = publicEl.GetBoolean();
+            }
+        }
         catch { return await JsonError(req, HttpStatusCode.BadRequest, "Invalid request body."); }
-
-        if (body is null) return await JsonError(req, HttpStatusCode.BadRequest, "Invalid request body.");
-
-        existing.Name        = body.Name ?? existing.Name;
-        existing.Description = body.Description;
-        existing.IsPublic    = body.IsPublic;
 
         await repo.UpsertAsync(existing, ct);
         return req.CreateResponse(HttpStatusCode.NoContent);
@@ -276,5 +294,22 @@ public class CollectionFunctions(
         await response.WriteStringAsync(
             JsonSerializer.Serialize(new ErrorResponse(message), PluckItJsonContext.Default.ErrorResponse));
         return response;
+    }
+
+    private static bool TryGetProperty(JsonElement root, string propertyName, out JsonElement value)
+    {
+        if (root.TryGetProperty(propertyName, out value))
+            return true;
+
+        // Support PascalCase payloads from non-web clients.
+        if (propertyName.Length > 0)
+        {
+            var pascal = char.ToUpperInvariant(propertyName[0]) + propertyName[1..];
+            if (root.TryGetProperty(pascal, out value))
+                return true;
+        }
+
+        value = default;
+        return false;
     }
 }
