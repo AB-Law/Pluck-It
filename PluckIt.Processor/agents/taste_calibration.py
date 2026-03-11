@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import logging
 import random
-import secrets
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
@@ -200,7 +199,7 @@ def _diverse_sample(docs: list[dict], n: int) -> list[dict]:
 
     result: list[dict] = []
     sources = list(by_source.keys())
-    secrets.SystemRandom().shuffle(sources)
+    random.shuffle(sources)
 
     # Round-robin across sources
     while len(result) < n and any(by_source.values()):

@@ -1048,7 +1048,7 @@ async def ingest_reddit_data(body: RedditIngestBatch, user_id: Annotated[str, De
     """
     from agents.scrapers.reddit_scraper import RedditScraper
     from agents.scraper_runner import ingest_items
-    import secrets
+    import random
 
     await _check_user_ban(user_id)
     source = await _get_source_and_verify_sub(body.source_id)
@@ -1063,7 +1063,7 @@ async def ingest_reddit_data(body: RedditIngestBatch, user_id: Annotated[str, De
 
     # Spot-check logic: 10% chance
     verified = True
-    do_audit = secrets.SystemRandom().random() < 0.1
+    do_audit = random.random() < 0.1
     # In production, we'd trigger a background audit here if do_audit is True
 
     loop = asyncio.get_event_loop()
