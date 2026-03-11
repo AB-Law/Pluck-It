@@ -490,3 +490,6 @@ Thumbs.db
 /.angular
 PluckIt.Api/appsettings.Development.json
 cosmos-backup/
+
+#SonarQube
+.sonarqube/
