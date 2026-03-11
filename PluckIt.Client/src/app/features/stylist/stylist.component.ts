@@ -23,6 +23,7 @@ interface DisplayMessage {
 
 const TOOL_LABELS: Record<string, string> = {
   search_wardrobe:      'Searching wardrobe…',
+  search_scraped_items:  'Discovering items…',
   get_wardrobe_summary: 'Reading wardrobe…',
   get_weather:          'Checking weather…',
   get_user_profile:     'Loading your profile…',
