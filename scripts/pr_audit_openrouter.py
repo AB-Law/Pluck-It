@@ -185,7 +185,7 @@ def extract_json(text: str) -> Dict[str, Any]:
     except json.JSONDecodeError:
         pass
 
-    for candidate in re.findall(r"```(?:json)?\s*([\s\S]*?)\s*```", text, re.IGNORECASE):
+    for candidate in re.findall(r"```(?:json)?\s*((?:(?!```)[\s\S])*?)\s*```", text, re.IGNORECASE):
         try:
             obj = json.loads(candidate.strip())
             if isinstance(obj, dict) and "findings" in obj:

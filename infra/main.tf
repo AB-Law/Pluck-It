@@ -30,6 +30,10 @@ resource "azurerm_storage_account" "sa_pluckit" {
   blob_properties {
     versioning_enabled = true
   }
+
+  identity {
+    type = "SystemAssigned"
+  }
 }
 
 resource "azurerm_storage_container" "uploads" {
@@ -64,6 +68,10 @@ resource "azurerm_cosmosdb_account" "pluckit" {
   resource_group_name = azurerm_resource_group.rg_pluckit_archive.name
   offer_type          = "Standard"
   kind                = "GlobalDocumentDB"
+
+  identity {
+    type = "SystemAssigned"
+  }
 
   # Free tier - only one per subscription
   free_tier_enabled = true
@@ -605,6 +613,10 @@ resource "azurerm_storage_account" "sa_functions" {
   account_tier             = "Standard"
   account_replication_type = "LRS"
   account_kind             = "StorageV2"
+
+  identity {
+    type = "SystemAssigned"
+  }
 }
 
 # Deployment package containers — Flex Consumption requires a dedicated blob container per app

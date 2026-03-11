@@ -74,102 +74,102 @@ const COMMENT_MARKER = '🤖 **Code Review Issue:';
 
 async function run() {
   try {
-    let newFindings = [];
-    try {
-      const findingsData = fs.readFileSync('findings.json', 'utf8');
-      newFindings = JSON.parse(findingsData);
-    } catch (e) {
-      console.log('Could not read findings.json — nothing to comment');
-      return;
-    }
+    const findings = loadFindings();
+    if (findings.length === 0) return;
 
-    if (newFindings.length === 0) {
-      console.log('No findings to comment on');
-      return;
-    }
-
-    // Get PR files to verify which files are in the diff
     const prFiles = ghApi(`/repos/${context.repo.owner}/${context.repo.repo}/pulls/${context.issue.number}/files?per_page=100`);
-    const fileMap = {};
-    prFiles.forEach(file => { fileMap[file.filename] = file; });
-
-    // Build review comments
-    const reviewComments = [];
-    for (const finding of newFindings) {
-      const file = finding.file || finding.path;
-      const line = finding.line || (finding.start && finding.start.line) || 1;
-      const message = finding.description || 'Issue detected';
-      const severity = finding.severity || 'MEDIUM';
-      const category = finding.category || 'unknown';
-      const mode = finding.mode || 'security';
-      const icon = MODE_ICONS[mode] || '🔍';
-
-      if (!fileMap[file]) {
-        console.log(`File ${file} not in PR diff, skipping`);
-        continue;
-      }
-
-      let body = `${icon} ${COMMENT_MARKER} ${message}**\n\n`;
-      body += `**Severity:** ${severity}\n`;
-      body += `**Category:** ${category}\n`;
-      body += `**Mode:** ${mode}\n`;
-      body += `**Tool:** OpenRouter AI Analysis\n`;
-      if (finding.exploit_scenario && finding.exploit_scenario !== 'Not provided') {
-        body += `\n**Exploit Scenario:** ${finding.exploit_scenario}\n`;
-      }
-      if (finding.recommendation && finding.recommendation !== 'Not provided') {
-        body += `\n**Recommendation:** ${finding.recommendation}\n`;
-      }
-
-      reviewComments.push({ path: file, line, side: 'RIGHT', body });
-    }
+    const reviewComments = mapFindingsToComments(findings, prFiles);
 
     if (reviewComments.length === 0) {
       console.log('No findings map to PR diff lines');
       return;
     }
 
-    // Dedup: skip if bot already commented
-    const existingComments = ghApi(`/repos/${context.repo.owner}/${context.repo.repo}/pulls/${context.issue.number}/comments`);
-    const hasExisting = existingComments.some(c =>
-      c.user.type === 'Bot' && c.body && c.body.includes(COMMENT_MARKER)
-    );
-    if (hasExisting) {
+    if (hasExistingBotComments()) {
       console.log('Existing review comments found — skipping to avoid duplicates');
       return;
     }
 
-    try {
-      const reviewData = {
-        commit_id: context.payload.pull_request.head.sha,
-        event: 'COMMENT',
-        comments: reviewComments
-      };
-      const reviewResponse = ghApi(`/repos/${context.repo.owner}/${context.repo.repo}/pulls/${context.issue.number}/reviews`, 'POST', reviewData);
-      console.log(`Created review with ${reviewComments.length} inline comments`);
-      if (reviewResponse && reviewResponse.id) {
-        addReactionsToReview(reviewResponse.id);
-      }
-    } catch (error) {
-      console.error('Error creating review, falling back to individual comments:', error.message);
-      for (const comment of reviewComments) {
-        try {
-          const commentData = {
-            path: comment.path,
-            line: comment.line,
-            side: comment.side,
-            body: comment.body,
-            commit_id: context.payload.pull_request.head.sha
-          };
-          ghApi(`/repos/${context.repo.owner}/${context.repo.repo}/pulls/${context.issue.number}/comments`, 'POST', commentData);
-        } catch (e) {
-          console.log(`Could not comment on ${comment.path}:${comment.line} — line may not be in diff context`);
-        }
-      }
-    }
+    postReviewWithFallback(reviewComments);
   } catch (error) {
     console.error('Failed to comment on PR:', error);
     process.exit(1);
+  }
+}
+
+function loadFindings() {
+  try {
+    const findingsData = fs.readFileSync('findings.json', 'utf8');
+    const findings = JSON.parse(findingsData);
+    if (findings.length === 0) console.log('No findings to comment on');
+    return findings;
+  } catch (e) {
+    console.log('Could not read findings.json — nothing to comment');
+    return [];
+  }
+}
+
+function mapFindingsToComments(findings, prFiles) {
+  const fileMap = {};
+  prFiles.forEach(file => { fileMap[file.filename] = file; });
+
+  return findings.filter(f => {
+    const file = f.file || f.path;
+    if (!fileMap[file]) {
+      console.log(`File ${file} not in PR diff, skipping`);
+      return false;
+    }
+    return true;
+  }).map(finding => {
+    const file = finding.file || finding.path;
+    const line = finding.line || (finding.start && finding.start.line) || 1;
+    const icon = MODE_ICONS[finding.mode] || '🔍';
+
+    let body = `${icon} ${COMMENT_MARKER} ${finding.description || 'Issue detected'}**\n\n`;
+    body += `**Severity:** ${finding.severity || 'MEDIUM'}\n`;
+    body += `**Category:** ${finding.category || 'unknown'}\n`;
+    body += `**Mode:** ${finding.mode || 'security'}\n`;
+    body += `**Tool:** OpenRouter AI Analysis\n`;
+    if (finding.exploit_scenario && finding.exploit_scenario !== 'Not provided') {
+      body += `\n**Exploit Scenario:** ${finding.exploit_scenario}\n`;
+    }
+    if (finding.recommendation && finding.recommendation !== 'Not provided') {
+      body += `\n**Recommendation:** ${finding.recommendation}\n`;
+    }
+
+    return { path: file, line, side: 'RIGHT', body };
+  });
+}
+
+function hasExistingBotComments() {
+  const existingComments = ghApi(`/repos/${context.repo.owner}/${context.repo.repo}/pulls/${context.issue.number}/comments`);
+  return existingComments.some(c =>
+    c.user.type === 'Bot' && c.body && c.body.includes(COMMENT_MARKER)
+  );
+}
+
+function postReviewWithFallback(reviewComments) {
+  try {
+    const reviewData = {
+      commit_id: context.payload.pull_request.head.sha,
+      event: 'COMMENT',
+      comments: reviewComments
+    };
+    const reviewResponse = ghApi(`/repos/${context.repo.owner}/${context.repo.repo}/pulls/${context.issue.number}/reviews`, 'POST', reviewData);
+    console.log(`Created review with ${reviewComments.length} inline comments`);
+    if (reviewResponse && reviewResponse.id) {
+      addReactionsToReview(reviewResponse.id);
+    }
+  } catch (error) {
+    console.error('Error creating review, falling back to individual comments:', error.message);
+    reviewComments.forEach(comment => {
+      try {
+        const commentData = { ...comment, commit_id: context.payload.pull_request.head.sha };
+        ghApi(`/repos/${context.repo.owner}/${context.repo.repo}/pulls/${context.issue.number}/comments`, 'POST', commentData);
+      } catch (e) {
+        console.log(`Could not comment on ${comment.path}:${comment.line} — line may not be in diff context`);
+      }
+    });
   }
 }
 
