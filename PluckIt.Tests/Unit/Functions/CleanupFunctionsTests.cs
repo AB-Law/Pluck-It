@@ -22,6 +22,13 @@ public sealed class CleanupFunctionsTests
     private readonly Mock<Container> _mockContainer;
     private readonly FakeBlobSasService _sasService;
     private readonly CleanupFunctions _sut;
+    private static readonly string[] MixedOrphanBlobNames = new[]
+    {
+        "known-1-transparent.png",
+        "known-2-transparent.png",
+        "orphan-7-transparent.png",
+        "orphan-8-transparent.png"
+    };
 
     public CleanupFunctionsTests()
     {
@@ -41,7 +48,7 @@ public sealed class CleanupFunctionsTests
         );
     }
 
-    private TimerInfo CreateDummyTimer() => new TimerInfo
+    private static TimerInfo CreateDummyTimer() => new TimerInfo
     {
         ScheduleStatus = new ScheduleStatus(),
         IsPastDue = false
@@ -114,13 +121,7 @@ public sealed class CleanupFunctionsTests
     public async Task CleanUpOrphanBlobs_MixedBlobs_DeletesOnlyOrphans()
     {
         SetupCosmosQueryIterator("known-1", "known-2");
-        _sasService.ArchiveBlobNames.AddRange(new[]
-        {
-            "known-1-transparent.png",
-            "known-2-transparent.png",
-            "orphan-7-transparent.png",
-            "orphan-8-transparent.png"
-        });
+        _sasService.ArchiveBlobNames.AddRange(MixedOrphanBlobNames);
 
         await _sut.CleanUpOrphanBlobs(CreateDummyTimer(), CancellationToken.None);
 

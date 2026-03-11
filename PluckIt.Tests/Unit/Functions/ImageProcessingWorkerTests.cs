@@ -24,6 +24,10 @@ public sealed class ImageProcessingWorkerTests
     private readonly InMemoryWardrobeRepository _repo;
     private readonly FakeBlobSasService _sasService;
     private readonly FakeClothingMetadataService _metadataService;
+    private static readonly JsonSerializerOptions DefaultSerializerOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
 
     public ImageProcessingWorkerTests()
     {
@@ -58,7 +62,7 @@ public sealed class ImageProcessingWorkerTests
             {
                 StatusCode = statusCode,
                 Content = responseBody is not null
-                    ? new StringContent(JsonSerializer.Serialize(responseBody, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }))
+                    ? new StringContent(JsonSerializer.Serialize(responseBody, DefaultSerializerOptions))
                     : new StringContent("")
             });
 
@@ -147,7 +151,9 @@ public sealed class ImageProcessingWorkerTests
 
         var updated = _repo.AllItems[0];
         updated.DraftStatus.ShouldBe(DraftStatus.Failed);
-        updated.DraftError.ShouldContain("download");
+        var downloadError = updated.DraftError;
+        downloadError.ShouldNotBeNull();
+        downloadError.ShouldContain("download");
     }
 
     [Fact]
@@ -167,7 +173,9 @@ public sealed class ImageProcessingWorkerTests
 
         var updated = _repo.AllItems[0];
         updated.DraftStatus.ShouldBe(DraftStatus.Failed);
-        updated.DraftError.ShouldContain("500");
+        var processorError = updated.DraftError;
+        processorError.ShouldNotBeNull();
+        processorError.ShouldContain("500");
     }
 
     // ── Happy Path ────────────────────────────────────────────────────────────

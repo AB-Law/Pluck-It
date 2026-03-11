@@ -24,9 +24,14 @@ public sealed class GoogleTokenValidator
     public GoogleTokenValidator(IConfiguration configuration, IHttpClientFactory httpClientFactory)
     {
         _clientId = configuration["GoogleAuth:ClientId"]
+            ?? configuration["GoogleAuth__ClientId"]
+            ?? configuration["GOOGLE_CLIENT_ID"]
             ?? throw new InvalidOperationException(
-                "Required configuration key 'GoogleAuth__ClientId' is not set.");
-        var jwksUrl = configuration["GoogleAuth:JwksUrl"] ?? configuration["GoogleAuth:JwksUri"];
+                "Required configuration key 'GoogleAuth:ClientId' (or 'GoogleAuth__ClientId', 'GOOGLE_CLIENT_ID') is not set.");
+        var jwksUrl = configuration["GoogleAuth:JwksUrl"]
+            ?? configuration["GoogleAuth:JwksUri"]
+            ?? configuration["GoogleAuth__JwksUrl"]
+            ?? configuration["GoogleAuth__JwksUri"];
         if (!Uri.TryCreate(jwksUrl, UriKind.Absolute, out var jwksUri))
             throw new InvalidOperationException(
                 "Required configuration key 'GoogleAuth:JwksUrl' (or 'GoogleAuth:JwksUri') is not set or invalid.");
@@ -34,7 +39,8 @@ public sealed class GoogleTokenValidator
         _googleIssuerHost = configuration["GoogleAuth:IssuerHost"] ??
             configuration["GoogleAuth:Issuer"] ??
             "accounts.google.com";
-        _googleIssuerWithScheme = BuildIssuerWithScheme(_googleIssuerHost);
+        var issuerScheme = configuration["GoogleAuth:IssuerScheme"] ?? Uri.UriSchemeHttps;
+        _googleIssuerWithScheme = BuildIssuerWithScheme(_googleIssuerHost, issuerScheme);
         _httpClientFactory = httpClientFactory;
     }
 
@@ -70,8 +76,16 @@ public sealed class GoogleTokenValidator
         }
     }
 
-    private static string BuildIssuerWithScheme(string issuerHost)
-        => new UriBuilder(Uri.UriSchemeHttps, issuerHost).Uri.ToString().TrimEnd('/');
+    private static string BuildIssuerWithScheme(string issuerHost, string issuerScheme)
+    {
+        if (Uri.TryCreate(issuerHost, UriKind.Absolute, out var issuerWithScheme))
+            return issuerWithScheme.GetLeftPart(UriPartial.Authority).TrimEnd('/');
+
+        if (string.IsNullOrWhiteSpace(issuerScheme))
+            issuerScheme = Uri.UriSchemeHttps;
+
+        return new UriBuilder(issuerScheme, issuerHost).Uri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
+    }
 
     // ── JWKS caching ─────────────────────────────────────────────────────────
 

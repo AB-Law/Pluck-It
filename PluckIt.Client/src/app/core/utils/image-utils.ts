@@ -43,13 +43,14 @@ export async function resizeImageFile(
     | (new (width: number, height: number) => OffscreenCanvas)
     | undefined;
   const usingOffscreenCanvas = !!offscreenCanvasCtor;
+  let offscreenCanvas: OffscreenCanvas | null = null;
 
-  if (!offscreenCanvasCtor) {
+  if (usingOffscreenCanvas) {
+    canvas = offscreenCanvas = new offscreenCanvasCtor(outW, outH);
+  } else {
     canvas = document.createElement('canvas');
     canvas.width = outW;
     canvas.height = outH;
-  } else {
-    canvas = new offscreenCanvasCtor(outW, outH);
   }
 
   const ctx = canvas.getContext('2d');
@@ -62,10 +63,10 @@ export async function resizeImageFile(
   bitmap.close();
 
   let blob: Blob;
-  if (usingOffscreenCanvas && canvas instanceof offscreenCanvasCtor) {
-    blob = await canvas.convertToBlob({ type: 'image/jpeg', quality });
+  if (usingOffscreenCanvas && offscreenCanvas) {
+    blob = await offscreenCanvas.convertToBlob({ type: 'image/jpeg', quality });
     // TS lib definitions may not include OffscreenCanvas.close() in all targets.
-    const closable = canvas as OffscreenCanvas & { close?: () => void };
+    const closable = offscreenCanvas as { close?: () => void };
     closable.close?.();
   } else {
     const htmlCanvas = canvas as HTMLCanvasElement;

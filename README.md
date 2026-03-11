@@ -247,6 +247,7 @@ Add these to `PluckIt.Functions/local.settings.json` and `PluckIt.Processor/loca
 - `AI__Endpoint`, `AI__ApiKey` — Azure OpenAI
 - `BlobStorage__AccountName`, `BlobStorage__AccountKey` — Blob Storage
 - `GOOGLE_CLIENT_ID` / `GoogleAuth__ClientId` — Google OAuth client ID
+- `GOOGLE_AUTH_JWKS_URL` (optional) / `GoogleAuth__JwksUrl` — Google JWKS endpoint
 - `SEGMENTATION_ENDPOINT_URL`, `SEGMENTATION_SHARED_TOKEN` — Modal segmentation
 
 For Codespaces, add the same names as **Codespaces secrets** (not Actions secrets — they are separate namespaces).
