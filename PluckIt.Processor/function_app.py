@@ -135,7 +135,7 @@ def _normalize_otel_headers(raw_headers: Optional[str]) -> dict[str, str] | None
     if not raw_headers:
         return None
 
-    pairs = raw_headers.replace("%20", " ").split(",")
+    pairs = unquote(raw_headers).split(",")
     parsed: dict[str, str] = {}
     for pair in pairs:
         if "=" not in pair:
@@ -151,8 +151,9 @@ def _configure_open_telemetry() -> None:
     if _otel_configured:
         return
 
-    endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+    endpoint = os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
     if not endpoint:
+        logger.warning("OpenTelemetry trace endpoint missing: set OTEL_EXPORTER_OTLP_TRACES_ENDPOINT or OTEL_EXPORTER_OTLP_ENDPOINT.")
         return
 
     headers = _normalize_otel_headers(os.getenv("OTEL_EXPORTER_OTLP_HEADERS"))
@@ -192,6 +193,14 @@ def _configure_open_telemetry() -> None:
         logger.info("OpenTelemetry initialized for service=%s endpoint=%s", service_name, endpoint)
     except Exception as exc:
         logger.warning("OpenTelemetry initialization failed: %s", exc)
+
+
+# In some Azure Functions hosting modes, the FastAPI startup event may be skipped.
+# Initialize telemetry eagerly at import time as a fallback.
+try:
+    _configure_open_telemetry()
+except Exception as exc:
+    logger.warning("OpenTelemetry eager initialization failed: %s", exc)
 
 # ── FastAPI application ──────────────────────────────────────────────────────
 

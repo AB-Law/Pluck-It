@@ -777,11 +777,12 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
     "FUNCTIONS_EXTENSION_VERSION"                   = "~4"
     "APPLICATIONINSIGHTS_CONNECTION_STRING"         = azurerm_application_insights.pluckit.connection_string
     "OTEL_EXPORTER_OTLP_ENDPOINT"                   = var.grafana_cloud_otlp_endpoint
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"            = "${var.grafana_cloud_otlp_endpoint}/v1/traces"
     "OTEL_EXPORTER_OTLP_HEADERS"                    = var.grafana_cloud_otlp_headers
     "OTEL_EXPORTER_OTLP_PROTOCOL"                   = "http/protobuf"
     "OTEL_TRACES_EXPORTER"                          = "otlp"
     "OTEL_METRICS_EXPORTER"                         = "otlp"
-    "OTEL_LOGS_EXPORTER"                            = "none"
+    "OTEL_LOGS_EXPORTER"                            = "otlp"
     "OTEL_SERVICE_NAME"                             = var.grafana_cloud_processor_service_name
     "UPLOADS_CONTAINER_NAME"                        = azurerm_storage_container.uploads.name
     "ARCHIVE_CONTAINER_NAME"                        = azurerm_storage_container.archive.name
