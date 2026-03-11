@@ -37,20 +37,30 @@ public sealed class ClothingPriceConverter : JsonConverter<ClothingPrice>
         using var doc = JsonDocument.ParseValue(ref reader);
         var root = doc.RootElement;
 
-        var amount = root.TryGetProperty("amount", out var amountElement) && amountElement.TryGetDecimal(out var parsedAmount)
-            ? parsedAmount
-            : 0m;
+        decimal amount = 0m;
+        string? originalCurrency = null;
+        string? purchaseDate = null;
 
-        var originalCurrency = "USD";
-        if (root.TryGetProperty("originalCurrency", out var currencyElement) &&
-            currencyElement.ValueKind != JsonValueKind.Null)
+        foreach (var property in root.EnumerateObject())
         {
-            originalCurrency = currencyElement.GetString() ?? "USD";
+            if (string.Equals(property.Name, "amount", StringComparison.OrdinalIgnoreCase))
+            {
+                if (property.Value.TryGetDecimal(out var parsedAmount))
+                    amount = parsedAmount;
+            }
+            else if (string.Equals(property.Name, "originalCurrency", StringComparison.OrdinalIgnoreCase))
+            {
+                if (property.Value.ValueKind != JsonValueKind.Null)
+                    originalCurrency = property.Value.GetString();
+            }
+            else if (string.Equals(property.Name, "purchaseDate", StringComparison.OrdinalIgnoreCase))
+            {
+                if (property.Value.ValueKind != JsonValueKind.Null)
+                    purchaseDate = property.Value.GetString();
+            }
         }
 
-        var purchaseDate = root.TryGetProperty("purchaseDate", out var dateElement) && dateElement.ValueKind != JsonValueKind.Null
-            ? dateElement.GetString()
-            : null;
+        originalCurrency ??= "USD";
 
         return new ClothingPrice
         {
