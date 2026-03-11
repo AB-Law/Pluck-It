@@ -397,7 +397,7 @@ public class WardrobeFunctions(
 
     [Function(nameof(GetWearSuggestions))]
     public async Task<HttpResponseData> GetWearSuggestions(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "wardrobe/wear-suggestions")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "wardrobe/suggestions/wear")] HttpRequestData req,
         CancellationToken cancellationToken)
     {
         var (authed, userId) = await TryGetUserIdAsync(req);
@@ -449,7 +449,7 @@ public class WardrobeFunctions(
 
     [Function(nameof(UpdateWearSuggestionStatus))]
     public async Task<HttpResponseData> UpdateWearSuggestionStatus(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "wardrobe/wear-suggestions/{suggestionId}")]
+        [HttpTrigger(AuthorizationLevel.Anonymous, "patch", Route = "wardrobe/suggestions/wear/{suggestionId}")]
         HttpRequestData req,
         string suggestionId,
         CancellationToken cancellationToken)

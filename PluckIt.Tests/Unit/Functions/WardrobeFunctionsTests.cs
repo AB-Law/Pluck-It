@@ -796,7 +796,7 @@ public sealed class WardrobeFunctionsTests
         recordResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
 
         var suggestionsResponse = await sut.GetWearSuggestions(
-            TestRequest.Get("http://localhost/api/wardrobe/wear-suggestions"),
+            TestRequest.Get("http://localhost/api/suggestions/wear/"),
             CancellationToken.None) as Helpers.TestHttpResponseData;
         suggestionsResponse!.StatusCode.ShouldBe(HttpStatusCode.OK);
 

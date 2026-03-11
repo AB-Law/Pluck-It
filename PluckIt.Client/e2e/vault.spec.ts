@@ -16,7 +16,7 @@ test.describe('Vault / Wardrobe', () => {
       const url = route.request().url();
       const method = route.request().method();
 
-      if (url.includes('/wear-suggestions') && method === 'GET') {
+      if (url.includes('/suggestions/wear') && method === 'GET') {
         return route.fulfill({
           status: 200,
           contentType: 'application/json',
