@@ -158,7 +158,6 @@ class RedditScraper(BaseScraper):
         source_id: str = config.get("source_id", f"reddit-{subreddit}")
 
         url = f"{_BASE_URL}/r/{subreddit}/{sort}.json?limit={limit}"
-        results: list[ScrapedItemRaw] = []
 
         with httpx.Client() as client:
             try:
@@ -178,25 +177,47 @@ class RedditScraper(BaseScraper):
             posts = data.get("data", {}).get("children", [])
             logger.info("Reddit r/%s: fetched %d posts", subreddit, len(posts))
 
-            for child in posts:
-                post = child.get("data", {})
-                if post.get("score", 0) < min_score:
-                    continue
+            raw_posts = [child.get("data", {}) for child in posts]
+            return self.process_posts(raw_posts, subreddit, source_id, min_score)
 
-                items = self._process_post(post, subreddit, source_id)
-                results.extend(items)
-                time.sleep(_REQUEST_DELAY)
+    def process_posts(
+        self,
+        posts: list[dict],
+        subreddit: str,
+        source_id: str,
+        min_score: int = 0,
+    ) -> list[ScrapedItemRaw]:
+        """Process a list of raw Reddit post objects into ScrapedItemRaw."""
+        results: list[ScrapedItemRaw] = []
+        for post in posts:
+            if post.get("score", 0) < min_score:
+                continue
 
-        logger.info("Reddit r/%s: extracted %d image items", subreddit, len(results))
+            items = self.process_post(post, subreddit, source_id)
+            results.extend(items)
         return results
 
-    def _process_post(
+    def process_post(
         self,
         post: dict,
         subreddit: str,
         source_id: str,
     ) -> list[ScrapedItemRaw]:
+        """Process a single raw Reddit post into one or more ScrapedItemRaw."""
+        actual_sub = post.get("subreddit", "").lower()
+        if actual_sub and actual_sub != subreddit.lower():
+            logger.warning("Subreddit mismatch: expected %s, got %s", subreddit, actual_sub)
+            return []
+
+        if post.get("over_18", False):
+            return []
+
         post_url = f"https://www.reddit.com{post.get('permalink', '')}"
+        
+        if not post.get("permalink", "").lower().startswith(f"/r/{subreddit.lower()}/"):
+            logger.warning("Permalink mismatch for subreddit %s: %s", subreddit, post.get("permalink"))
+            return []
+
         title = (post.get("title") or "").strip()
         description = (post.get("selftext") or "").strip()[:500]
         tags = _extract_tags_from_post(post, subreddit)
@@ -212,35 +233,46 @@ class RedditScraper(BaseScraper):
         results: list[ScrapedItemRaw] = []
 
         # ── Gallery posts ──────────────────────────────────────────────────
-        # Store as ONE item with the first image as cover + all images in gallery_images
         if _is_reddit_gallery(post):
             gallery_pairs = _extract_gallery_images(post)
             if gallery_pairs:
-                first_img, first_preview = gallery_pairs[0]
-                results.append(ScrapedItemRaw(
-                    source_id=source_id,
-                    source_type=self.source_type,
-                    title=title,
-                    description=description,
-                    image_url=first_img,
-                    product_url=post_url,
-                    tags=tags,
-                    buy_links=buy_links,
-                    preview_url=first_preview,
-                    gallery_images=[img for img, _ in gallery_pairs],
-                    comment_text=comment_text[:1000],
-                    score_signal=score,
-                    source_created_at=source_created_at,
-                ))
+                # Security: validate all gallery images are on trusted domains
+                valid_gallery: list[tuple[str, Optional[str]]] = []
+                for img, prev in gallery_pairs:
+                    if _is_trusted_reddit_domain(img):
+                        valid_gallery.append((img, prev))
+                
+                if valid_gallery:
+                    first_img, first_preview = valid_gallery[0]
+                    results.append(ScrapedItemRaw(
+                        source_id=source_id,
+                        source_type=self.source_type,
+                        title=title,
+                        description=description,
+                        image_url=first_img,
+                        product_url=post_url,
+                        tags=tags,
+                        buy_links=buy_links,
+                        preview_url=first_preview,
+                        gallery_images=[img for img, _ in valid_gallery],
+                        comment_text=comment_text[:1000],
+                        score_signal=score,
+                        source_created_at=source_created_at,
+                    ))
 
         # ── Single direct image ────────────────────────────────────────────
         elif _is_direct_image(post.get("url", "")):
-            post_url_direct = post["url"]
+            img_url = post["url"]
+            if not _is_trusted_reddit_domain(img_url):
+                return []
+
             # Preview URL for pHash (may carry token — transient only)
             preview_url: Optional[str] = None
             try:
                 preview = post["preview"]["images"][0]["source"]["url"]
                 preview_url = preview.replace("&amp;", "&")
+                if preview_url and not _is_trusted_reddit_domain(preview_url):
+                    preview_url = None
             except (KeyError, IndexError, TypeError):
                 pass
 
@@ -249,7 +281,7 @@ class RedditScraper(BaseScraper):
                 source_type=self.source_type,
                 title=title,
                 description=description,
-                image_url=post_url_direct,   # stable i.redd.it URL
+                image_url=img_url,   # stable i.redd.it URL
                 product_url=post_url,
                 tags=tags,
                 buy_links=buy_links,
@@ -261,3 +293,14 @@ class RedditScraper(BaseScraper):
             ))
 
         return results
+
+
+def _is_trusted_reddit_domain(url: str) -> bool:
+    """True if the URL is on an official Reddit content domain."""
+    parsed = urlparse(url)
+    return parsed.netloc.lower() in {
+        "i.redd.it",
+        "www.reddit.com",
+        "preview.redd.it",
+        "reddit.com",
+    }

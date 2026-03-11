@@ -13,7 +13,7 @@ import {
 export class DiscoverService {
   private base = `${environment.chatApiUrl}/api`;
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) { }
 
   getFeed(query: DiscoverFeedQuery = {}): Observable<DiscoverFeedResponse> {
     let params = new HttpParams();
@@ -49,5 +49,16 @@ export class DiscoverService {
       `${this.base}/scraper/items/${itemId}/feedback`,
       galleryImageIndex != null ? { signal, galleryImageIndex } : { signal },
     );
+  }
+
+  acquireLease(sourceId: string): Observable<{ status: string; expiresAt: string }> {
+    return this.http.post<{ status: string; expiresAt: string }>(`${this.base}/scraper/lease/${sourceId}`, {});
+  }
+
+  ingestReddit(sourceId: string, posts: any[]): Observable<{ count: number; status: string }> {
+    return this.http.post<{ count: number; status: string }>(`${this.base}/scraper/ingest/reddit`, {
+      source_id: sourceId,
+      posts,
+    });
   }
 }

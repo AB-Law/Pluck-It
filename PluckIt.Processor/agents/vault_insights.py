@@ -244,6 +244,8 @@ async def compute_vault_insights(
         if int(item.get("wearCount") or 0) > 0:
             continue
         price = item.get("price") or {}
+        if not isinstance(price, dict):
+            price = {"amount": price}
         amount = price.get("amount")
         if amount is None:
             continue
@@ -267,6 +269,8 @@ async def compute_vault_insights(
             items_with_history += 1
 
         price = item.get("price") or {}
+        if not isinstance(price, dict):
+            price = {"amount": price}
         amount = price.get("amount")
         converted = _convert(float(amount), price.get("originalCurrency"), profile_currency) if amount is not None else None
 
