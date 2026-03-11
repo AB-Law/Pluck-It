@@ -84,3 +84,23 @@ variable "admin_user_ids" {
   type        = string
   default     = ""
 }
+
+variable "grafana_cloud_otlp_endpoint" {
+  description = "OTLP ingest endpoint for Grafana Cloud (for example, https://otlp-gateway-<region>.grafana.net/otlp)."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "grafana_cloud_otlp_headers" {
+  description = "Authorization header payload for Grafana OTLP ingestion, eg: 'Authorization=Basic <base64(id:token)>'."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "grafana_cloud_processor_service_name" {
+  description = "Service name for the Python processor Function App in Grafana."
+  type        = string
+  default     = "pluckit-prod-processor-func"
+}

@@ -40,6 +40,7 @@ import json
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import unquote
 import random
 import time
 import uuid
@@ -127,6 +128,70 @@ _SCRAPER_MAX_CONCURRENCY = _get_int_env("SCRAPER_MAX_CONCURRENCY", 4)
 _TASTE_JOB_QUEUE_MAX_SIZE = _get_int_env("TASTE_JOB_QUEUE_MAX_SIZE", 1024)
 
 logger = logging.getLogger(__name__)
+_otel_configured = False
+
+
+def _normalize_otel_headers(raw_headers: Optional[str]) -> dict[str, str] | None:
+    if not raw_headers:
+        return None
+
+    pairs = raw_headers.replace("%20", " ").split(",")
+    parsed: dict[str, str] = {}
+    for pair in pairs:
+        if "=" not in pair:
+            continue
+        key, value = [part.strip() for part in pair.split("=", 1)]
+        if key and value:
+            parsed[key] = unquote(value)
+    return parsed or None
+
+
+def _configure_open_telemetry() -> None:
+    global _otel_configured
+    if _otel_configured:
+        return
+
+    endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+    if not endpoint:
+        return
+
+    headers = _normalize_otel_headers(os.getenv("OTEL_EXPORTER_OTLP_HEADERS"))
+    service_name = os.getenv("OTEL_SERVICE_NAME", "pluckit-processor-func")
+
+    try:
+        from opentelemetry import trace
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    except Exception as exc:
+        logger.warning("OpenTelemetry libraries are not available in this environment: %s", exc)
+        return
+
+    try:
+        trace.set_tracer_provider(
+            TracerProvider(
+                resource=Resource.create(
+                    {
+                        "service.name": service_name,
+                        "service.namespace": "pluckit",
+                    }
+                )
+            )
+        )
+        tracer = trace.get_tracer_provider()
+        tracer.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, headers=headers)))
+        HTTPXClientInstrumentor().instrument()
+        FastAPIInstrumentor.instrument_app(
+            fastapi_app,
+            tracer_provider=trace.get_tracer_provider(),
+        )
+        _otel_configured = True
+        logger.info("OpenTelemetry initialized for service=%s endpoint=%s", service_name, endpoint)
+    except Exception as exc:
+        logger.warning("OpenTelemetry initialization failed: %s", exc)
 
 # ── FastAPI application ──────────────────────────────────────────────────────
 
@@ -168,6 +233,7 @@ async def _global_exception_handler(request: Request, exc: Exception) -> JSONRes
 
 @fastapi_app.on_event("startup")
 async def _startup_log() -> None:
+    _configure_open_telemetry()
     env = os.getenv("AZURE_FUNCTIONS_ENVIRONMENT", "Production")
     logger.info("PluckIt Processor started — environment=%s", env)
     _ensure_taste_worker_running()
