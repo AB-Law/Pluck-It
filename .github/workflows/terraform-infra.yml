@@ -50,6 +50,9 @@ jobs:
           SEGMENTATION_ENDPOINT_URL: ${{ secrets.SEGMENTATION_ENDPOINT_URL }}
           SEGMENTATION_SHARED_TOKEN: ${{ secrets.SEGMENTATION_SHARED_TOKEN }}
           CORS_ALLOWED_ORIGINS: ${{ secrets.CORS_ALLOWED_ORIGINS }}
+          GRAFANA_CLOUD_OTLP_ENDPOINT: ${{ secrets.GRAFANA_CLOUD_OTLP_ENDPOINT }}
+          GRAFANA_CLOUD_OTLP_HEADERS: ${{ secrets.GRAFANA_CLOUD_OTLP_HEADERS }}
+          GRAFANA_CLOUD_OTEL_SERVICE_NAME_PROCESSOR: ${{ vars.GRAFANA_CLOUD_OTEL_SERVICE_NAME_PROCESSOR }}
         run: |
           cat > terraform.auto.tfvars <<'OUTER'
           subscription_id = "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
@@ -68,6 +71,16 @@ jobs:
             echo "cors_allowed_origins = $CORS_ALLOWED_ORIGINS" >> terraform.auto.tfvars
           else
             echo 'cors_allowed_origins = []' >> terraform.auto.tfvars
+          fi
+
+          if [ -n "$GRAFANA_CLOUD_OTLP_ENDPOINT" ]; then
+            echo "grafana_cloud_otlp_endpoint = \"$GRAFANA_CLOUD_OTLP_ENDPOINT\"" >> terraform.auto.tfvars
+          fi
+          if [ -n "$GRAFANA_CLOUD_OTLP_HEADERS" ]; then
+            echo "grafana_cloud_otlp_headers = \"$GRAFANA_CLOUD_OTLP_HEADERS\"" >> terraform.auto.tfvars
+          fi
+          if [ -n "$GRAFANA_CLOUD_OTEL_SERVICE_NAME_PROCESSOR" ]; then
+            echo "grafana_cloud_processor_service_name = \"$GRAFANA_CLOUD_OTEL_SERVICE_NAME_PROCESSOR\"" >> terraform.auto.tfvars
           fi
 
       - name: Terraform Init

@@ -31,3 +31,10 @@ google_oauth_client_id = "YOUR_CLIENT_ID.apps.googleusercontent.com"
 # Modal BiRefNet segmentation service
 segmentation_endpoint_url = "https://your-modal-endpoint.modal.run"
 segmentation_shared_token = "your-shared-bearer-token-here"
+
+# Grafana Cloud OpenTelemetry (production)
+# Endpoint example:
+# https://otlp-gateway-prod-ap-south-1.grafana.net/otlp
+grafana_cloud_otlp_endpoint = "https://otlp-gateway-<region>.grafana.net/otlp"
+grafana_cloud_otlp_headers = "Authorization=Basic <base64(user_id:api_token)>"
+grafana_cloud_processor_service_name = "pluckit-prod-processor-func"
