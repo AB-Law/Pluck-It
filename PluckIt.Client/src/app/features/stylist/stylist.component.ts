@@ -123,9 +123,9 @@ const TOOL_LABELS: Record<string, string> = {
               <div class="h-8 w-8 rounded-full bg-slate-700 flex items-center justify-center shrink-0">
                 <span class="material-symbols-outlined text-slate-400" style="font-size:16px">person</span>
               </div>
-              <div class="flex flex-col gap-1 items-end">
+              <div class="flex flex-col gap-1 items-end min-w-0 max-w-[82%]">
                 <span class="text-[11px] text-slate-400 font-mono">{{ msg.time }}</span>
-                <div class="bg-primary p-3 rounded-2xl rounded-tr-none text-sm text-white leading-relaxed">
+                <div class="bg-gradient-to-br from-[#2563eb] to-[#1d4ed8] border border-blue-300/25 shadow-[0_8px_24px_rgba(37,99,235,0.35)] p-3 rounded-2xl rounded-tr-none text-sm text-white leading-relaxed whitespace-pre-wrap">
                   {{ msg.text }}
                 </div>
               </div>

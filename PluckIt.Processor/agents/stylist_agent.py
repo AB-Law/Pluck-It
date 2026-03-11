@@ -273,17 +273,17 @@ def _event_to_sse(event: dict) -> Optional[str]:
         chunk = event["data"].get("chunk")
         if not chunk or not chunk.content:
             return None
-        return f"data: {json.dumps({'type': 'token', 'content': chunk.content})}\\n\\n"
+        return f"data: {json.dumps({'type': 'token', 'content': chunk.content})}\n\n"
 
     if kind == "on_tool_start":
         tool_name = event.get("name", "tool")
-        return f"data: {json.dumps({'type': 'tool_use', 'name': tool_name})}\\n\\n"
+        return f"data: {json.dumps({'type': 'tool_use', 'name': tool_name})}\n\n"
 
     if kind == "on_tool_end":
         tool_name = event.get("name", "tool")
         output = event["data"].get("output", "")
         summary = str(output)[:120] + ("…" if len(str(output)) > 120 else "")
-        return f"data: {json.dumps({'type': 'tool_result', 'name': tool_name, 'summary': summary})}\\n\\n"
+        return f"data: {json.dumps({'type': 'tool_result', 'name': tool_name, 'summary': summary})}\n\n"
 
     return None
 

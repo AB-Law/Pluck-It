@@ -80,10 +80,10 @@ public sealed class GoogleTokenValidatorTests
     }
 
     [Fact]
-    public void Constructor_Throws_When_JwksUrl_Is_Missing()
+    public void Constructor_Uses_Default_JwksUrl_When_Missing()
     {
         var handler = new CountingHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
-        Should.Throw<InvalidOperationException>(() =>
+        Should.NotThrow(() =>
             new GoogleTokenValidator(
                 CreateValidatorConfig(jwksUrl: null),
                 new FakeHttpClientFactory(new HttpClient(handler))));

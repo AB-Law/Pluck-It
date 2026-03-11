@@ -31,7 +31,10 @@ public sealed class GoogleTokenValidator
         var jwksUrl = configuration["GoogleAuth:JwksUrl"]
             ?? configuration["GoogleAuth:JwksUri"]
             ?? configuration["GoogleAuth__JwksUrl"]
-            ?? configuration["GoogleAuth__JwksUri"];
+            ?? configuration["GoogleAuth__JwksUri"]
+            ?? configuration["GOOGLE_AUTH_JWKS_URL"]
+            ?? configuration["GOOGLE_AUTH_JWKSURI"]
+            ?? "https://www.googleapis.com/oauth2/v3/certs";
         if (!Uri.TryCreate(jwksUrl, UriKind.Absolute, out var jwksUri))
             throw new InvalidOperationException(
                 "Required configuration key 'GoogleAuth:JwksUrl' (or 'GoogleAuth:JwksUri') is not set or invalid.");

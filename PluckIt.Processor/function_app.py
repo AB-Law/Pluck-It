@@ -407,6 +407,12 @@ class ChatRequest(BaseModel):
     401: {"description": "Authentication failed."},
     500: {"description": "Agent logic error or streaming failure."}
 })
+@fastapi_app.post("/api/chat/", responses={
+    200: {"description": "SSE stream of stylist agent responses."},
+    400: {"description": "Invalid prompt or mood selection."},
+    401: {"description": "Authentication failed."},
+    500: {"description": "Agent logic error or streaming failure."}
+})
 async def chat(body: ChatRequest, user_id: Annotated[str, Depends(get_user_id)]):
     """
     Stream the stylist agent's response as Server-Sent Events.
