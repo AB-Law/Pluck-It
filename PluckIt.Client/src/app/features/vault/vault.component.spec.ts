@@ -7,21 +7,29 @@ import { UserProfileService } from '../../core/services/user-profile.service';
 import { of, throwError } from 'rxjs';
 import { ItemCondition } from '../../core/models/clothing-item.model';
 import { SmartGroup, VaultFilters } from './vault-sidebar.component';
+import { CollectionService } from '../../core/services/collection.service';
 
 describe('VaultComponent', () => {
   let component: VaultComponent;
   let fixture: ComponentFixture<VaultComponent>;
+  let router: { navigate: ReturnType<typeof vi.fn> };
   let wardrobeService: {
     getAll: ReturnType<typeof vi.fn>;
     getWearSuggestions: ReturnType<typeof vi.fn>;
     logWear: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
     updateWearSuggestionStatus: ReturnType<typeof vi.fn>;
+    getWearHistory: ReturnType<typeof vi.fn>;
   };
   let insightsService: { getInsights: ReturnType<typeof vi.fn> };
   let profileService: {
     load: ReturnType<typeof vi.fn>;
     getOrDefault: ReturnType<typeof vi.fn>;
+  };
+  let collectionService: {
+    loadAll: ReturnType<typeof vi.fn>;
+    collections: () => any[];
+    addItem: ReturnType<typeof vi.fn>;
   };
   let route: { snapshot: { queryParamMap: ReturnType<typeof convertToParamMap> }; queryParamMap: any };
   const ITEM = {
@@ -58,6 +66,7 @@ describe('VaultComponent', () => {
       logWear: vi.fn().mockReturnValue(of({ ...ITEM, wearCount: 2 })),
       update: vi.fn().mockReturnValue(of(ITEM)),
       updateWearSuggestionStatus: vi.fn().mockReturnValue(of({})),
+      getWearHistory: vi.fn().mockReturnValue(of({ items: [] })),
     };
     insightsService = {
       getInsights: vi.fn().mockReturnValue(of({
@@ -83,6 +92,12 @@ describe('VaultComponent', () => {
       load: vi.fn().mockReturnValue(of({ id: 'u-1' })),
       getOrDefault: vi.fn().mockReturnValue({ currencyCode: 'USD' }),
     };
+    collectionService = {
+      loadAll: vi.fn().mockReturnValue(of({})),
+      collections: () => [],
+      addItem: vi.fn().mockReturnValue(of({})),
+    };
+    router = { navigate: vi.fn() };
     route = {
       snapshot: { queryParamMap: convertToParamMap({}) },
       queryParamMap: of(convertToParamMap({})),
@@ -92,10 +107,11 @@ describe('VaultComponent', () => {
       imports: [VaultComponent],
       providers: [
         { provide: ActivatedRoute, useValue: route },
-        { provide: Router, useValue: { navigate: vi.fn() } },
+        { provide: Router, useValue: router },
         { provide: VaultInsightsService, useValue: insightsService },
         { provide: WardrobeService, useValue: wardrobeService },
         { provide: UserProfileService, useValue: profileService },
+        { provide: CollectionService, useValue: collectionService },
       ]
     }).compileComponents();
     fixture = TestBed.createComponent(VaultComponent);
@@ -280,5 +296,268 @@ describe('VaultComponent', () => {
 
     expect((component as any).insights()).toBeNull();
     expect((component as any).loadingInsights()).toBe(false);
+  });
+
+  it('renders loading, empty, and suggestion branches in template', () => {
+    const root = fixture.nativeElement as HTMLElement;
+    (component as any).loading.set(true);
+    fixture.detectChanges();
+    expect(root.textContent).toContain('Loading vault…');
+
+    (component as any).loading.set(false);
+    (component as any).allItems.set([]);
+    fixture.detectChanges();
+    expect(root.textContent).toContain('No items match your filters.');
+
+    (component as any).wearSuggestions.set([{ ...SUGGESTION, message: 'Test suggestion' } as any]);
+    fixture.detectChanges();
+    expect(root.textContent).toContain('Test suggestion');
+
+    wardrobeService.logWear.mockReturnValueOnce(of({ ...ITEM, wearCount: 2 }));
+    const acceptButton = (Array.from(root.querySelectorAll('button')) as HTMLButtonElement[]).find(
+      btn => btn.textContent?.trim() === 'Mark Worn',
+    );
+    acceptButton?.click();
+    fixture.detectChanges();
+    expect((component as any).wearSuggestions()).toEqual([]);
+
+    (component as any).wearSuggestions.set([{ ...SUGGESTION, message: 'Close soon', suggestionId: 's-2' } as any]);
+    fixture.detectChanges();
+    const dismissButton = (Array.from(root.querySelectorAll('button')) as HTMLButtonElement[]).find(
+      btn => btn.textContent?.trim() === 'Dismiss',
+    );
+    dismissButton?.click();
+    expect(wardrobeService.updateWearSuggestionStatus).toHaveBeenCalledWith('s-2', { status: 'Dismissed' });
+  });
+
+  it('renders and toggles edit/share modal overlays', () => {
+    const root = fixture.nativeElement as HTMLElement;
+    (component as any).editingItem.set(ITEM);
+    fixture.detectChanges();
+    expect(root.querySelector('app-review-item-modal')).toBeTruthy();
+
+    (component as any).editingItem.set(null);
+    (component as any).sharingItem.set(ITEM);
+    fixture.detectChanges();
+    expect(root.querySelector('app-add-to-collection-modal')).toBeTruthy();
+  });
+
+  it('applies computed client-side grouping branches', () => {
+    const favourite = { ...ITEM, id: 'fav', tags: ['favorite'], wearCount: 3 };
+    const recent = { ...ITEM, id: 'recent', wearCount: 5, tags: [] };
+    const archived = { ...ITEM, id: 'old', wearCount: 0, tags: [] };
+    (component as any).allItems.set([favourite, recent, archived]);
+
+    (component as any).activeFilters.set({ ...QUERY_FILTER, group: 'favorites' });
+    expect(component.filteredItems()).toEqual([favourite]);
+
+    (component as any).activeFilters.set({ ...QUERY_FILTER, group: 'recent' });
+    expect(component.filteredItems()).toEqual([favourite, recent]);
+
+    (component as any).searchQuery.set('fav');
+    expect(component.filteredItems().length).toBe(1);
+    (component as any).searchQuery.set('');
+    expect(component.filteredItems().length).toBe(2);
+  });
+
+  it('handles cpw display branches and intel lookups', () => {
+    (component as any).allItems.set([{ ...ITEM, price: { amount: 120, originalCurrency: 'USD' }, wearCount: 2 } as any]);
+    expect(component.avgCpwDisplay()).toBe('$60.00');
+
+    (component as any).allItems.set([{ ...ITEM, price: undefined, wearCount: 0 } as any]);
+    expect(component.avgCpwDisplay()).toBe('N/A');
+
+    (component as any).insights.set({
+      topWornBrands: ['UNQ'],
+      behavioralInsights: { topColorWearShare: { color: 'black', pct: 10 }, unworn90dPct: 0, mostExpensiveUnworn: { itemId: 'x', amount: 10, currency: 'USD' } },
+      cpwIntel: [{ itemId: 'i-1', badge: 'great', breakEvenReached: true }],
+    });
+    expect(component.cpwBadgeFor('i-1')).toBe('great');
+    expect(component.breakEvenFor('i-1')).toBe(true);
+    expect(component.cpwBadgeFor('missing')).toBe('unknown');
+  });
+
+  it('buildQuery and syncUrl include expected defaults and overrides', () => {
+    const custom = { ...QUERY_FILTER, brand: 'UNQ', condition: 'New' as ItemCondition, priceRange: [20, 500] as [number, number], minWears: 2 };
+    expect((component as any).buildQuery(custom)).toEqual(expect.objectContaining({
+      brand: 'UNQ',
+      condition: 'New',
+      priceMin: 20,
+      priceMax: 500,
+      minWears: 2,
+      pageSize: 24,
+      sortField: 'dateAdded',
+      sortDir: 'desc',
+    }));
+    expect((component as any).buildQuery(QUERY_FILTER)).toEqual(expect.objectContaining({
+      brand: undefined,
+      condition: undefined,
+      priceMin: undefined,
+      priceMax: undefined,
+      minWears: undefined,
+      pageSize: 24,
+    }));
+
+    component['syncUrl'](custom);
+    expect(router.navigate).toHaveBeenCalledWith([], expect.objectContaining({
+      queryParams: {
+        group: null,
+        priceMin: 20,
+        priceMax: 500,
+        minWears: 2,
+        brand: 'UNQ',
+        condition: 'New',
+        sortField: null,
+        sortDir: null,
+      },
+      replaceUrl: true,
+    }));
+  });
+
+  it('handles wear suggestions load failure without breaking state', () => {
+    wardrobeService.getWearSuggestions = vi.fn().mockReturnValue(throwError(() => new Error('no suggestions')));
+    fixture = TestBed.createComponent(VaultComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+
+    expect((component as any).wearSuggestions()).toEqual([]);
+  });
+
+  it('falls back to timestamp-based event ids when crypto helpers are missing', () => {
+    const originalCrypto = globalThis.crypto;
+    try {
+      Object.defineProperty(globalThis, 'crypto', {
+        value: { getRandomValues: () => new Uint32Array([123]) },
+        configurable: true,
+      });
+      const randomValueId = (component as any).nextClientEventId('wear');
+      expect(randomValueId).toMatch(/^wear-/);
+
+      Object.defineProperty(globalThis, 'crypto', {
+        value: {},
+        configurable: true,
+      });
+      const fallbackId = (component as any).nextClientEventId('wear');
+      expect(fallbackId).toMatch(/^wear-/);
+    } finally {
+      Object.defineProperty(globalThis, 'crypto', { value: originalCrypto, configurable: true });
+    }
+  });
+
+  it('covers load-more loading state, selected-item branch, and card selection toggles', () => {
+    const localItems = [
+      { ...ITEM, id: 'a', price: { amount: 10, originalCurrency: 'USD' }, brand: undefined as any, wearCount: 1 },
+      { ...ITEM, id: 'b', price: { amount: 120, originalCurrency: 'USD' }, wearCount: 2 },
+    ];
+    (component as any).allItems.set(localItems);
+    (component as any).nextToken.set('more');
+    (component as any).hasMore.set(true);
+    (component as any).loadingMore.set(true);
+    fixture.detectChanges();
+
+    const root = fixture.nativeElement as HTMLElement;
+    const loadMoreButton = Array.from(root.querySelectorAll('button')).find(
+      button => button.textContent?.includes('Load More') || button.textContent?.includes('Loading...'),
+    ) as HTMLButtonElement;
+    expect(loadMoreButton?.disabled).toBe(true);
+    expect(loadMoreButton?.textContent).toContain('Loading...');
+
+    (component as any).loadingMore.set(false);
+    fixture.detectChanges();
+    expect(loadMoreButton?.textContent).toContain('Load More');
+
+    component.onCardSelect(localItems[0]);
+    fixture.detectChanges();
+    expect((component as any).selectedItem()?.id).toBe('a');
+    component.onCardSelect(localItems[0]);
+    fixture.detectChanges();
+    expect((component as any).selectedItem()).toBeNull();
+  });
+
+  it('uses randomUUID branch for client event IDs', () => {
+    const originalCrypto = globalThis.crypto;
+    try {
+      Object.defineProperty(globalThis, 'crypto', {
+        value: { randomUUID: vi.fn(() => 'uuid-1') },
+        configurable: true,
+      });
+      const id = (component as any).nextClientEventId('wear');
+      expect(id).toContain('wear-uuid-1-');
+    } finally {
+      Object.defineProperty(globalThis, 'crypto', { value: originalCrypto, configurable: true });
+    }
+  });
+
+  it('builds query and syncUrl for both default and explicit parameter branches', () => {
+    const explicit = {
+      ...QUERY_FILTER,
+      group: 'favorites' as SmartGroup,
+      brand: 'Acme',
+      condition: 'New' as ItemCondition,
+      priceRange: [12, 420] as [number, number],
+      minWears: 3,
+      sortField: 'wearCount' as const,
+      sortDir: 'asc' as const,
+    } as VaultFilters;
+
+    expect((component as any).buildQuery(explicit)).toEqual(expect.objectContaining({
+      brand: 'Acme',
+      condition: 'New',
+      priceMin: 12,
+      priceMax: 420,
+      minWears: 3,
+      sortField: 'wearCount',
+      sortDir: 'asc',
+      continuationToken: undefined,
+    }));
+
+    (router.navigate as any).mockClear();
+    component['syncUrl'](explicit);
+    expect(router.navigate).toHaveBeenCalledWith([], expect.objectContaining({
+      queryParams: expect.objectContaining({
+        group: 'favorites',
+        priceMin: 12,
+        priceMax: 420,
+        minWears: 3,
+        brand: 'Acme',
+        condition: 'New',
+        sortField: 'wearCount',
+        sortDir: 'asc',
+      }),
+      replaceUrl: true,
+    }));
+  });
+
+  it('computes max price and known brand collection across item variants', () => {
+    (component as any).allItems.set([]);
+    expect(component.maxItemPrice()).toBe(5000);
+
+    (component as any).allItems.set([
+      { ...ITEM, id: 'x', price: { amount: 9000, originalCurrency: 'USD' }, brand: 'Alpha' },
+      { ...ITEM, id: 'y', price: undefined, brand: 'Beta' },
+      { ...ITEM, id: 'z', price: { amount: 420, originalCurrency: 'USD' }, brand: undefined },
+      { ...ITEM, id: 'w', price: { amount: 7200, originalCurrency: 'USD' }, brand: 'Alpha' },
+    ] as any[]);
+    expect(component.maxItemPrice()).toBe(9000);
+    expect((component as any).knownBrands()).toEqual(['Alpha', 'Beta']);
+  });
+
+  it('handles errors for suggestion accept and dismiss flows', () => {
+    (component as any).wearSuggestions.set([SUGGESTION as any]);
+    wardrobeService.logWear = vi.fn().mockReturnValue(throwError(() => new Error('retry later')));
+    component.acceptSuggestion(SUGGESTION as any);
+    expect((component as any).wearSuggestions().length).toBe(1);
+
+    wardrobeService.updateWearSuggestionStatus = vi.fn().mockReturnValue(throwError(() => new Error('bad status')));
+    component.dismissSuggestion(SUGGESTION as any);
+    expect((component as any).wearSuggestions().length).toBe(1);
+  });
+
+  it('resets loadingMore when additional pages fail', () => {
+    (component as any).nextToken.set('tok');
+    (component as any).loadingMore.set(false);
+    wardrobeService.getAll = vi.fn().mockReturnValue(throwError(() => new Error('paged fail')));
+    component.loadMore();
+    expect((component as any).loadingMore()).toBe(false);
   });
 });

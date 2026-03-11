@@ -4,6 +4,7 @@ import { UserProfileService } from '../../core/services/user-profile.service';
 import { of, throwError } from 'rxjs';
 import { signal } from '@angular/core';
 import { UserProfile } from '../../core/services/user-profile.service';
+import { By } from '@angular/platform-browser';
 
 describe('ProfilePanelComponent', () => {
   let component: ProfilePanelComponent;
@@ -92,6 +93,86 @@ describe('ProfilePanelComponent', () => {
   it('computes button chip and style classes', () => {
     expect(component.styleChipClass('minimalist')).toContain('bg-transparent');
     expect(component.sysClass('US', false)).toContain('bg-white');
+  });
+
+  it('handles overlay and footer close interactions', () => {
+    const closedSpy = vi.fn();
+    component.closed.subscribe(() => closedSpy());
+
+    const backdrop = fixture.debugElement.query(By.css('div[style*="background"]'));
+    backdrop.triggerEventHandler('click');
+    expect(closedSpy).toHaveBeenCalledTimes(1);
+
+    const closeButton = fixture.debugElement.query(By.css('button[aria-label="Close"]'));
+    closeButton.triggerEventHandler('click');
+    expect(closedSpy).toHaveBeenCalledTimes(2);
+
+    const buttons = Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLElement>) as HTMLButtonElement[];
+    const cancel = buttons.find(
+      button => button.textContent?.trim() === 'Cancel',
+    );
+    cancel?.click();
+    expect(closedSpy).toHaveBeenCalledTimes(3);
+
+    const aside = fixture.debugElement.query(By.css('aside'));
+    const stopSpy = vi.fn();
+    aside.triggerEventHandler('click', { stopPropagation: stopSpy });
+    expect(stopSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('updates draft fields via template bindings and parse handlers', () => {
+    const currency = fixture.debugElement.query(By.css('select'));
+    currency.triggerEventHandler('ngModelChange', 'EUR');
+    fixture.detectChanges();
+    expect(component.draft.currencyCode).toBe('EUR');
+
+    const buttons = fixture.nativeElement.querySelectorAll('section button');
+    (Array.from(buttons) as HTMLButtonElement[]).find(btn => btn.textContent?.trim() === 'EU')?.click();
+    expect(component.draft.preferredSizeSystem).toBe('EU');
+
+    (Array.from(buttons) as HTMLButtonElement[]).find(btn => btn.textContent?.trim() === 'minimalist')?.click();
+    expect(component.draft.stylePreferences).toContain('minimalist');
+    (Array.from(buttons) as HTMLButtonElement[]).find(btn => btn.textContent?.trim() === 'minimalist')?.click();
+    expect(component.draft.stylePreferences).not.toContain('minimalist');
+
+    const numberInputs = fixture.debugElement.queryAll(By.css('input[type="number"]'));
+    numberInputs[0].triggerEventHandler('ngModelChange', 180);
+    numberInputs[1].triggerEventHandler('ngModelChange', 72);
+    numberInputs[2].triggerEventHandler('ngModelChange', 96);
+    numberInputs[3].triggerEventHandler('ngModelChange', 82);
+    numberInputs[4].triggerEventHandler('ngModelChange', 101);
+    numberInputs[5].triggerEventHandler('ngModelChange', 78);
+    expect(component.draft.waistCm).toBe(82);
+
+    const brandsInput = fixture.debugElement.query(By.css('input[placeholder="e.g. Nike, COS, Zara"]'));
+    brandsInput.triggerEventHandler('blur', { target: { value: 'Nike, COS,  ' } });
+    expect(component.draft.favoriteBrands).toEqual(['Nike', 'COS']);
+
+    const coloursInput = fixture.debugElement.query(By.css('input[placeholder="e.g. black, earth tones, pastels"]'));
+    coloursInput.triggerEventHandler('blur', { target: { value: 'black, white,  ' } });
+    expect(component.draft.preferredColours).toEqual(['black', 'white']);
+
+    const cityInput = fixture.debugElement.query(By.css('input[placeholder="e.g. London"]'));
+    cityInput.triggerEventHandler('ngModelChange', 'Paris');
+    expect(component.draft.locationCity).toBe('Paris');
+
+    const recommendationToggle = fixture.debugElement.query(By.css('button[role="switch"]'));
+    recommendationToggle.triggerEventHandler('click');
+    expect(component.draft.recommendationOptIn).toBe(false);
+    recommendationToggle.triggerEventHandler('click');
+    expect(component.draft.recommendationOptIn).toBe(true);
+  });
+
+  it('invokes save when save button is clicked', () => {
+    profileService.update.mockReturnValue(of({}));
+    fixture.detectChanges();
+    const saveButton = Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLElement>) as HTMLButtonElement[];
+    const save = saveButton.find(
+      b => b.textContent?.trim() === 'Save'
+    );
+    expect(save).toBeTruthy();
+    save?.click();
+    expect(profileService.update).toHaveBeenCalled();
   });
 });
 

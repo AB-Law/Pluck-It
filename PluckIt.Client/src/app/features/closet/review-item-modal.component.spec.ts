@@ -1,5 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { SimpleChanges } from '@angular/core';
+import { By } from '@angular/platform-browser';
 import { ReviewItemModalComponent } from './review-item-modal.component';
 import { UserProfileService } from '../../core/services/user-profile.service';
 import { ClothingItem } from '../../core/models/clothing-item.model';
@@ -46,6 +47,11 @@ describe('ReviewItemModalComponent', () => {
     component.ngOnChanges(createChanges(item));
     fixture.detectChanges();
   };
+
+  const queryButtons = (root: HTMLElement): HTMLButtonElement[] =>
+    Array.from(root.querySelectorAll('button')) as HTMLButtonElement[];
+  const queryInputs = (root: HTMLElement): HTMLInputElement[] =>
+    Array.from(root.querySelectorAll('input')) as HTMLInputElement[];
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
@@ -178,4 +184,117 @@ describe('ReviewItemModalComponent', () => {
     expect(component.condBtnClass('Good', true)).not.toContain('border-r');
     expect(component.letterSizeBtnClass('M', true)).toContain('text-[10px]');
   });
+
+  it('handles overlay, footer, and close interactions', () => {
+    const saved = vi.fn();
+    const updated = vi.fn();
+    const cancelled = vi.fn();
+    component.saved.subscribe(saved);
+    component.updated.subscribe(updated);
+    component.cancelled.subscribe(cancelled);
+    setInputItem(BASE_ITEM);
+
+    const root = fixture.nativeElement as HTMLElement;
+    const backdrop = root.querySelector('.backdrop-animate') as HTMLDivElement;
+    const shell = root.querySelector('.modal-animate') as HTMLDivElement;
+    const closeBtn = root.querySelector('[aria-label="Close"]') as HTMLButtonElement | null;
+    const buttons = queryButtons(root);
+    const saveBtn = buttons.find(btn => btn.textContent?.trim() === 'Add to Wardrobe') as HTMLButtonElement;
+    const cancelBtn = buttons.find(btn => btn.textContent?.trim() === 'Discard') as HTMLButtonElement;
+
+    backdrop.click();
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    shell.click();
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    closeBtn?.click();
+    expect(cancelled).toHaveBeenCalledTimes(2);
+    saveBtn?.click();
+    expect(saved).toHaveBeenCalledTimes(1);
+    cancelBtn?.click();
+    expect(cancelled).toHaveBeenCalledTimes(3);
+
+    component.isEditMode = true;
+    fixture.detectChanges();
+    const editSaveBtn = Array.from(root.querySelectorAll('button')).find(btn => btn.textContent?.trim() === 'Save Changes') as HTMLButtonElement;
+    editSaveBtn?.click();
+    expect(updated).toHaveBeenCalledTimes(1);
+  });
+
+  it('executes form control events for price, tags, care, condition, and size branches', () => {
+    const root = fixture.nativeElement as HTMLElement;
+    setInputItem({ ...BASE_ITEM, category: 'Footwear', size: { shoeSize: 9, system: 'US' }, careInfo: [], condition: 'Good' });
+
+    const priceInput = fixture.debugElement.query(By.css('input[placeholder=\"0.00\"]'));
+    priceInput.triggerEventHandler('ngModelChange', 42);
+    fixture.detectChanges();
+    expect(component.draft?.price?.amount).toBe(42);
+
+    const shoeInput = fixture.debugElement.query(By.css('input[placeholder=\"e.g. 10.5\"]'));
+    shoeInput.triggerEventHandler('ngModelChange', 10.5);
+    fixture.detectChanges();
+    expect(component.draft?.size).toEqual({ shoeSize: 10.5, system: 'US' });
+
+    const tagInput = queryInputs(root).find(
+      input => input.placeholder === 'Add tag…',
+    ) as HTMLInputElement;
+    tagInput.value = 'summer fit';
+    tagInput.dispatchEvent(new Event('input'));
+    tagInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(component.draft?.tags).toContain('summer fit');
+
+    const addTagBtn = queryButtons(root).find(
+      btn => btn.textContent?.trim() === 'ADD',
+    ) as HTMLButtonElement;
+    addTagBtn.click();
+    expect(component.draft?.tags.filter(t => t === 'summer fit')).toHaveLength(1);
+
+    const removeTagBtn = root.querySelector('[aria-label="Remove tag minimal"]') as HTMLButtonElement;
+    removeTagBtn?.click();
+    expect(component.draft?.tags).not.toContain('minimal');
+
+    const careButton = queryButtons(root).find(
+      btn => btn.textContent?.includes('DRY'),
+    ) as HTMLButtonElement;
+    careButton?.click();
+    expect(component.hasCare('dry_clean')).toBe(true);
+
+    const conditionBtn = queryButtons(root).find(
+      btn => btn.textContent?.trim() === 'Fair',
+    ) as HTMLButtonElement;
+    conditionBtn?.click();
+    expect(component.draft?.condition).toBe('Fair');
+  });
+
+  it('renders and triggers bottoms size handlers', () => {
+    setInputItem({ ...BASE_ITEM, category: 'Bottoms', size: { waist: 30, inseam: 32, system: 'US' } });
+    fixture.detectChanges();
+
+    const debugSelects = fixture.debugElement.queryAll(By.css('select'));
+    const categorySelect = debugSelects[0];
+    categorySelect.triggerEventHandler('ngModelChange', 'Bottoms');
+    fixture.detectChanges();
+
+    const updatedSelects = fixture.debugElement.queryAll(By.css('select'));
+    const waistSelect = updatedSelects[1];
+    waistSelect.triggerEventHandler('ngModelChange', 34);
+    fixture.detectChanges();
+    expect(component.draft?.size?.waist).toBe(34);
+
+    const inseamSelect = updatedSelects[2];
+    inseamSelect.triggerEventHandler('ngModelChange', 30);
+    fixture.detectChanges();
+    expect(component.draft?.size?.inseam).toBe(30);
+  });
+
+  it('renders and triggers letter-size buttons', () => {
+    setInputItem({ ...BASE_ITEM, category: 'Tops', size: { letter: 'S', system: 'US' } });
+    fixture.detectChanges();
+
+    const letterBtn = queryButtons(fixture.nativeElement).find(
+      btn => btn.textContent?.trim() === 'L',
+    ) as HTMLButtonElement;
+    letterBtn.click();
+    expect(component.draft?.size).toEqual({ letter: 'L', system: 'US' });
+  });
+
 });

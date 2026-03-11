@@ -99,4 +99,87 @@ describe('StylistPanelComponent', () => {
     component.saveMemory();
     expect(component.savingMemory()).toBe(false);
   });
+
+  it('opens and closes the memory panel', () => {
+    const root = fixture.nativeElement as HTMLElement;
+    const openBtn = root.querySelector('button[title="View conversation memory"]') as HTMLButtonElement | null;
+    expect(openBtn).toBeTruthy();
+    openBtn?.click();
+    fixture.detectChanges();
+
+    expect(component.memoryOpen()).toBe(true);
+    expect(root.textContent).toContain('Conversation Memory (editable)');
+
+    const closeBtn = Array.from(root.querySelectorAll('button')).find(btn => btn.textContent?.trim() === 'Close');
+    closeBtn?.click();
+    fixture.detectChanges();
+    expect(component.memoryOpen()).toBe(false);
+  });
+
+  it('emits panel close and renders selected-item banner text', () => {
+    const closeSpy = vi.fn();
+    component.closed.subscribe(closeSpy);
+
+    const root = fixture.nativeElement as HTMLElement;
+    const panelClose = root.querySelector('[aria-label="Close panel"]') as HTMLButtonElement | null;
+    panelClose?.click();
+    expect(closeSpy).toHaveBeenCalledTimes(1);
+
+    component.selectedItemIds.set(['item-a']);
+    fixture.detectChanges();
+    expect(root.textContent).toContain('1 item selected for styling');
+
+    component.selectedItemIds.set(['item-a', 'item-b']);
+    fixture.detectChanges();
+    expect(root.textContent).toContain('2 items selected for styling');
+  });
+
+  it('renders assistant and user message variants', () => {
+    component.messages.set([
+      { role: 'assistant', text: 'Hello Stylist', time: '09:00' },
+      { role: 'user', text: 'Plan outfit?', time: '09:01' },
+      { role: 'assistant', text: 'Here is one', time: '09:02', streaming: true },
+    ]);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Hello Stylist');
+    expect(fixture.nativeElement.textContent).toContain('Plan outfit?');
+  });
+
+  it('shows tool labels and clears thinking via tool lifecycle events', () => {
+    component.thinking.set(true);
+    (component as any).handleEvent({ type: 'tool_use', name: 'search_wardrobe' }, '');
+    expect(component.currentTool()).toBe('search_wardrobe');
+    expect(component.toolLabel()).toContain('Searching wardrobe');
+
+    (component as any).handleEvent(
+      { type: 'tool_result', name: 'search_wardrobe', summary: '2 matches' },
+      '',
+    );
+    expect(component.currentTool()).toBeNull();
+  });
+
+  it('finalises stream on done and captures chat history', () => {
+    (component as any).handleEvent({ type: 'token', content: 'hello' }, 'How do I dress?');
+    (component as any).handleEvent({ type: 'done' }, 'How do I dress?');
+
+    expect(component.thinking()).toBe(false);
+    expect(component.messages().some(m => m.text.includes('hello'))).toBe(true);
+    expect((component as any).chatHistory).toEqual([
+      { role: 'user', content: 'How do I dress?' },
+      { role: 'assistant', content: 'hello' },
+    ]);
+  });
+
+  it('adds assistant error bubble when stream fails without streaming bubble', () => {
+    (component as any).handleEvent({ type: 'error', content: 'service down' }, 'weather');
+    expect(component.thinking()).toBe(false);
+    expect(component.messages().some(m => m.text === 'service down')).toBe(true);
+  });
+
+  it('does not send while thinking is active', () => {
+    component.thinking.set(true);
+    component.inputText = 'Tell me an outfit';
+    component.sendMessage();
+    expect(chatService.streamMessage).not.toHaveBeenCalled();
+  });
 });
