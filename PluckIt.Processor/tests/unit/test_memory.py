@@ -11,9 +11,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agents.memory import ConversationMemory, SUMMARY_TRIGGER, load_memory, save_memory, maybe_summarize
+from agents import memory as memory_module
+from agents.memory import ConversationMemory, SUMMARY_TRIGGER, SUMMARY_COOLDOWN_MESSAGES, load_memory, save_memory, maybe_summarize
 
 TEST_USER = "test-user-001"
+
+
+@pytest.fixture(autouse=True)
+def _reset_memory_summary_state():
+    memory_module._SUMMARY_STATE.clear()
+    memory_module._nano_llm = None
 
 
 # ── load_memory ───────────────────────────────────────────────────────────────
@@ -100,3 +107,89 @@ async def test_maybe_summarize_exactly_one_below_threshold_returns_none():
     messages = [{"role": "user", "content": "x"} for _ in range(SUMMARY_TRIGGER - 1)]
     result = await maybe_summarize(TEST_USER, messages, existing_summary="some context")
     assert result is None
+
+
+@pytest.mark.unit
+async def test_maybe_summarize_skips_when_within_cooldown_after_summary():
+    messages = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"msg {i}"} for i in range(SUMMARY_TRIGGER + 1)]
+
+    fake_llm_response = MagicMock()
+    fake_llm_response.content = "User is into minimal fashion."
+    fake_llm = MagicMock()
+    fake_llm.ainvoke = AsyncMock(return_value=fake_llm_response)
+
+    mock_container = AsyncMock()
+    mock_container.upsert_item = AsyncMock(return_value={})
+
+    with (
+        patch("langchain_openai.AzureChatOpenAI", return_value=fake_llm),
+        patch("agents.memory.get_conversations_container", return_value=mock_container),
+    ):
+        first = await maybe_summarize(TEST_USER, messages, existing_summary="")
+        second = await maybe_summarize(
+            TEST_USER,
+            messages + [{"role": "user", "content": "another msg"}],
+            existing_summary=first or "",
+        )
+
+    assert first is not None
+    assert second is None
+    assert fake_llm.ainvoke.await_count == 1
+
+
+@pytest.mark.unit
+async def test_maybe_summarize_rearms_when_existing_summary_is_cleared():
+    messages = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"msg {i}"} for i in range(SUMMARY_TRIGGER)]
+
+    fake_llm_response = MagicMock()
+    fake_llm_response.content = "User is into minimal fashion."
+    fake_llm = MagicMock()
+    fake_llm.ainvoke = AsyncMock(return_value=fake_llm_response)
+
+    mock_container = AsyncMock()
+    mock_container.upsert_item = AsyncMock(return_value={})
+
+    with (
+        patch("langchain_openai.AzureChatOpenAI", return_value=fake_llm),
+        patch("agents.memory.get_conversations_container", return_value=mock_container),
+    ):
+        first = await maybe_summarize(TEST_USER, messages, existing_summary="previous summary")
+        second = await maybe_summarize(
+            TEST_USER,
+            messages + [{"role": "user", "content": "another msg"}],
+            existing_summary="",
+        )
+
+    assert first is not None
+    assert second is not None
+    assert fake_llm.ainvoke.await_count == 2
+    assert mock_container.upsert_item.await_count == 2
+    assert memory_module._SUMMARY_STATE.get(TEST_USER) == len(messages) + 1
+
+
+@pytest.mark.unit
+async def test_maybe_summarize_re_arms_after_cooldown():
+    messages = [{"role": "user" if i % 2 == 0 else "assistant", "content": f"msg {i}"} for i in range(SUMMARY_TRIGGER + 1)]
+
+    fake_llm_response = MagicMock()
+    fake_llm_response.content = "User is into minimal fashion."
+    fake_llm = MagicMock()
+    fake_llm.ainvoke = AsyncMock(return_value=fake_llm_response)
+
+    mock_container = AsyncMock()
+    mock_container.upsert_item = AsyncMock(return_value={})
+
+    with (
+        patch("langchain_openai.AzureChatOpenAI", return_value=fake_llm),
+        patch("agents.memory.get_conversations_container", return_value=mock_container),
+    ):
+        first = await maybe_summarize(TEST_USER, messages, existing_summary="")
+        second = await maybe_summarize(
+            TEST_USER,
+            messages + [{"role": "user", "content": f"msg {i}"} for i in range(SUMMARY_COOLDOWN_MESSAGES)],
+            existing_summary=first or "",
+        )
+
+    assert first is not None
+    assert second is not None
+    assert fake_llm.ainvoke.await_count == 2

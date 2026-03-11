@@ -22,6 +22,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import threading
 from typing import Optional
 
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
@@ -32,11 +33,36 @@ logger = logging.getLogger(__name__)
 
 # After this many total messages the oldest half is summarised.
 SUMMARY_TRIGGER = 12
+# Minimum number of additional messages required since last summarisation before the
+# next nano summarisation round is allowed.
+SUMMARY_COOLDOWN_MESSAGES = 20
 # Model used exclusively for cheap summarisation.
 _NANO_DEPLOYMENT = os.getenv("AZURE_OPENAI_NANO_DEPLOYMENT",
                               os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini"))
 
 _nano_llm = None
+_SUMMARY_STATE: dict[str, int] = {}
+_SUMMARY_STATE_LOCK = threading.Lock()
+
+
+
+def _try_start_summary(user_id: str, message_count: int) -> bool:
+    if message_count < SUMMARY_TRIGGER:
+        return False
+    with _SUMMARY_STATE_LOCK:
+        last_count = _SUMMARY_STATE.get(user_id)
+        if last_count is None:
+            _SUMMARY_STATE[user_id] = message_count
+            return True
+        if message_count - last_count < SUMMARY_COOLDOWN_MESSAGES:
+            return False
+        _SUMMARY_STATE[user_id] = message_count
+        return True
+
+
+def _reset_summary_state(user_id: str) -> None:
+    with _SUMMARY_STATE_LOCK:
+        _SUMMARY_STATE.pop(user_id, None)
 
 
 def _get_nano_llm():
@@ -101,7 +127,10 @@ async def maybe_summarize(
     into a short summary using the nano model. Returns the new summary string,
     or None if no summarisation was needed.
     """
-    if len(messages) < SUMMARY_TRIGGER:
+    if not existing_summary:
+        _reset_summary_state(user_id)
+
+    if not _try_start_summary(user_id, len(messages)):
         return None
 
     from langchain_core.messages import SystemMessage, HumanMessage as LCHuman
@@ -131,5 +160,6 @@ async def maybe_summarize(
         await save_memory(user_id, new_summary)
         return new_summary
     except Exception as exc:
+        _reset_summary_state(user_id)
         logger.warning("Summarisation failed for user %s: %s", user_id, exc)
         return None

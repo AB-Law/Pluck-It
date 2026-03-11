@@ -39,6 +39,7 @@ import io
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import random
 import time
 import uuid
@@ -120,6 +121,8 @@ _TASTE_JOB_BASE_BACKOFF_SECONDS = _get_float_env("TASTE_JOB_BASE_BACKOFF_SECONDS
 _TASTE_JOB_MAX_BACKOFF_SECONDS = _get_float_env("TASTE_JOB_MAX_BACKOFF_SECONDS", 6.0)
 _TASTE_JOB_JITTER_SECONDS = _get_float_env("TASTE_JOB_JITTER_SECONDS", 0.2)
 _TASTE_JOB_PROFILE_UPDATE_MAX_RETRIES = 2
+_WEEKLY_DIGEST_MAX_CONCURRENCY = _get_int_env("WEEKLY_DIGEST_MAX_CONCURRENCY", 6)
+_SCRAPER_MAX_CONCURRENCY = _get_int_env("SCRAPER_MAX_CONCURRENCY", 4)
 
 _TASTE_JOB_QUEUE_MAX_SIZE = _get_int_env("TASTE_JOB_QUEUE_MAX_SIZE", 1024)
 
@@ -554,6 +557,141 @@ def _infer_basic_tags(image: Image.Image) -> dict[str, Any]:
 
 # ── Timer trigger: weekly wardrobe digest ────────────────────────────────────
 
+def _run_weekly_digest_user(user_id: str) -> str:
+    """
+    Run one digest job and return one of: generated / skipped_by_hash / skipped_by_opt_out / failed.
+    """
+    start = time.perf_counter()
+    try:
+        from agents.digest_agent import run_digest_for_user_with_status
+        _, status = run_digest_for_user_with_status(user_id)
+        if status not in {"generated", "skipped_by_hash", "skipped_by_opt_out", "failed"}:
+            status = "failed"
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Weekly digest failed for user %s: %s", user_id, exc)
+        status = "failed"
+    elapsed_ms = (time.perf_counter() - start) * 1000.0
+    logger.info(
+        "PluckItWeeklyDigest user=%s completed with status=%s in %.2f ms",
+        user_id,
+        status,
+        elapsed_ms,
+    )
+    return status
+
+
+def _run_weekly_digest_job() -> None:
+    from collections import Counter
+
+    from agents.db import get_user_profiles_container_sync
+
+    logger.info(
+        "PluckItWeeklyDigest: starting bounded fan-out with max_concurrency=%d",
+        _WEEKLY_DIGEST_MAX_CONCURRENCY,
+    )
+
+    start = time.perf_counter()
+    try:
+        profile_container = get_user_profiles_container_sync()
+        user_profiles = list(profile_container.read_all_items())
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Could not load user profiles for weekly digest: %s", exc)
+        return
+
+    counter = Counter[str]()
+    with ThreadPoolExecutor(max_workers=max(1, _WEEKLY_DIGEST_MAX_CONCURRENCY)) as pool:
+        futures = {}
+        for profile in user_profiles:
+            user_id = (profile or {}).get("id")
+            if not user_id:
+                continue
+            futures[pool.submit(_run_weekly_digest_user, user_id)] = user_id
+
+        for future in as_completed(futures):
+            user_id = futures[future]
+            try:
+                outcome = future.result()
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Weekly digest worker crashed for user %s: %s", user_id, exc)
+                outcome = "failed"
+            counter[outcome] += 1
+
+    elapsed_ms = (time.perf_counter() - start) * 1000.0
+    logger.info(
+        "PluckItWeeklyDigest complete: users=%d elapsed_ms=%.2f outcomes=%s",
+        sum(counter.values()),
+        elapsed_ms,
+        dict(counter),
+    )
+
+
+def _run_scraper_source_job(source_id: str) -> str:
+    start = time.perf_counter()
+    try:
+        from agents.scraper_runner import run_for_source
+
+        new_items = run_for_source(source_id)
+        status = "ok" if new_items else "no_items"
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Scraper source failed for %s: %s", source_id, exc)
+        status = "failed"
+    elapsed_ms = (time.perf_counter() - start) * 1000.0
+    logger.info(
+        "PluckItScraper source=%s completed with status=%s in %.2f ms",
+        source_id,
+        status,
+        elapsed_ms,
+    )
+    return status
+
+
+def _run_scraper_job() -> None:
+    from collections import Counter
+
+    from agents.db import get_scraper_sources_container_sync
+
+    logger.info(
+        "PluckItScraper: starting bounded fan-out with max_concurrency=%d",
+        _SCRAPER_MAX_CONCURRENCY,
+    )
+    start = time.perf_counter()
+    try:
+        sources_container = get_scraper_sources_container_sync()
+        sources = list(sources_container.query_items(
+            query="SELECT * FROM c WHERE c.isActive = true AND c.isGlobal = true",
+            enable_cross_partition_query=True,
+        ))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Could not load scraper sources for PluckItScraper: %s", exc)
+        return
+
+    counter = Counter[str]()
+    with ThreadPoolExecutor(max_workers=max(1, _SCRAPER_MAX_CONCURRENCY)) as pool:
+        futures = {}
+        for source_doc in sources:
+            source_id = (source_doc or {}).get("id")
+            if not source_id:
+                continue
+            futures[pool.submit(_run_scraper_source_job, source_id)] = source_id
+
+        for future in as_completed(futures):
+            source_id = futures[future]
+            try:
+                outcome = future.result()
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Scraper worker crashed for source %s: %s", source_id, exc)
+                outcome = "failed"
+            counter[outcome] += 1
+
+    elapsed_ms = (time.perf_counter() - start) * 1000.0
+    logger.info(
+        "PluckItScraper complete: sources=%d elapsed_ms=%.2f outcomes=%s",
+        sum(counter.values()),
+        elapsed_ms,
+        dict(counter),
+    )
+
+
 @app.function_name(name="PluckItWeeklyDigest")
 @app.timer_trigger(
     arg_name="digest_timer",
@@ -564,8 +702,7 @@ def _infer_basic_tags(image: Image.Image) -> dict[str, Any]:
 def pluck_it_weekly_digest(digest_timer: func.TimerRequest) -> None:
     logger.info("PluckItWeeklyDigest: triggered (past_due=%s)", digest_timer.past_due)
     try:
-        from agents.digest_agent import run_weekly_digest
-        run_weekly_digest()
+        _run_weekly_digest_job()
     except Exception as exc:
         logger.exception("Weekly digest failed: %s", exc)
 
@@ -600,8 +737,7 @@ def pluck_it_mood_processor(mood_timer: func.TimerRequest) -> None:
 def pluck_it_scraper(scraper_timer: func.TimerRequest) -> None:
     logger.info("PluckItScraper: triggered (past_due=%s)", scraper_timer.past_due)
     try:
-        from agents.scraper_runner import run_global_scrapers
-        run_global_scrapers()
+        _run_scraper_job()
     except Exception as exc:
         logger.exception("Scraper run failed: %s", exc)
 

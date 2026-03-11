@@ -1,16 +1,196 @@
 """
 Unit tests for agents/digest_agent.py.
-
-All Cosmos DB and LLM calls are mocked — no real I/O.
 """
-import hashlib
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+import hashlib
+import json
 
-from agents.digest_agent import compute_wardrobe_hash
+from agents.digest_agent import (
+    _save_digest_and_update_profile,
+    compute_wardrobe_hash,
+    run_digest_for_user_with_status,
+    run_weekly_digest,
+)
 
+
+@pytest.mark.unit
+def test_run_digest_for_user_with_status_fails_when_wardrobe_cannot_load():
+    with patch("agents.digest_agent._load_user_wardrobe", return_value=None):
+        digest, outcome = run_digest_for_user_with_status("user-fail-load")
+
+    assert digest is None
+    assert outcome == "failed"
+
+
+@pytest.mark.unit
+def test_run_digest_for_user_with_status_skips_by_hash():
+    profile_container = MagicMock()
+    profile_container.read_item.return_value = {
+        "id": "user-hash-match",
+        "wardrobeHashAtLastDigest": "hash-123",
+        "recommendationOptIn": True,
+    }
+    with (
+        patch("agents.digest_agent.get_user_profiles_container_sync", return_value=profile_container),
+        patch("agents.digest_agent._load_user_wardrobe", return_value={"items": [], "item_ids": ["item-1"]}),
+        patch("agents.digest_agent.compute_wardrobe_hash", return_value="hash-123"),
+    ):
+        digest, outcome = run_digest_for_user_with_status("user-hash-match")
+
+    assert digest is None
+    assert outcome == "skipped_by_hash"
+
+
+@pytest.mark.unit
+def test_run_digest_for_user_with_status_skips_by_opt_out():
+    profile_container = MagicMock()
+    profile_container.read_item.return_value = {
+        "id": "user-opt-out",
+        "wardrobeHashAtLastDigest": "other-hash",
+        "recommendationOptIn": False,
+    }
+    with (
+        patch("agents.digest_agent.get_user_profiles_container_sync", return_value=profile_container),
+        patch("agents.digest_agent._load_user_wardrobe", return_value={"items": [], "item_ids": ["item-1"]}),
+        patch("agents.digest_agent.compute_wardrobe_hash", return_value="hash-123"),
+    ):
+        digest, outcome = run_digest_for_user_with_status("user-opt-out")
+
+    assert digest is None
+    assert outcome == "skipped_by_opt_out"
+
+
+@pytest.mark.unit
+def test_run_digest_for_user_with_status_generates_digest():
+    profile_container = MagicMock()
+    profile_container.read_item.return_value = {
+        "id": "user-generate",
+        "wardrobeHashAtLastDigest": "old-hash",
+        "recommendationOptIn": True,
+        "climateZone": "temperate",
+    }
+    with (
+        patch("agents.digest_agent.get_user_profiles_container_sync", return_value=profile_container),
+        patch("agents.digest_agent._load_user_wardrobe", return_value={
+            "items": [{"wearCount": 1}, {"wearCount": 2}],
+            "item_ids": ["item-1", "item-2"],
+        }),
+        patch("agents.digest_agent.compute_wardrobe_hash", return_value="hash-456"),
+        patch("agents.digest_agent._should_skip_digest", return_value=False),
+        patch("agents.digest_agent._analyze_wardrobe", return_value=([], {}, [])),
+        patch("agents.digest_agent._load_recent_feedback", return_value=([], [])),
+        patch("agents.digest_agent._generate_suggestions", return_value=[{"item": "jacket", "rationale": "works great"}]),
+        patch("agents.digest_agent._compute_style_confidence", return_value=0.77),
+        patch("agents.digest_agent._create_digest_doc", return_value={"id": "d-1"}),
+        patch("agents.digest_agent._save_digest_and_update_profile"),
+    ):
+        digest, outcome = run_digest_for_user_with_status("user-generate")
+
+    assert digest == {"id": "d-1"}
+    assert outcome == "generated"
+
+
+@pytest.mark.unit
+def test_run_digest_for_user_with_status_fails_when_save_fails():
+    profile_container = MagicMock()
+    profile_container.read_item.return_value = {
+        "id": "user-save-fail",
+        "wardrobeHashAtLastDigest": "old-hash",
+        "recommendationOptIn": True,
+        "climateZone": "temperate",
+    }
+    with (
+        patch("agents.digest_agent.get_user_profiles_container_sync", return_value=profile_container),
+        patch("agents.digest_agent._load_user_wardrobe", return_value={
+            "items": [{"wearCount": 1}, {"wearCount": 2}],
+            "item_ids": ["item-1", "item-2"],
+        }),
+        patch("agents.digest_agent.compute_wardrobe_hash", return_value="hash-456"),
+        patch("agents.digest_agent._should_skip_digest", return_value=False),
+        patch("agents.digest_agent._analyze_wardrobe", return_value=([], {}, [])),
+        patch("agents.digest_agent._load_recent_feedback", return_value=([], [])),
+        patch("agents.digest_agent._generate_suggestions", return_value=[{"item": "jacket", "rationale": "works great"}]),
+        patch("agents.digest_agent._compute_style_confidence", return_value=0.77),
+        patch("agents.digest_agent._create_digest_doc", return_value={"id": "d-1"}),
+        patch("agents.digest_agent._save_digest_and_update_profile", return_value=False),
+    ):
+        digest, outcome = run_digest_for_user_with_status("user-save-fail")
+
+    assert digest is None
+    assert outcome == "failed"
+
+
+@pytest.mark.unit
+def test_save_digest_and_update_profile_returns_false_on_exception():
+    profile_container = MagicMock()
+    profile = {
+        "id": "user-save-exc",
+        "wardrobeHashAtLastDigest": "old-hash",
+        "climateZone": "temperate",
+    }
+    digest = {"wardrobeHash": "new-hash"}
+    failing_container = MagicMock()
+    failing_container.upsert_item.side_effect = Exception("upsert failed")
+
+    with patch("agents.digest_agent.get_digests_container_sync", return_value=failing_container):
+        result = _save_digest_and_update_profile(profile_container, profile, digest, None, "temperate")
+
+    assert result is False
+
+
+@pytest.mark.unit
+def test_run_weekly_digest_tracks_outcomes_and_handles_failures():
+    read_all_profiles = MagicMock(return_value=[
+        {"id": "user-good"},
+        {"id": "user-bad"},
+        {"id": ""},
+        {},
+    ])
+    profile_container = MagicMock()
+    profile_container.read_all_items = read_all_profiles
+
+    def _run_digest_side_effect(user_id: str):
+        if user_id == "user-bad":
+            raise RuntimeError("boom")
+        return None, "generated"
+
+    with (
+        patch("agents.digest_agent.get_user_profiles_container_sync", return_value=profile_container),
+        patch("agents.digest_agent.run_digest_for_user_with_status", side_effect=_run_digest_side_effect),
+        patch("agents.digest_agent.logger.info") as mock_info,
+    ):
+        run_weekly_digest()
+
+    assert mock_info.call_count >= 2
+    last_call = mock_info.call_args_list[-1]
+    assert "Weekly digest complete" in last_call.args[0]
+@pytest.mark.unit
+def test_run_digest_for_user_with_status_fails_when_no_suggestions():
+    profile_container = MagicMock()
+    profile_container.read_item.return_value = {
+        "id": "user-no-suggestions",
+        "wardrobeHashAtLastDigest": "old-hash",
+        "recommendationOptIn": True,
+        "climateZone": "temperate",
+    }
+    with (
+        patch("agents.digest_agent.get_user_profiles_container_sync", return_value=profile_container),
+        patch("agents.digest_agent._load_user_wardrobe", return_value={
+            "items": [{"wearCount": 1}],
+            "item_ids": ["item-1"],
+        }),
+        patch("agents.digest_agent.compute_wardrobe_hash", return_value="hash-456"),
+        patch("agents.digest_agent._should_skip_digest", return_value=False),
+        patch("agents.digest_agent._analyze_wardrobe", return_value=([], {}, [])),
+        patch("agents.digest_agent._load_recent_feedback", return_value=([], [])),
+        patch("agents.digest_agent._generate_suggestions", return_value=[]),
+    ):
+        digest, outcome = run_digest_for_user_with_status("user-no-suggestions")
+
+    assert digest is None
+    assert outcome == "failed"
 
 # ── compute_wardrobe_hash ────────────────────────────────────────────────────
 

@@ -25,7 +25,7 @@ import logging
 import os
 from collections import Counter
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Literal, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import AzureChatOpenAI
@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 # Items fed into the LLM prompt — keeps prompt tokens bounded for p95 < 2.5 s AC.
 _PROMPT_ITEM_LIMIT = 50
+_DigestOutcome = Literal["skipped_by_hash", "skipped_by_opt_out", "generated", "failed"]
 
 
 def _get_env(name: str, default: Optional[str] = None) -> str:
@@ -120,10 +121,26 @@ def run_digest_for_user(user_id: str, force: bool = False) -> Optional[dict]:
     Synchronous digest run for a single user. Returns the digest dict or None
     if skipped (wardrobe unchanged) or on error.
     """
+    result, _ = run_digest_for_user_with_status(user_id, force=force)
+    return result
+
+
+def run_digest_for_user_with_status(user_id: str, force: bool = False) -> tuple[Optional[dict], _DigestOutcome]:
+    """
+    Same as `run_digest_for_user`, plus internal status for scheduler metrics.
+
+    Status values:
+      - skipped_by_hash: no change in wardrobe hash
+      - skipped_by_opt_out: user disabled recommendations
+      - generated: digest generated and persisted
+      - failed: no digest produced due runtime issues or LLM empty output
+    """
     # 1. Load data
     wardrobe_data = _load_user_wardrobe(user_id)
-    if not wardrobe_data or not wardrobe_data["item_ids"]:
-        return None
+    if wardrobe_data is None:
+        return None, "failed"
+    if not wardrobe_data["item_ids"]:
+        return None, "skipped_by_hash"
 
     profile_container = get_user_profiles_container_sync()
     profile = _get_user_profile(profile_container, user_id)
@@ -131,7 +148,9 @@ def run_digest_for_user(user_id: str, force: bool = False) -> Optional[dict]:
     # 2. Skip checks
     current_hash = compute_wardrobe_hash(wardrobe_data["item_ids"])
     if _should_skip_digest(profile, current_hash, force):
-        return None
+        if profile.get("wardrobeHashAtLastDigest") == current_hash and not force:
+            return None, "skipped_by_hash"
+        return None, "skipped_by_opt_out"
 
     # 3. Analyze wardrobe & feedback
     ranked_items, category_counts, climate_signals = _analyze_wardrobe(wardrobe_data["items"])
@@ -148,16 +167,17 @@ def run_digest_for_user(user_id: str, force: bool = False) -> Optional[dict]:
         climate_zone, items_with_history, len(wardrobe_data["items"])
     )
     if not suggestions:
-        return None
+        return None, "failed"
 
     # 5. Finalize and Save
     style_confidence = _compute_style_confidence(suggestions, category_counts, ranked_items)
     digest = _create_digest_doc(user_id, current_hash, suggestions, items_with_history, 
                                 wardrobe_data["item_ids"], profile, climate_zone)
     
-    _save_digest_and_update_profile(profile_container, profile, digest, style_confidence, climate_zone)
+    if not _save_digest_and_update_profile(profile_container, profile, digest, style_confidence, climate_zone):
+        return None, "failed"
     
-    return digest
+    return digest, "generated"
 
 def _load_user_wardrobe(user_id: str) -> Optional[dict]:
     try:
@@ -306,8 +326,10 @@ def _save_digest_and_update_profile(profile_container, profile, digest, confiden
         if climate and not profile.get("climateZone"):
             profile["climateZone"] = climate
         profile_container.upsert_item(profile)
+        return True
     except Exception as exc:
         logger.warning("Digest: final save failed: %s", exc)
+        return False
 
 
 def run_weekly_digest() -> None:
@@ -315,9 +337,10 @@ def run_weekly_digest() -> None:
     Entry point for the timer trigger. Iterates all UserProfiles and runs digests
     for each user. Skips users whose wardrobes haven't changed.
     """
+    from collections import Counter
+
     logger.info("Weekly digest starting.")
-    processed = 0
-    skipped = 0
+    outcome_counter: Counter[str] = Counter()
 
     try:
         profile_container = get_user_profiles_container_sync()
@@ -330,10 +353,18 @@ def run_weekly_digest() -> None:
         user_id = profile.get("id")
         if not user_id:
             continue
-        result = run_digest_for_user(user_id)
-        if result:
-            processed += 1
-        else:
-            skipped += 1
+        try:
+            _, outcome = run_digest_for_user_with_status(user_id)
+        except Exception as exc:
+            logger.exception("Digest scheduler failure for user %s: %s", user_id, exc)
+            outcome = "failed"
+        outcome_counter[outcome] += 1
 
-    logger.info("Weekly digest complete. Processed: %d, Skipped: %d.", processed, skipped)
+    logger.info(
+        "Weekly digest complete. Outcomes: skipped_by_hash=%d, skipped_by_opt_out=%d, "
+        "generated=%d, failed=%d.",
+        outcome_counter["skipped_by_hash"],
+        outcome_counter["skipped_by_opt_out"],
+        outcome_counter["generated"],
+        outcome_counter["failed"],
+    )
