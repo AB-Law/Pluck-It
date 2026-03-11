@@ -1063,8 +1063,7 @@ async def ingest_reddit_data(body: RedditIngestBatch, user_id: Annotated[str, De
 
     # Spot-check logic: 10% chance
     verified = True
-    do_audit = random.random() < 0.1
-    # In production, we'd trigger a background audit here if do_audit is True
+    # TODO: trigger background audit on ~10% of requests (random.random() < 0.1)
 
     loop = asyncio.get_event_loop()
     upserted = await loop.run_in_executor(
