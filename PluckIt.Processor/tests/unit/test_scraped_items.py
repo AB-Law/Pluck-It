@@ -110,6 +110,48 @@ async def test_scraped_items_search_returns_error_when_embedding_fails() -> None
     assert payload == '{"items": [], "note": "Could not embed query."}'
 
 
+@pytest.mark.unit
+async def test_scraped_items_search_returns_top_ranked_product_payload() -> None:
+    class _Embedder:
+        async def aembed_query(self, _query: str) -> list[float]:
+            await asyncio.sleep(0)
+            return [1.0, 0.0]
+
+    documents = [
+        {"id": "best", "title": "Textured linen blazer", "imageUrl": "https://example.com/blazer.jpg", "productUrl": "https://shop.example.com/blazer", "buyLinks": ["https://buy.example.com/blazer"], "tags": ["blazer", "linen"], "sourceId": "global-1", "scoreSignal": 42, "embedding": [1.0, 0.0]},
+        {"id": "next", "title": "Lightweight suede jacket", "imageUrl": "https://example.com/jacket.jpg", "productUrl": "https://shop.example.com/jacket", "buyLinks": ["https://buy.example.com/jacket"], "tags": ["jacket", "fall"], "sourceId": "global-1", "scoreSignal": 38, "embedding": [0.95, 0.0]},
+        {"id": "cool", "title": "Smart relaxed blazer", "imageUrl": "https://example.com/smart.jpg", "productUrl": "https://shop.example.com/smart", "buyLinks": ["https://buy.example.com/smart"], "tags": ["blazer", "casual"], "sourceId": "global-2", "scoreSignal": 36, "embedding": [0.90, 0.0]},
+        {"id": "nice", "title": "Weekend utility blazer", "imageUrl": "https://example.com/weekend.jpg", "productUrl": "https://shop.example.com/weekend", "buyLinks": ["https://buy.example.com/weekend"], "tags": ["blazer", "weekend"], "sourceId": "global-2", "scoreSignal": 30, "embedding": [0.85, 0.0]},
+        {"id": "fallback", "title": "Neutral street blazer", "imageUrl": "https://example.com/street.jpg", "productUrl": "https://shop.example.com/street", "buyLinks": ["https://buy.example.com/street"], "tags": ["blazer", "neutral"], "sourceId": "global-3", "scoreSignal": 29, "embedding": [0.80, 0.0]},
+        {"id": "low", "title": "Ignored low-score cardigan", "imageUrl": "https://example.com/cardigan.jpg", "productUrl": "https://shop.example.com/cardigan", "buyLinks": ["https://buy.example.com/cardigan"], "tags": ["cardigan"], "sourceId": "global-4", "scoreSignal": 15, "embedding": [0.20, 0.0]},
+    ]
+
+    container = MagicMock()
+    container.query_items = _async_query(documents)
+
+    with patch("agents.tools.scraped_items._build_embedder", return_value=_Embedder()):
+        with patch("agents.tools.scraped_items.get_scraped_items_container", return_value=container):
+            payload = await search_scraped_items.ainvoke({"query": "soft neutral blazer for spring"})
+
+    data = json.loads(payload)
+    assert len(data["items"]) == 5
+    assert [item["title"] for item in data["items"]] == [
+        "Textured linen blazer",
+        "Lightweight suede jacket",
+        "Smart relaxed blazer",
+        "Weekend utility blazer",
+        "Neutral street blazer",
+    ]
+    first = data["items"][0]
+    assert first["title"] == "Textured linen blazer"
+    assert first["imageUrl"] == "https://example.com/blazer.jpg"
+    assert first["productUrl"] == "https://shop.example.com/blazer"
+    assert first["buyLinks"] == ["https://buy.example.com/blazer"]
+    assert "tags" in first
+    assert first["sourceId"] == "global-1"
+    assert first["scoreSignal"] == 42
+
+
 def test_get_env_raises_when_missing_env_var() -> None:
     with patch.dict(os.environ, {}, clear=True):
         with pytest.raises(RuntimeError, match="Missing env var: TESTING_ONLY"):

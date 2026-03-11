@@ -158,6 +158,13 @@ describe('StylistPanelComponent', () => {
     expect(component.currentTool()).toBeNull();
   });
 
+  it('shows discovery label for search_scraped_items', () => {
+    component.thinking.set(true);
+    (component as any).handleEvent({ type: 'tool_use', name: 'search_scraped_items' }, '');
+    expect(component.currentTool()).toBe('search_scraped_items');
+    expect(component.toolLabel()).toContain('Discovering items');
+  });
+
   it('finalises stream on done and captures chat history', () => {
     (component as any).handleEvent({ type: 'token', content: 'hello' }, 'How do I dress?');
     (component as any).handleEvent({ type: 'done' }, 'How do I dress?');
