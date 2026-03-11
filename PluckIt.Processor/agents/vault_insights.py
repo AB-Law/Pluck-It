@@ -242,26 +242,35 @@ def _get_top_color_insight(events: list[dict], item_by_id: dict) -> Optional[dic
         return {"color": top_color, "pct": round((count / total) * 100.0, 1)}
     return None
 
+def _normalize_price_dict(price_raw) -> dict:
+    if isinstance(price_raw, dict):
+        return price_raw
+    return {"amount": price_raw}
+
+
+def _converted_price(item: dict, currency: str) -> Optional[float]:
+    price = _normalize_price_dict(item.get("price") or {})
+    return _convert(float(price.get("amount") or 0), price.get("originalCurrency"), currency)
+
+
 def _get_unworn_insights(items: list[dict], now: datetime, currency: str) -> tuple[Optional[float], Optional[dict]]:
     cutoff = now - timedelta(days=90)
     unworn_count = 0
     max_amount = -1.0
     most_expensive = None
-    
+
     for item in items:
         wear_count = int(item.get("wearCount") or 0)
         last_worn = _parse_iso(item.get("lastWornAt"))
         if last_worn is None or last_worn < cutoff:
             unworn_count += 1
-            
+
         if wear_count == 0:
-            price = item.get("price") or {}
-            if not isinstance(price, dict): price = {"amount": price}
-            converted = _convert(float(price.get("amount") or 0), price.get("originalCurrency"), currency)
+            converted = _converted_price(item, currency)
             if converted and converted > max_amount:
                 max_amount = converted
                 most_expensive = {"itemId": item.get("id"), "amount": round(converted, 2), "currency": currency}
-                
+
     pct = round((unworn_count / len(items)) * 100.0, 1) if items else None
     return pct, most_expensive
 

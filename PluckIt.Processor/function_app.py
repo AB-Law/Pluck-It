@@ -1465,7 +1465,7 @@ async def record_quiz_response(
         session = await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: __import__(
-                "agents.taste_calibration", fromlist=["record_response"]
+                _TASTE_MODULE_NAME_TAG, fromlist=["record_response"]
             ).record_response(user_id, session_id, response_dict),
         )
         return {
@@ -1488,7 +1488,7 @@ async def complete_taste_quiz(
         inferred = await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: __import__(
-                "agents.taste_calibration", fromlist=["complete_quiz"]
+                _TASTE_MODULE_NAME_TAG, fromlist=["complete_quiz"]
             ).complete_quiz(user_id, session_id),
         )
         return {"sessionId": session_id, "inferredTastes": inferred}

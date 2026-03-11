@@ -189,6 +189,23 @@ def _should_skip_digest(profile: dict, current_hash: str, force: bool) -> bool:
         return True
     return False
 
+def _extract_price_amount(price_raw) -> Optional[float]:
+    if isinstance(price_raw, dict):
+        return price_raw.get("amount")
+    if isinstance(price_raw, (int, float)):
+        return price_raw
+    return None
+
+
+def _collect_climate_signals(item: dict) -> list[str]:
+    events = sorted(item.get("wearEvents") or [], key=lambda e: e.get("occurredAt") or "", reverse=True)
+    return [
+        (ev.get("weatherSnapshot") or {}).get("conditions", "").lower()
+        for ev in events[:5]
+        if (ev.get("weatherSnapshot") or {}).get("conditions")
+    ]
+
+
 def _analyze_wardrobe(items: list[dict]) -> tuple[list[dict], Counter, list[str]]:
     counts = Counter()
     signals = []
@@ -196,26 +213,19 @@ def _analyze_wardrobe(items: list[dict]) -> tuple[list[dict], Counter, list[str]
     for item in items:
         cat = (item.get("category") or "other").lower()
         counts[cat] += 1
-        
+
         wear_count = item.get("wearCount", 0)
         score = _recency_score(wear_count, item.get("lastWornAt"))
-        
-        # Collect climate signals from top 5 events
-        events = sorted(item.get("wearEvents") or [], key=lambda e: e.get("occurredAt") or "", reverse=True)
-        for ev in events[:5]:
-            cond = (ev.get("weatherSnapshot") or {}).get("conditions")
-            if cond:
-                signals.append(cond.lower())
+        signals.extend(_collect_climate_signals(item))
 
-        price_raw = item.get("price")
-        price_amount = price_raw.get("amount") if isinstance(price_raw, dict) else (price_raw if isinstance(price_raw, (int, float)) else None)
+        price_amount = _extract_price_amount(item.get("price"))
         cpw = round(price_amount / wear_count, 2) if price_amount and wear_count > 0 else None
 
         scored.append({
             "category": cat, "brand": item.get("brand"), "aestheticTags": item.get("aestheticTags") or [],
             "wearCount": wear_count, "lastWornAt": item.get("lastWornAt"), "score": score, "costPerWear": cpw,
         })
-    
+
     scored.sort(key=lambda x: x["score"], reverse=True)
     return scored[:_PROMPT_ITEM_LIMIT], counts, signals
 
