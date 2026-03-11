@@ -149,7 +149,7 @@ export class ChatService {
   }
 
   /** Get the latest wardrobe digest suggestions. */
-  getLatestDigest(): Observable<{ digest: unknown | null }> {
+  getLatestDigest(): Observable<{ digest: unknown }> {
     const token = environment.production ? this.auth.getIdToken() : null;
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;

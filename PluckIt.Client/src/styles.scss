@@ -5,9 +5,7 @@
 // Explicitly tell Tailwind v4 to scan Angular inline templates and HTML files
 // (paths are relative to this file at src/styles.scss)
 // stylelint-disable-next-line css/at-rule-no-unknown
-@source "./app/**/*.ts";
 // stylelint-disable-next-line css/at-rule-no-unknown
-@source "./app/**/*.html";
 
 @theme {
   --color-primary: #258df4;

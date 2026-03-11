@@ -189,7 +189,7 @@ export class StylistPanelComponent implements OnInit, OnDestroy {
   /** Wardrobe item IDs pre-selected from the styling board. */
   @Input() selectedItemIds = signal<string[] | null>(null);
 
-  @ViewChild('messageList') private messageList!: ElementRef<HTMLElement>;
+  @ViewChild('messageList') private readonly messageList!: ElementRef<HTMLElement>;
 
   readonly messages       = signal<DisplayMessage[]>([]);
   readonly thinking       = signal(false);
@@ -211,7 +211,7 @@ export class StylistPanelComponent implements OnInit, OnDestroy {
   private streamSub?: Subscription;
   private streamingIndex = -1;
 
-  constructor(private chat: ChatService) {}
+  constructor(private readonly chat: ChatService) {}
 
   ngOnInit(): void {
     this.messages.set([{
@@ -315,6 +315,8 @@ export class StylistPanelComponent implements OnInit, OnDestroy {
           streaming: false,
           text: (errorText ?? copy[this.streamingIndex].text) || '…',
         };
+      } else if (errorText) {
+        copy.push({ role: 'assistant', text: errorText, time: this.now() });
       }
       return copy;
     });

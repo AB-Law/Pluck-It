@@ -7,7 +7,7 @@ import {
   SimpleChanges,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ClothingItem, ClothingSize, ItemCondition } from '../../core/models/clothing-item.model';
+import { ClothingItem, ItemCondition } from '../../core/models/clothing-item.model';
 import { UserProfileService } from '../../core/services/user-profile.service';
 
 interface CareOption {
@@ -475,7 +475,7 @@ export class ReviewItemModalComponent implements OnChanges {
     return sizeType(this.draft?.category ?? null);
   }
 
-  constructor(private profileService: UserProfileService) {}
+  constructor(private readonly profileService: UserProfileService) {}
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['item'] && this.item) {
@@ -529,7 +529,7 @@ export class ReviewItemModalComponent implements OnChanges {
     if (!this.draft) return;
     this.draft = {
       ...this.draft,
-      size: { ...(this.draft.size ?? {}), [field]: value, system: this.sizeSystem },
+      size: { ...this.draft.size, [field]: value, system: this.sizeSystem },
     };
   }
 
@@ -537,7 +537,7 @@ export class ReviewItemModalComponent implements OnChanges {
     if (!this.draft) return;
     this.draft = {
       ...this.draft,
-      size: value != null ? { shoeSize: value, system: this.sizeSystem } : null,
+      size: value === null ? null : { shoeSize: value, system: this.sizeSystem },
     };
   }
 

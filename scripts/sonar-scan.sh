@@ -18,22 +18,29 @@ fi
 SONAR_HOST="${SONAR_HOST:-http://localhost:9001}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-echo "==> [1/5] Begin SonarQube scan"
+echo "==> [1/6] Run Angular tests with LCOV coverage"
+cd "$ROOT/PluckIt.Client"
+npm run test -- --watch=false
+cd "$ROOT"
+
+echo ""
+echo "==> [2/6] Begin SonarQube scan"
 dotnet sonarscanner begin \
   /k:"PluckIt" \
   /d:sonar.host.url="$SONAR_HOST" \
   /d:sonar.token="$SONAR_TOKEN" \
   /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml" \
   /d:sonar.python.coverage.reportPaths="PluckIt.Processor/coverage.xml" \
+  /d:sonar.javascript.lcov.reportPaths="PluckIt.Client/coverage/PluckIt.Client/lcov.info" \
   /d:sonar.exclusions="PluckIt.Processor/.venv/**,**/node_modules/**,PluckIt.Processor/tests/**,PluckIt.Segmentation.Modal/tests/**,k6/**,scripts/**" \
-  /d:sonar.test.inclusions="PluckIt.Processor/tests/**,PluckIt.Segmentation.Modal/tests/**,PluckIt.Tests/**"
+  /d:sonar.test.inclusions="PluckIt.Processor/tests/**,PluckIt.Segmentation.Modal/tests/**,PluckIt.Tests/**,PluckIt.Client/src/**/*.spec.ts"
 
 echo ""
-echo "==> [2/5] Build C#"
+echo "==> [3/6] Build C#"
 dotnet build "$ROOT/PluckIt.sln" --no-restore
 
 echo ""
-echo "==> [3/5] Run C# tests with OpenCover coverage"
+echo "==> [4/6] Run C# tests with OpenCover coverage"
 dotnet test "$ROOT/PluckIt.sln" \
   --no-build \
   --filter "Category!=Integration" \
@@ -41,7 +48,7 @@ dotnet test "$ROOT/PluckIt.sln" \
   -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
 
 echo ""
-echo "==> [4/5] Run Python tests with coverage"
+echo "==> [5/6] Run Python tests with coverage"
 cd "$ROOT/PluckIt.Processor"
 # Use the project's venv if present, otherwise fall back to system python
 if [ -f ".venv/bin/activate" ]; then
@@ -57,7 +64,7 @@ pytest --cov=. \
 cd "$ROOT"
 
 echo ""
-echo "==> [5/5] End SonarQube scan"
+echo "==> [6/6] End SonarQube scan"
 dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 
 echo ""

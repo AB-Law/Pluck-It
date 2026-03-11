@@ -3,8 +3,6 @@
 @import "tailwindcss";
 
 /* @source paths are relative to THIS file (src/styles.css), so ./app/ → src/app/ */
-@source "./app/**/*.ts";
-@source "./app/**/*.html";
 
 @theme {
   --color-primary: #258df4;

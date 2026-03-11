@@ -290,7 +290,7 @@ export class WardrobeComponent implements OnInit {
 
   @Output() itemToggled = new EventEmitter<string>();
 
-  @ViewChild('uploadRef') private uploadRef!: UploadItemComponent;
+  @ViewChild('uploadRef') private readonly uploadRef!: UploadItemComponent;
 
   // ── Wardrobe archive ─────────────────────────────────────────────────────
   readonly allItems     = signal<ClothingItem[]>([]);
@@ -363,9 +363,9 @@ export class WardrobeComponent implements OnInit {
   });
 
   constructor(
-    private wardrobe: WardrobeService,
-    private router: Router,
-    private route: ActivatedRoute,
+    private readonly wardrobe: WardrobeService,
+    private readonly router: Router,
+    private readonly route: ActivatedRoute,
   ) {}
 
   ngOnInit(): void {
@@ -700,7 +700,7 @@ export class WardrobeComponent implements OnInit {
   private buildQuery(continuationToken?: string | null) {
     const cat = this.selectedCategory();
     return {
-      category:          cat !== 'all' ? cat : undefined,
+      category:          cat === 'all' ? undefined : cat,
       sortField:         this.sortField(),
       sortDir:           this.sortDir(),
       pageSize:          24,
@@ -714,9 +714,9 @@ export class WardrobeComponent implements OnInit {
     const sd  = this.sortDir();
     this.router.navigate([], {
       queryParams: {
-        category:  cat !== 'all'       ? cat  : null,
-        sortField: sf  !== 'dateAdded' ? sf   : null,
-        sortDir:   sd  !== 'desc'      ? sd   : null,
+        category:  cat === 'all'       ? null : cat,
+        sortField: sf  === 'dateAdded' ? null : sf,
+        sortDir:   sd  === 'desc'      ? null : sd,
       },
       replaceUrl: true,
     });

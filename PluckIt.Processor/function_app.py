@@ -1259,7 +1259,7 @@ async def list_scraped_items(
             if sortBy == "score"
             else "c.userId ASC, c.scrapedAt DESC"
         )
-        cursor_key, cursor_id = _parse_cursor(continuationToken)
+        cursor_key, _ = _parse_cursor(continuationToken)
         where_clauses = ["c.userId = 'global'"]
         effective_page_size = max(1, min(pageSize, 100))
         params: list[dict] = [{"name": "@limit", "value": effective_page_size + 1}]
