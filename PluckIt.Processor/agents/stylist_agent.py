@@ -15,11 +15,13 @@ to SSE for the Angular client.
 import json
 import logging
 import os
+import re
 from datetime import date
 from functools import lru_cache
 from typing import AsyncIterator, Optional
 
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_openai import AzureChatOpenAI
 from langgraph.prebuilt import create_react_agent
 
@@ -136,6 +138,42 @@ What you MUST do:
 ---
 {memory_block}
 """
+_FOLLOW_UP_PROMPT = """\
+You are a conversation intent classifier for a fashion stylist chatbot.
+Given the stylist's last message and the user's reply, decide if the user is
+accepting/confirming an offer the stylist made.
+
+Stylist's last message:
+{last_assistant}
+
+User's reply: {user_message}
+
+Reply with EXACTLY one of:
+  CONFIRM_GAPS, CONFIRM_SEARCH, CONFIRM_OUTFIT, NOT_A_CONFIRM
+"""
+_FOLLOW_UP_SEARCH_PATTERNS = (
+    re.compile(r"\bsearch\b[^\n.!?]{0,90}\bfor\s+(?P<query>[^\n.!?]+)", re.IGNORECASE),
+    re.compile(r"\bfind\b[^\n.!?]{0,90}\bfor\s+(?P<query>[^\n.!?]+)", re.IGNORECASE),
+    re.compile(r"\blook\b[^\n.!?]{0,90}\bfor\s+(?P<query>[^\n.!?]+)", re.IGNORECASE),
+    re.compile(r"\bdiscover\b\s+(?P<query>[^\n.!?]+?)\s+\bfor\b", re.IGNORECASE),
+    re.compile(r"\bdiscover\b\s+(?P<query>[^\n.!?]+)", re.IGNORECASE),
+    re.compile(r"\b(?:search|find|look)\b\s+(?P<query>[^\n.!?]+)", re.IGNORECASE),
+)
+_FOLLOW_UP_GAP_KEYWORDS = (
+    "gap analysis",
+    "wardrobe gaps",
+    "shopping list",
+    "what should i buy",
+    "what to buy",
+)
+_FOLLOW_UP_OUTFIT_KEYWORDS = (
+    "build an outfit",
+    "complete outfit",
+    "full outfit",
+    "put together",
+)
+
+_TOOL_CALL_RECURSION_LIMIT = int(os.getenv("STYLIST_TOOL_CALL_RECURSION_LIMIT", "8"))
 
 
 def _build_system_prompt(memory_summary: str) -> SystemMessage:
@@ -177,37 +215,146 @@ def _last_assistant_content(recent_messages: list[dict]) -> str:
     return ""
 
 
+def _get_fast_follow_up_intent(user_message: str, last_assistant: str) -> str | None:
+    normalised = user_message.strip().lower().rstrip("!.? ")
+    if not normalised:
+        return None
+    if normalised in _AFFIRMATIVES:
+        lower_last = last_assistant.lower()
+        if any(keyword in lower_last for keyword in _FOLLOW_UP_GAP_KEYWORDS):
+            return "CONFIRM_GAPS"
+        if any(keyword in lower_last for keyword in _FOLLOW_UP_OUTFIT_KEYWORDS):
+            return "CONFIRM_OUTFIT"
+        if "search" in lower_last or "discover" in lower_last:
+            return "CONFIRM_SEARCH"
+    return None
+
+
+def _is_discovery_follow_up(last_assistant: str) -> bool:
+    lower_last = (last_assistant or "").lower()
+    if "discover" in lower_last:
+        return True
+    return "to buy" in lower_last or "where to buy" in lower_last
+
+
+def _extract_follow_up_refinement(user_message: str) -> str:
+    normalised = (user_message or "").strip().lower().rstrip("?.!")
+    if not normalised:
+        return ""
+    for phrase in sorted(_AFFIRMATIVES, key=len, reverse=True):
+        if not normalised.startswith(phrase):
+            continue
+        if normalised == phrase:
+            return ""
+        return normalised[len(phrase):].lstrip(" ,")
+    return normalised
+
+
+def _extract_follow_up_search_query(last_assistant: str, user_message: str) -> str:
+    target_text = (last_assistant or "").replace("\\n", " ")
+    query = ""
+    for pattern in _FOLLOW_UP_SEARCH_PATTERNS:
+        match = pattern.search(target_text)
+        if match:
+            found_query = match.groupdict().get("query", "").strip()
+            if found_query:
+                query = found_query
+                break
+
+    if not query:
+        return user_message.strip()
+
+    refinement = _extract_follow_up_refinement(user_message)
+    if not refinement:
+        return query
+    if refinement in query.lower():
+        return query
+    return f"{query} {refinement}"
+
+
+@lru_cache(maxsize=1)
+def _build_stylist_config(user_id: str) -> RunnableConfig:
+    return RunnableConfig(configurable={"user_id": user_id})
+
+
+@lru_cache(maxsize=1)
+def _get_follow_up_llm():
+    from .db import _get_env as _db_env
+
+    return AzureChatOpenAI(
+        azure_endpoint=_db_env("AZURE_OPENAI_ENDPOINT"),
+        api_key=_db_env("AZURE_OPENAI_API_KEY"),
+        azure_deployment=os.getenv("AZURE_OPENAI_NANO_DEPLOYMENT",
+                                  os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini")),
+        api_version="2024-12-01-preview",
+        temperature=0,
+        max_tokens=10,
+    )
+
+
+def _tool_result_event(name: str, payload: object) -> str:
+    summary = str(payload)[:120] + ("..." if len(str(payload)) > 120 else "")
+    return f"data: {json.dumps({'type': 'tool_result', 'name': name, 'summary': summary})}\n\n"
+
+
+def _assistant_followup_response(content: str) -> str:
+    return f"data: {json.dumps({'type': 'token', 'content': content})}\n\n"
+
+
+def _tool_use_event(name: str) -> str:
+    return f"data: {json.dumps({'type': 'tool_use', 'name': name})}\n\n"
+
+
+async def _run_fast_followup(
+    user_id: str,
+    user_message: str,
+    recent_messages: list[dict],
+) -> list[str] | None:
+    if not recent_messages:
+        return None
+
+    last_assistant = _last_assistant_content(recent_messages)
+    intent = _get_fast_follow_up_intent(user_message, last_assistant)
+    if intent is None:
+        intent = await _classify_follow_up_intent(user_message, last_assistant)
+    if intent is None:
+        return None
+
+    events: list[str] = []
+    cfg = _build_stylist_config(user_id)
+
+    if intent == "CONFIRM_SEARCH":
+        query = _extract_follow_up_search_query(last_assistant, user_message)
+        search_tool = search_scraped_items if _is_discovery_follow_up(last_assistant) else search_wardrobe
+        tool_name = "search_scraped_items" if _is_discovery_follow_up(last_assistant) else "search_wardrobe"
+        events.append(_tool_use_event(tool_name))
+        result = await search_tool.ainvoke({"query": query}, config=cfg)
+        events.append(_tool_result_event(tool_name, result))
+        events.append(_assistant_followup_response(f"Done - I searched for {query!r} and can share the results."))
+        return events
+
+    if intent == "CONFIRM_GAPS":
+        events.append(_tool_use_event("analyze_wardrobe_gaps"))
+        result = await analyze_wardrobe_gaps.ainvoke(config=cfg)
+        events.append(_tool_result_event("analyze_wardrobe_gaps", result))
+        events.append(_assistant_followup_response("Done - here are your wardrobe gap results."))
+        return events
+
+    return None
+
+
 async def _classify_follow_up_intent(user_message: str, last_assistant: str) -> str | None:
     """
     Nano LLM call to classify whether the user is confirming a prior offer.
     Returns one of: CONFIRM_GAPS, CONFIRM_SEARCH, CONFIRM_OUTFIT, NOT_A_CONFIRM.
     Capped at 10 output tokens — extremely cheap.
     """
-    prompt = (
-        "You are a conversation intent classifier for a fashion stylist chatbot.\n"
-        "Given the stylist's last message and the user's reply, decide if the user is "
-        "accepting/confirming an offer the stylist made.\n\n"
-        f"Stylist's last message:\n{last_assistant[-600:]}\n\n"
-        f"User's reply: {user_message}\n\n"
-        "Reply with EXACTLY one of:\n"
-        "  CONFIRM_GAPS    — user agreed to gap/buy/shopping analysis\n"
-        "  CONFIRM_SEARCH  — user agreed to search wardrobe for specific pieces\n"
-        "  CONFIRM_OUTFIT  — user agreed to see a full outfit built from discussed items\n"
-        "  NOT_A_CONFIRM   — new question or elaboration, not confirming an offer\n\n"
-        "One word only:"
+    prompt = _FOLLOW_UP_PROMPT.format(
+        last_assistant=last_assistant[-600:],
+        user_message=user_message,
     )
     try:
-        from .db import _get_env as _db_env
-        nano = AzureChatOpenAI(
-            azure_endpoint=_db_env("AZURE_OPENAI_ENDPOINT"),
-            api_key=_db_env("AZURE_OPENAI_API_KEY"),
-            azure_deployment=os.getenv("AZURE_OPENAI_NANO_DEPLOYMENT",
-                                        os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini")),
-            api_version="2024-12-01-preview",
-            temperature=0,
-            max_tokens=10,
-        )
-        response = await nano.ainvoke(prompt)
+        response = await _get_follow_up_llm().ainvoke(prompt)
         label = response.content.strip().upper().split()[0]
         return label if label in {"CONFIRM_GAPS", "CONFIRM_SEARCH", "CONFIRM_OUTFIT"} else None
     except Exception as exc:
@@ -218,6 +365,7 @@ async def _classify_follow_up_intent(user_message: str, last_assistant: str) -> 
 _INTENT_ANNOTATION: dict[str, str] = {
     "CONFIRM_GAPS":   "[Context: the user is confirming your offer to analyse wardrobe gaps. Call analyze_wardrobe_gaps and present the full shopping list. Do not call search_wardrobe again.]",
     "CONFIRM_SEARCH": "[Context: the user is confirming your offer to search the wardrobe. Call search_wardrobe for the items mentioned in your last message.]",
+    "CONFIRM_DISCOVER": "[Context: the user is confirming your offer to discover items to buy. Call search_scraped_items for the items mentioned in your last message.]",
     "CONFIRM_OUTFIT": "[Context: the user is confirming your offer to build a complete outfit. Use the items already discussed — do not re-search the wardrobe.]",
 }
 
@@ -235,7 +383,14 @@ async def _resolve_follow_up_annotation(user_message: str, recent_messages: list
     if not last:
         return None
     if normalised in _AFFIRMATIVES or len(words) <= 6:
+        fast_intent = _get_fast_follow_up_intent(user_message, last)
+        if fast_intent:
+            if fast_intent == "CONFIRM_SEARCH" and _is_discovery_follow_up(last):
+                return _INTENT_ANNOTATION.get("CONFIRM_DISCOVER")
+            return _INTENT_ANNOTATION.get(fast_intent)
         intent = await _classify_follow_up_intent(user_message, last)
+        if intent == "CONFIRM_SEARCH" and _is_discovery_follow_up(last):
+            return _INTENT_ANNOTATION.get("CONFIRM_DISCOVER")
         return _INTENT_ANNOTATION.get(intent) if intent else None
     return None
 
@@ -319,6 +474,12 @@ async def stream_stylist_response(
     # Annotate short follow-up confirmations so the agent knows which tool to reach for.
     annotation = await _resolve_follow_up_annotation(user_message, recent_messages)
     augmented_message = f"{annotation}\n{user_message}" if annotation else user_message
+    fast_follow_up = await _run_fast_followup(user_id, user_message, recent_messages)
+    if fast_follow_up is not None:
+        for event_line in fast_follow_up:
+            yield event_line
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        return
 
     messages: list[BaseMessage] = [
         system_msg,
@@ -329,8 +490,12 @@ async def stream_stylist_response(
     config = {
         "configurable": {
             "user_id": user_id,
-        }
+        },
+        "recursion_limit": _TOOL_CALL_RECURSION_LIMIT,
     }
+
+    tool_start_count = 0
+    abort = False
 
     try:
         async for event in _get_agent_graph().astream_events(
@@ -338,6 +503,11 @@ async def stream_stylist_response(
             config=config,
             version="v2",
         ):
+            if event.get("event") == "on_tool_start":
+                tool_start_count += 1
+                if tool_start_count > _TOOL_CALL_RECURSION_LIMIT:
+                    abort = True
+                    break
             event_sse = _event_to_sse(event)
             if event_sse is not None:
                 yield event_sse
@@ -345,5 +515,8 @@ async def stream_stylist_response(
     except Exception as exc:
         logger.exception("Agent stream error for user %s: %s", user_id, exc)
         yield f"data: {json.dumps({'type': 'error', 'content': 'Something went wrong. Please try again.'})}\n\n"
+    if abort:
+        logger.warning("Tool-call recursion cap hit for user %s", user_id)
+        yield f"data: {json.dumps({'type': 'error', 'content': 'Tool-call limit reached. Please retry with a shorter request.'})}\n\n"
 
     yield f"data: {json.dumps({'type': 'done'})}\n\n"
