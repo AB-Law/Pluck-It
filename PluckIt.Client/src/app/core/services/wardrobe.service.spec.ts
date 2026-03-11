@@ -128,13 +128,13 @@ describe('WardrobeService', () => {
 
   it('getWearSuggestions() GETs suggestions', () => {
     service.getWearSuggestions().subscribe();
-    const req = http.expectOne(r => r.url.includes('/api/wardrobe/wear-suggestions') && r.method === 'GET');
+    const req = http.expectOne(r => r.url.includes('/api/wardrobe/suggestions/wear') && r.method === 'GET');
     req.flush({ suggestions: [] });
   });
 
   it('updateWearSuggestionStatus() PATCHes suggestion status', () => {
     service.updateWearSuggestionStatus('sug-1', { status: 'Dismissed' }).subscribe();
-    const req = http.expectOne(r => r.url.includes('/api/wardrobe/wear-suggestions/sug-1') && r.method === 'PATCH');
+    const req = http.expectOne(r => r.url.includes('/api/wardrobe/suggestions/wear/sug-1') && r.method === 'PATCH');
     expect(req.request.body.status).toBe('Dismissed');
     req.flush({ status: 'updated' });
   });

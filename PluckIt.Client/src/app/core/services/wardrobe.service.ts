@@ -123,7 +123,7 @@ export class WardrobeService {
   }
 
   getWearSuggestions(): Observable<WearSuggestionsResponse> {
-    return this.http.get<WearSuggestionsResponse>(`${this.base}/api/wardrobe/wear-suggestions`);
+    return this.http.get<WearSuggestionsResponse>(`${this.base}/api/wardrobe/suggestions/wear`);
   }
 
   updateWearSuggestionStatus(
@@ -131,7 +131,7 @@ export class WardrobeService {
     payload: UpdateWearSuggestionStatusRequest,
   ): Observable<UpdateWearSuggestionStatusResponse> {
     return this.http.patch<UpdateWearSuggestionStatusResponse>(
-      `${this.base}/api/wardrobe/wear-suggestions/${suggestionId}`,
+      `${this.base}/api/wardrobe/suggestions/wear/${suggestionId}`,
       payload,
     );
   }
