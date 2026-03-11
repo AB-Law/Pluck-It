@@ -1,4 +1,4 @@
-import { ApplicationConfig, APP_INITIALIZER, provideBrowserGlobalErrorListeners } from '@angular/core';
+import { ApplicationConfig, inject, provideAppInitializer, provideBrowserGlobalErrorListeners } from '@angular/core';
 import { provideRouter } from '@angular/router';
 import { provideHttpClient, withInterceptorsFromDi, HTTP_INTERCEPTORS } from '@angular/common/http';
 
@@ -16,11 +16,6 @@ export const appConfig: ApplicationConfig = {
       useClass: AuthInterceptor,
       multi: true,
     },
-    {
-      provide: APP_INITIALIZER,
-      useFactory: (auth: AuthService) => () => auth.initialize(),
-      deps: [AuthService],
-      multi: true,
-    },
+    provideAppInitializer(() => inject(AuthService).initialize()),
   ]
 };

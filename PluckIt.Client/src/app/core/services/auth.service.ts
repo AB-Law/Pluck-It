@@ -21,11 +21,11 @@ interface GoogleIdTokenPayload {
 }
 
 function parseJwtPayload(token: string): GoogleIdTokenPayload {
-  const base64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+  const base64 = token.split('.')[1].replaceAll('-', '+').replaceAll('_', '/');
   const json = decodeURIComponent(
     atob(base64)
       .split('')
-      .map(c => '%' + c.charCodeAt(0).toString(16).padStart(2, '0'))
+      .map(c => '%' + c.codePointAt(0)!.toString(16).padStart(2, '0'))
       .join('')
   );
   return JSON.parse(json) as GoogleIdTokenPayload;
@@ -41,14 +41,14 @@ interface StoredAuth {
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
-  private _user = signal<AuthUser | null>(null);
-  private _idToken = signal<string | null>(null);
-  private _tokenExp = signal<number>(0);
+  private readonly _user = signal<AuthUser | null>(null);
+  private readonly _idToken = signal<string | null>(null);
+  private readonly _tokenExp = signal<number>(0);
 
   readonly user = this._user.asReadonly();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private get gis(): any { return (window as any)['google']?.accounts?.id; }
+  private get gis(): any { return (globalThis as any)['google']?.accounts?.id; }
 
   async initialize(): Promise<void> {
     if (!environment.production) {
@@ -187,7 +187,7 @@ export class AuthService {
     return new Promise<void>((resolve) => {
       const poll = () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        if ((window as any)['google']?.accounts?.id) {
+        if ((globalThis as any)['google']?.accounts?.id) {
           resolve();
         } else {
           setTimeout(poll, 50);

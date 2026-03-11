@@ -179,7 +179,7 @@ import { AuthService } from '../../core/services/auth.service';
 export class LoginComponent implements AfterViewInit {
   protected readonly auth = inject(AuthService);
   private readonly router = inject(Router);
-  @ViewChild('gisBtnContainer') private gisBtnContainer!: ElementRef<HTMLDivElement>;
+  @ViewChild('gisBtnContainer') private readonly gisBtnContainer!: ElementRef<HTMLDivElement>;
 
   constructor() {
     effect(() => {

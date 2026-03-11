@@ -10,8 +10,18 @@ Unit tests for FastAPI routes in function_app.py:
   - POST /api/digest/feedback
 """
 from unittest.mock import AsyncMock, MagicMock, patch
+from collections.abc import AsyncGenerator, Callable
 
+from fastapi import HTTPException
 import pytest
+
+
+def _async_query(items: list[dict]) -> Callable[..., AsyncGenerator[dict, None]]:
+    async def _query(**_kwargs: object) -> AsyncGenerator[dict, None]:
+        for item in items:
+            yield item
+
+    return _query
 
 
 @pytest.mark.unit
@@ -86,7 +96,7 @@ async def test_get_vault_insights_returns_payload(async_client):
     data = response.json()
     assert data["currency"] == "INR"
     assert data["behavioralInsights"]["topColorWearShare"]["color"] == "black"
-    assert data["behavioralInsights"]["topColorWearShare"]["pct"] == 63.0
+    assert data["behavioralInsights"]["topColorWearShare"]["pct"] == pytest.approx(63.0)
 
 
 # ── POST /api/digest/run ─────────────────────────────────────────────────────
@@ -151,7 +161,7 @@ async def test_get_digest_feedback_returns_list(async_client, mock_digest_feedba
 async def test_get_digest_feedback_returns_stored_entries(async_client):
     mock_container = AsyncMock()
 
-    async def _query(**kwargs):
+    async def _query(**kwargs: object) -> AsyncGenerator[dict, None]:
         yield {"suggestionIndex": 0, "signal": "up"}
         yield {"suggestionIndex": 1, "signal": "down"}
 
@@ -217,3 +227,160 @@ async def test_post_digest_feedback_rejects_invalid_signal(async_client, mock_di
         )
 
     assert response.status_code == 400
+
+
+@pytest.mark.unit
+async def test_list_moods_returns_items(async_client):
+    container = MagicMock()
+    container.query_items = _async_query([
+        {"id": "minimalist-calm", "title": "Calm palette", "primaryMood": "minimalist", "_rid": "r1"},
+        {"id": "minimalist-sheer", "title": "Sheer utility", "primaryMood": "minimalist", "_rid": "r2"},
+    ])
+
+    with patch("agents.db.get_moods_container", return_value=container):
+        response = await async_client.get("/api/moods?primaryMood=Minimalist")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "primaryMoods" in payload
+    assert len(payload["moods"]) == 2
+    assert "_rid" not in payload["moods"][0]
+
+
+@pytest.mark.unit
+async def test_list_moods_rejects_invalid_mood(async_client):
+    with patch("agents.db.get_moods_container", return_value=MagicMock()):
+        response = await async_client.get("/api/moods?primaryMood=bizarro")
+
+    assert response.status_code == 400
+
+
+@pytest.mark.unit
+async def test_get_mood_by_id_not_found(async_client):
+    container = MagicMock()
+    container.read_item = AsyncMock(side_effect=Exception("No item"))
+
+    with patch("agents.db.get_moods_container", return_value=container):
+        response = await async_client.get("/api/moods/does-not-exist")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.unit
+async def test_get_mood_by_id_returns_item(async_client):
+    container = MagicMock()
+    container.read_item = AsyncMock(return_value={
+        "id": "minimalist-calm",
+        "_rid": "r1",
+        "title": "Calm palette",
+        "primaryMood": "minimalist",
+    })
+
+    with patch("agents.db.get_moods_container", return_value=container):
+        response = await async_client.get("/api/moods/minimalist-calm")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == "minimalist-calm"
+    assert "_rid" not in payload
+
+
+@pytest.mark.unit
+async def test_seed_sitemap_endpoint_async(async_client):
+    with patch("agents.sitemap_seeder.run_sitemap_seeder", return_value=None):
+        response = await async_client.post("/api/moods/seed")
+
+    assert response.status_code == 200
+    assert response.json() is None
+
+
+@pytest.mark.unit
+async def test_list_scraper_sources_includes_subscription_state(async_client):
+    scraper_container = MagicMock()
+    scraper_container.query_items = _async_query([
+        {"id": "source-1", "url": "https://example.com", "selector": {"css": ".item"}},
+    ])
+    subscriptions_container = MagicMock()
+    subscriptions_container.query_items = _async_query([])
+
+    with patch("agents.db.get_scraper_sources_container", return_value=scraper_container), patch(
+        "agents.db.get_user_source_subscriptions_container", return_value=subscriptions_container
+    ):
+        response = await async_client.get("/api/scraper/sources?userId=user-1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["sources"][0]["id"] == "source-1"
+    assert payload["sources"][0]["subscribed"] is False
+    assert payload["sources"][0]["needsClientIngest"] is False
+
+
+@pytest.mark.unit
+async def test_post_scraper_source_rejects_http_error(async_client):
+    with patch(
+        "function_app._validate_scraper_url",
+        side_effect=HTTPException(status_code=400, detail="URL must use https"),
+    ):
+        response = await async_client.post(
+            "/api/scraper/sources",
+            json={"url": "http://bad.example", "source_type": "general", "name": "Bad"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "URL must use https"
+
+
+@pytest.mark.unit
+async def test_post_scraper_source_creates_source(async_client):
+    container = MagicMock()
+    container.upsert_item = AsyncMock()
+
+    with patch("agents.db.get_scraper_sources_container", return_value=container), patch(
+        "function_app._validate_scraper_url",
+        return_value=None,
+    ), patch("agents.scrapers.config_generator.generate_selector_config", return_value={"type": "generic"}):
+        response = await async_client.post(
+            "/api/scraper/sources",
+            json={"url": "https://example.com", "source_type": "reddit", "name": "Example"},
+        )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["sourceId"] == "brand-example"
+    assert payload["name"] == "Example"
+    container.upsert_item.assert_awaited()
+
+
+@pytest.mark.unit
+async def test_post_scraper_source_subscription(async_client):
+    container = MagicMock()
+    container.upsert_item = AsyncMock()
+
+    with patch("agents.db.get_user_source_subscriptions_container", return_value=container), patch(
+        "agents.db.get_scraper_sources_container",
+        return_value=MagicMock(),
+    ):
+        response = await async_client.post(
+            "/api/scraper/subscribe/source-1",
+            json={},
+        )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["subscribed"] is True
+    assert payload["sourceId"] == "source-1"
+
+
+@pytest.mark.unit
+async def test_delete_scraper_source_subscription(async_client):
+    container = MagicMock()
+    container.read_item = AsyncMock(return_value={"id": "user-1-source-1", "isActive": True})
+    container.upsert_item = AsyncMock()
+
+    with patch("agents.db.get_user_source_subscriptions_container", return_value=container):
+        response = await async_client.delete("/api/scraper/subscribe/source-1")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["sourceId"] == "source-1"
+    assert payload["subscribed"] is False

@@ -5,7 +5,6 @@ using System.Text.Json;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
 using PluckIt.Core;
 using PluckIt.Functions.Auth;
 using PluckIt.Functions.Serialization;
@@ -20,8 +19,7 @@ namespace PluckIt.Functions.Functions;
 public class CollectionFunctions(
     ICollectionRepository repo,
     GoogleTokenValidator tokenValidator,
-    IConfiguration config,
-    ILogger<CollectionFunctions> logger)
+    IConfiguration config)
 {
     // ── GET /api/collections ─────────────────────────────────────────────────
     // Returns owned collections + joined collections merged.
