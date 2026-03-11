@@ -165,8 +165,8 @@ public sealed class InMemoryWardrobeRepository : IWardrobeRepository
     }
 
     public Task<bool> SetDraftTerminalAsync(
-        string id, string userId, DraftStatus status, string? draftError,
-        ClothingMetadata? metadata, string? imageUrl, DateTimeOffset updatedAt,
+        string id, string userId, DraftStatus status, string? processedBlobUrl,
+        ClothingMetadata? metadata, string? errorMessage, DateTimeOffset updatedAt,
         CancellationToken cancellationToken = default)
     {
         _ = metadata; // not applied in the in-memory stub
@@ -176,9 +176,9 @@ public sealed class InMemoryWardrobeRepository : IWardrobeRepository
             i.DraftStatus == DraftStatus.Processing);
         if (item is null) return Task.FromResult(false);
         item.DraftStatus    = status;
-        item.DraftError     = draftError;
+        item.DraftError     = errorMessage;
         item.DraftUpdatedAt = updatedAt;
-        if (imageUrl is not null) item.ImageUrl = imageUrl;
+        if (processedBlobUrl is not null) item.ImageUrl = processedBlobUrl;
         return Task.FromResult(true);
     }
 

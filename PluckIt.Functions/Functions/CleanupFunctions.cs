@@ -80,11 +80,14 @@ public class CleanupFunctions(
 
         await foreach (var blobName in sasService.ListArchiveBlobNamesAsync())
         {
+            Console.WriteLine($"TEST_LOOP: Found blob {blobName}");
             // Blob naming convention: "{item_id}-transparent.png"
             // Extract the item ID prefix by stripping the "-transparent.png" suffix
             var itemId = blobName.EndsWith("-transparent.png", StringComparison.OrdinalIgnoreCase)
                 ? blobName[..^"-transparent.png".Length]
                 : blobName;
+
+            Console.WriteLine($"TEST_LOOP: Extracted itemId {itemId}. KnownIds contains it? {knownIds.Contains(itemId)}");
 
             if (knownIds.Contains(itemId))
             {
@@ -96,6 +99,8 @@ public class CleanupFunctions(
             var accountName = Environment.GetEnvironmentVariable("STORAGE_ACCOUNT_NAME") ?? "";
             var archiveContainer = Environment.GetEnvironmentVariable("ARCHIVE_CONTAINER_NAME") ?? "archive";
             var blobUrl = $"https://{accountName}.blob.core.windows.net/{archiveContainer}/{blobName}";
+
+            Console.WriteLine($"TEST_LOOP: Deleting {blobUrl}");
 
             logger.LogInformation("Deleting orphan blob: {BlobName}", blobName);
             await sasService.DeleteBlobAsync(blobUrl, cancellationToken);

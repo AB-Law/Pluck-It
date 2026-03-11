@@ -15,7 +15,7 @@ namespace PluckIt.Tests.Integration;
 public sealed class CosmosDbFixture : IAsyncLifetime
 {
     private readonly CosmosDbContainer _cosmos =
-        new CosmosDbBuilder("mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest")
+        new CosmosDbBuilder("mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview")
             .Build();
 
     public const string Database  = "PluckIt";

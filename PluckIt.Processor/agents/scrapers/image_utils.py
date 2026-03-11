@@ -67,8 +67,13 @@ def hamming_distance(hash_a: str, hash_b: str) -> int:
     Bit-level Hamming distance between two pHash hex strings.
     Returns a large number if the hashes are incomparable lengths.
     """
+    if len(hash_a) != len(hash_b):
+        return 999
     try:
         import imagehash
         return imagehash.hex_to_hash(hash_a) - imagehash.hex_to_hash(hash_b)
     except Exception:  # noqa: BLE001
-        return 999
+        try:
+            return bin(int(hash_a, 16) ^ int(hash_b, 16)).count("1")
+        except ValueError:
+            return 999
