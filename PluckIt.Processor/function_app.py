@@ -951,12 +951,13 @@ async def ingest_reddit_data(body: RedditIngestBatch, user_id: str = Depends(get
     import random
 
     # 1. Security check: User Ban List
+    from azure.cosmos.exceptions import CosmosResourceNotFoundError
     bans_container = get_user_bans_container()
     try:
         await bans_container.read_item(item=user_id, partition_key=user_id)
         raise HTTPException(status_code=403, detail="User is banned from contributing.")
-    except Exception: # NOT_FOUND is what we expect
-        pass
+    except CosmosResourceNotFoundError:
+        pass  # NOT_FOUND is expected — user is not banned
 
     # 2. Load source and verify subreddit binding
     sources_container = get_scraper_sources_container()
@@ -969,7 +970,7 @@ async def ingest_reddit_data(body: RedditIngestBatch, user_id: str = Depends(get
             raise HTTPException(status_code=404, detail="Source not found.")
         source = items[0]
         expected_sub = source.get("config", {}).get("subreddit", "").lower()
-    except Exception:
+    except Exception as exc:
         if isinstance(exc, HTTPException): raise
         raise HTTPException(status_code=404, detail="Source not found.")
 

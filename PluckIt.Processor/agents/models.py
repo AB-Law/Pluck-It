@@ -38,4 +38,4 @@ class RedditIngestBatch(BaseModel):
     Request body for POST /api/scraper/ingest/reddit
     """
     source_id: str
-    posts: List[RedditPost]
+    posts: List[RedditPost] = Field(..., max_length=100)
