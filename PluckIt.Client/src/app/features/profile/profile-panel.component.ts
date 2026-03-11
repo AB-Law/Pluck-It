@@ -280,7 +280,7 @@ export class ProfilePanelComponent implements OnInit {
   readonly sizeSystems  = SIZE_SYSTEMS;
   readonly styleOptions = STYLE_OPTIONS;
 
-  constructor(private profileService: UserProfileService) {}
+  constructor(private readonly profileService: UserProfileService) {}
 
   ngOnInit(): void {
     const current = this.profileService.profile();

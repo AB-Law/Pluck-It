@@ -67,6 +67,69 @@ describe('WardrobeService', () => {
     req.flush({ items: [], nextContinuationToken: null });
   });
 
+  it('getAll() maps all query filters into request parameters', () => {
+    service.getAll({
+      category: 'Tops',
+      brand: 'Acme',
+      condition: 'Good',
+      tags: ['casual', 'work'],
+      aestheticTags: ['clean'],
+      priceMin: 10,
+      priceMax: 200,
+      minWears: 1,
+      maxWears: 10,
+      sortField: 'wearCount',
+      sortDir: 'desc',
+      continuationToken: 'cursor-9',
+    }).subscribe();
+
+    const req = http.expectOne(r => r.url.includes('/api/wardrobe') && !r.url.includes('/api/wardrobe/drafts'));
+    expect(req.request.params.get('category')).toBe('Tops');
+    expect(req.request.params.get('brand')).toBe('Acme');
+    expect(req.request.params.get('condition')).toBe('Good');
+    expect(req.request.params.get('tags')).toBe('casual,work');
+    expect(req.request.params.get('aestheticTags')).toBe('clean');
+    expect(req.request.params.get('priceMin')).toBe('10');
+    expect(req.request.params.get('priceMax')).toBe('200');
+    expect(req.request.params.get('minWears')).toBe('1');
+    expect(req.request.params.get('maxWears')).toBe('10');
+    expect(req.request.params.get('sortField')).toBe('wearCount');
+    expect(req.request.params.get('sortDir')).toBe('desc');
+    expect(req.request.params.get('continuationToken')).toBe('cursor-9');
+    req.flush({ items: [], nextContinuationToken: null });
+  });
+
+  it('uploadForDraft() posts image data using FormData', () => {
+    const blob = new Blob(['image'], { type: 'image/jpeg' });
+    const file = new File([blob], 'shirt.jpg', { type: 'image/jpeg' });
+    service.uploadForDraft(file).subscribe();
+
+    const req = http.expectOne(r => r.url.includes('/api/wardrobe/upload') && r.method === 'POST');
+    expect(req.request.body).toBeInstanceOf(FormData);
+    expect((req.request.body as FormData).get('image')).toBeTruthy();
+    req.flush({ ...MOCK_ITEM, id: 'upload-1' });
+  });
+
+  it('getDrafts() loads server draft list', () => {
+    service.getDrafts().subscribe();
+    const req = http.expectOne(r => r.url.includes('/api/wardrobe/drafts') && r.method === 'GET');
+    req.flush({ inProgress: [], ready: [], failed: [] });
+  });
+
+  it('acceptDraft(), retryDraft(), and dismissDraft() target draft endpoints', () => {
+    service.acceptDraft('draft-1').subscribe();
+    const acceptReq = http.expectOne(r => r.url.includes('/api/wardrobe/drafts/draft-1/accept') && r.method === 'PATCH');
+    acceptReq.flush({ ...MOCK_ITEM, id: 'item-from-draft' });
+
+    service.retryDraft('draft-1').subscribe();
+    const retryReq = http.expectOne(r => r.url.includes('/api/wardrobe/drafts/draft-1/retry') && r.method === 'POST');
+    retryReq.flush({ ...MOCK_ITEM, id: 'item-from-draft-retry' });
+
+    service.dismissDraft('draft-1').subscribe();
+    const dismissReq = http.expectOne(r => r.url.includes('/api/wardrobe/draft-1') && r.method === 'DELETE');
+    dismissReq.flush(null);
+  });
+
   it('getById() hits /api/wardrobe/:id', () => {
     let result: ClothingItem | undefined;
     service.getById('item-001').subscribe(i => (result = i));

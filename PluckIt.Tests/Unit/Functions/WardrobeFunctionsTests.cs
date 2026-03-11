@@ -23,16 +23,21 @@ public sealed class WardrobeFunctionsTests
 
     // ── Shared test data builders ────────────────────────────────────────────
 
+    private sealed class MakeItemOptions
+    {
+        public decimal? Price { get; init; }
+        public string[]? AestheticTags { get; init; }
+        public DateTimeOffset? DateAdded { get; init; }
+    }
+
     private static ClothingItem MakeItem(
         string id,
         string? category  = "Tops",
         string? brand     = null,
         ItemCondition? condition = null,
-        decimal? price    = null,
         int wearCount     = 0,
         string[]? tags    = null,
-        string[]? aestheticTags = null,
-        DateTimeOffset? dt = null) => new()
+        MakeItemOptions? options = null) => new()
     {
         Id          = id,
         UserId      = UserId,
@@ -40,15 +45,17 @@ public sealed class WardrobeFunctionsTests
         Category    = category,
         Brand       = brand,
         Condition   = condition,
-        Price       = price.HasValue ? new ClothingPrice { Amount = price.Value, OriginalCurrency = "USD" } : null,
+        Price       = options?.Price.HasValue == true
+            ? new ClothingPrice { Amount = options.Price.Value, OriginalCurrency = "USD" }
+            : null,
         WearCount   = wearCount,
         Tags        = tags  ?? ["casual"],
-        AestheticTags = aestheticTags,
+        AestheticTags = options?.AestheticTags,
         Colours     = [new ClothingColour("White", "#FFFFFF")],
-        DateAdded   = dt ?? DateTimeOffset.UtcNow.AddDays(-1),
+        DateAdded   = options?.DateAdded ?? DateTimeOffset.UtcNow.AddDays(-1),
     };
 
-    private WardrobeFunctions CreateSut(
+private static WardrobeFunctions CreateSut(
         InMemoryWardrobeRepository? repo = null,
         FakeBlobSasService? sas = null,
         InMemoryWearHistoryRepository? wearHistoryRepo = null,
@@ -60,9 +67,8 @@ public sealed class WardrobeFunctionsTests
             wearHistoryRepo ?? new InMemoryWearHistoryRepository(),
             stylingActivityRepo ?? new InMemoryStylingActivityRepository(),
             sas   ?? new FakeBlobSasService(),
-            cfg,
-            TestFactory.CreateTokenValidator(cfg),
             new FakeImageJobQueue(),
+            new WardrobeFunctionsAuthContext(UserId, TestFactory.CreateTokenValidator(cfg)),
             TestFactory.NullLogger<WardrobeFunctions>());
     }
 
@@ -99,9 +105,8 @@ public sealed class WardrobeFunctionsTests
             new InMemoryWearHistoryRepository(),
             new InMemoryStylingActivityRepository(),
             new FakeBlobSasService(),
-            TestConfiguration.Unauthenticated(),
-            TestFactory.CreateTokenValidator(TestConfiguration.Unauthenticated()),
             new FakeImageJobQueue(),
+            new WardrobeFunctionsAuthContext(null, TestFactory.CreateTokenValidator(TestConfiguration.Unauthenticated())),
             TestFactory.NullLogger<WardrobeFunctions>());
 
         var result = await sut.GetWardrobe(TestRequest.Get("http://localhost/api/wardrobe"), CancellationToken.None);
@@ -260,7 +265,9 @@ public sealed class WardrobeFunctionsTests
     public async Task GetWardrobe_FiltersByPriceMin()
     {
         var repo = new InMemoryWardrobeRepository()
-            .WithItems(MakeItem("cheap", price: 20m), MakeItem("exp", price: 200m));
+            .WithItems(
+                MakeItem("cheap", options: new MakeItemOptions { Price = 20m }),
+                MakeItem("exp", options: new MakeItemOptions { Price = 200m }));
 
         var result = await CreateSut(repo).GetWardrobe(
             TestRequest.Get("http://localhost/api/wardrobe?priceMin=100"), CancellationToken.None)
@@ -274,7 +281,9 @@ public sealed class WardrobeFunctionsTests
     public async Task GetWardrobe_FiltersByPriceMax()
     {
         var repo = new InMemoryWardrobeRepository()
-            .WithItems(MakeItem("cheap", price: 20m), MakeItem("exp", price: 200m));
+            .WithItems(
+                MakeItem("cheap", options: new MakeItemOptions { Price = 20m }),
+                MakeItem("exp", options: new MakeItemOptions { Price = 200m }));
 
         var result = await CreateSut(repo).GetWardrobe(
             TestRequest.Get("http://localhost/api/wardrobe?priceMax=50"), CancellationToken.None)
@@ -289,9 +298,9 @@ public sealed class WardrobeFunctionsTests
     {
         var repo = new InMemoryWardrobeRepository()
             .WithItems(
-                MakeItem("a", price: 50m),
-                MakeItem("b", price: 100m),
-                MakeItem("c", price: 150m));
+                MakeItem("a", options: new MakeItemOptions { Price = 50m }),
+                MakeItem("b", options: new MakeItemOptions { Price = 100m }),
+                MakeItem("c", options: new MakeItemOptions { Price = 150m }));
 
         var result = await CreateSut(repo).GetWardrobe(
             TestRequest.Get("http://localhost/api/wardrobe?priceMin=50&priceMax=100"), CancellationToken.None)
@@ -305,7 +314,9 @@ public sealed class WardrobeFunctionsTests
     public async Task GetWardrobe_ExcludesItemsWithNoPriceWhenPriceFilterApplied()
     {
         var repo = new InMemoryWardrobeRepository()
-            .WithItems(MakeItem("no-price"), MakeItem("has-price", price: 80m));
+            .WithItems(
+                MakeItem("no-price"),
+                MakeItem("has-price", options: new MakeItemOptions { Price = 80m }));
 
         var result = await CreateSut(repo).GetWardrobe(
             TestRequest.Get("http://localhost/api/wardrobe?priceMin=10"), CancellationToken.None)
@@ -388,7 +399,9 @@ public sealed class WardrobeFunctionsTests
     public async Task GetWardrobe_AllowsEqualPriceMinAndPriceMax()
     {
         var repo = new InMemoryWardrobeRepository()
-            .WithItems(MakeItem("a", price: 50m), MakeItem("b", price: 100m));
+            .WithItems(
+                MakeItem("a", options: new MakeItemOptions { Price = 50m }),
+                MakeItem("b", options: new MakeItemOptions { Price = 100m }));
 
         var result = await CreateSut(repo).GetWardrobe(
             TestRequest.Get("http://localhost/api/wardrobe?priceMin=50&priceMax=50"),
@@ -406,8 +419,10 @@ public sealed class WardrobeFunctionsTests
     {
         var repo = new InMemoryWardrobeRepository()
             .WithItems(
-                MakeItem("luxe",   aestheticTags: ["Luxe", "Formal"]),
-                MakeItem("casual", aestheticTags: ["Casual"]));
+                MakeItem(
+                    "luxe",
+                    options: new MakeItemOptions { AestheticTags = ["Luxe", "Formal"] }),
+                MakeItem("casual", options: new MakeItemOptions { AestheticTags = ["Casual"] }));
 
         var result = await CreateSut(repo).GetWardrobe(
             TestRequest.Get("http://localhost/api/wardrobe?aestheticTags=Luxe"), CancellationToken.None)
@@ -445,9 +460,9 @@ public sealed class WardrobeFunctionsTests
     {
         var repo = new InMemoryWardrobeRepository()
             .WithItems(
-                MakeItem("cheap",     price: 10m),
-                MakeItem("mid",       price: 50m),
-                MakeItem("expensive", price: 200m));
+                MakeItem("cheap", options: new MakeItemOptions { Price = 10m }),
+                MakeItem("mid", options: new MakeItemOptions { Price = 50m }),
+                MakeItem("expensive", options: new MakeItemOptions { Price = 200m }));
 
         var result = await CreateSut(repo).GetWardrobe(
             TestRequest.Get($"http://localhost/api/wardrobe?sortField={sortField}&sortDir={sortDir}"),
@@ -463,9 +478,9 @@ public sealed class WardrobeFunctionsTests
         var now  = DateTimeOffset.UtcNow;
         var repo = new InMemoryWardrobeRepository()
             .WithItems(
-                MakeItem("old",  dt: now.AddDays(-10)),
-                MakeItem("new",  dt: now.AddDays(-1)),
-                MakeItem("mid",  dt: now.AddDays(-5)));
+                MakeItem("old", options: new MakeItemOptions { DateAdded = now.AddDays(-10) }),
+                MakeItem("new", options: new MakeItemOptions { DateAdded = now.AddDays(-1) }),
+                MakeItem("mid", options: new MakeItemOptions { DateAdded = now.AddDays(-5) }));
 
         var result = await CreateSut(repo).GetWardrobe(
             TestRequest.Get("http://localhost/api/wardrobe"), CancellationToken.None)
@@ -481,8 +496,8 @@ public sealed class WardrobeFunctionsTests
         var now  = DateTimeOffset.UtcNow;
         var repo = new InMemoryWardrobeRepository()
             .WithItems(
-                MakeItem("a", dt: now.AddDays(-2)),
-                MakeItem("b", dt: now.AddDays(-1)));
+                MakeItem("a", options: new MakeItemOptions { DateAdded = now.AddDays(-2) }),
+                MakeItem("b", options: new MakeItemOptions { DateAdded = now.AddDays(-1) }));
 
         var result = await CreateSut(repo).GetWardrobe(
             TestRequest.Get("http://localhost/api/wardrobe?sortField=__evil__injection__"),
@@ -500,7 +515,9 @@ public sealed class WardrobeFunctionsTests
     {
         var repo = new InMemoryWardrobeRepository().WithItems(
             Enumerable.Range(1, 10)
-                .Select(i => MakeItem($"item-{i:D2}", dt: DateTimeOffset.UtcNow.AddSeconds(-i)))
+                .Select(i => MakeItem(
+                    $"item-{i:D2}",
+                    options: new MakeItemOptions { DateAdded = DateTimeOffset.UtcNow.AddSeconds(-i) }))
                 .ToArray());
         var sut = CreateSut(repo);
 
@@ -565,9 +582,9 @@ public sealed class WardrobeFunctionsTests
     {
         var repo = new InMemoryWardrobeRepository()
             .WithItems(
-                MakeItem("ok",        condition: ItemCondition.Good, price: 80m),
-                MakeItem("too-cheap", condition: ItemCondition.Good, price: 10m),
-                MakeItem("wrong-cond",condition: ItemCondition.Fair, price: 80m));
+                MakeItem("ok", condition: ItemCondition.Good, options: new MakeItemOptions { Price = 80m }),
+                MakeItem("too-cheap", condition: ItemCondition.Good, options: new MakeItemOptions { Price = 10m }),
+                MakeItem("wrong-cond", condition: ItemCondition.Fair, options: new MakeItemOptions { Price = 80m }));
 
         var result = await CreateSut(repo).GetWardrobe(
             TestRequest.Get("http://localhost/api/wardrobe?condition=Good&priceMin=50"),

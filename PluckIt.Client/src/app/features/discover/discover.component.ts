@@ -316,7 +316,7 @@ export class DiscoverComponent implements OnInit {
   protected galleryIndex = signal(0);
   protected modalVoted = signal<'up' | 'down' | null>(null);
   protected searchQuery = '';
-  private preloadedImageUrls = new Set<string>();
+  private readonly preloadedImageUrls = new Set<string>();
 
   readonly skeletons = Array.from({ length: 15 }, (_, i) => i);
   readonly timeRangeOptions = [
@@ -336,7 +336,7 @@ export class DiscoverComponent implements OnInit {
     );
   });
 
-  constructor(private discoverService: DiscoverService) { }
+  constructor(private readonly discoverService: DiscoverService) { }
 
   ngOnInit() {
     this.loadSources();
@@ -350,7 +350,7 @@ export class DiscoverComponent implements OnInit {
   }
 
   protected loadFeed(append = false) {
-    if (!append) {
+    if (append === false) {
       this.loading.set(true);
       this.nextToken.set(null);
     } else {
@@ -400,7 +400,7 @@ export class DiscoverComponent implements OnInit {
       const lastScrapedKey = `last_scraped_${sourceId}`;
       const lastScrapedStr = localStorage.getItem(lastScrapedKey);
       if (lastScrapedStr) {
-        const lastScraped = parseInt(lastScrapedStr, 10);
+        const lastScraped = Number.parseInt(lastScrapedStr, 10);
         if (Date.now() - lastScraped < 120000) {
           console.log(`Throttled: Scraped r/${subreddit} recently.`);
           return;

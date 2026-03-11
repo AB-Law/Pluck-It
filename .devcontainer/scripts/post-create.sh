@@ -50,6 +50,15 @@ if app_type == "dotnet":
 		"BlobStorage__AccountName": pick("STORAGE_ACCOUNT_NAME", "AZURE_STORAGE_ACCOUNT_NAME", "BlobStorage__AccountName"),
 		"BlobStorage__AccountKey": pick("STORAGE_ACCOUNT_KEY", "AZURE_STORAGE_ACCOUNT_KEY", "BlobStorage__AccountKey"),
 		"BlobStorage__ArchiveContainer": pick("ARCHIVE_CONTAINER", "BlobStorage__ArchiveContainer", default="archive"),
+		"GoogleAuth__ClientId": pick("GoogleAuth__ClientId", "GOOGLE_CLIENT_ID", "GoogleAuth:ClientId"),
+		"GoogleAuth__JwksUrl": pick(
+			"GoogleAuth__JwksUrl",
+			"GOOGLE_AUTH_JWKS_URL",
+			"GoogleAuth:JwksUrl",
+			"GoogleAuth__JwksUri",
+			"GoogleAuth:JwksUri",
+			default="https://www.googleapis.com/oauth2/v3/certs"
+		),
 	}
 elif app_type == "python":
 	values = {

@@ -6,12 +6,12 @@ import { Collection, CreateCollectionRequest } from '../models/collection.model'
 
 @Injectable({ providedIn: 'root' })
 export class CollectionService {
-  private base = environment.apiUrl;
+  private readonly base = environment.apiUrl;
 
   /** Reactive list of all collections (owned + joined) for the current user. */
   readonly collections = signal<Collection[]>([]);
 
-  constructor(private http: HttpClient) {}
+  constructor(private readonly http: HttpClient) {}
 
   /** Load all owned + joined collections and refresh the signal. */
   loadAll(): Observable<Collection[]> {
@@ -35,8 +35,7 @@ export class CollectionService {
   /** Update name / description / visibility of an owned collection. */
   update(id: string, patch: Partial<Pick<Collection, 'name' | 'description' | 'isPublic'>>): Observable<void> {
     return this.http.put<void>(`${this.base}/api/collections/${id}`, patch).pipe(
-      tap(() => this.collections.update(list =>
-        list.map(c => c.id === id ? { ...c, ...patch } : c)))
+      tap(() => this.collections.update(list => this.applyPatchToCollection(list, id, patch)))
     );
   }
 
@@ -62,20 +61,74 @@ export class CollectionService {
   /** Add a clothing item to a collection. */
   addItem(collectionId: string, itemId: string): Observable<void> {
     return this.http.post<void>(`${this.base}/api/collections/${collectionId}/items`, { itemId }).pipe(
-      tap(() => this.collections.update(list =>
-        list.map(c => c.id === collectionId
-          ? { ...c, clothingItemIds: [...c.clothingItemIds, itemId] }
-          : c)))
+      tap(() => this.collections.update(list => this.addItemToCollection(list, collectionId, itemId)))
     );
   }
 
   /** Remove a clothing item from a collection. */
   removeItem(collectionId: string, itemId: string): Observable<void> {
     return this.http.delete<void>(`${this.base}/api/collections/${collectionId}/items/${itemId}`).pipe(
-      tap(() => this.collections.update(list =>
-        list.map(c => c.id === collectionId
-          ? { ...c, clothingItemIds: c.clothingItemIds.filter(i => i !== itemId) }
-          : c)))
+      tap(() => this.collections.update(list => this.removeItemFromCollection(list, collectionId, itemId)))
     );
+  }
+
+  private applyPatchToCollection(
+    list: Collection[],
+    id: string,
+    patch: Partial<Pick<Collection, 'name' | 'description' | 'isPublic'>>
+  ): Collection[] {
+    const updated: Collection[] = [];
+
+    for (const collection of list) {
+      if (collection.id === id) {
+        updated.push({ ...collection, ...patch });
+        continue;
+      }
+      updated.push(collection);
+    }
+
+    return updated;
+  }
+
+  private addItemToCollection(list: Collection[], collectionId: string, itemId: string): Collection[] {
+    const updated: Collection[] = [];
+
+    for (const collection of list) {
+      if (collection.id === collectionId) {
+        updated.push({
+          ...collection,
+          clothingItemIds: [...collection.clothingItemIds, itemId],
+        });
+        continue;
+      }
+      updated.push(collection);
+    }
+
+    return updated;
+  }
+
+  private removeItemFromCollection(list: Collection[], collectionId: string, itemId: string): Collection[] {
+    const updated: Collection[] = [];
+
+    for (const collection of list) {
+      if (collection.id !== collectionId) {
+        updated.push(collection);
+        continue;
+      }
+
+      const filteredItemIds: string[] = [];
+      for (const id of collection.clothingItemIds) {
+        if (id !== itemId) {
+          filteredItemIds.push(id);
+        }
+      }
+
+      updated.push({
+        ...collection,
+        clothingItemIds: filteredItemIds,
+      });
+    }
+
+    return updated;
   }
 }

@@ -15,44 +15,66 @@ public sealed class ClothingPriceConverter : JsonConverter<ClothingPrice>
 {
     public override ClothingPrice? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        // Legacy format: plain number
+        // Legacy format: plain number.
         if (reader.TokenType == JsonTokenType.Number)
         {
-            return new ClothingPrice
-            {
-                Amount = reader.GetDecimal(),
-                OriginalCurrency = "USD"
-            };
+            return ReadLegacyPrice(ref reader);
         }
 
-        // New format: object
+        // New format: object.
         if (reader.TokenType == JsonTokenType.StartObject)
         {
-            var price = new ClothingPrice();
-            while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
-            {
-                if (reader.TokenType != JsonTokenType.PropertyName) continue;
-                var prop = reader.GetString() ?? string.Empty;
-                reader.Read();
-
-                if (prop.Equals("amount", StringComparison.OrdinalIgnoreCase))
-                    price.Amount = reader.GetDecimal();
-                else if (prop.Equals("originalCurrency", StringComparison.OrdinalIgnoreCase))
-                    price.OriginalCurrency = reader.TokenType == JsonTokenType.Null
-                        ? "USD"
-                        : (reader.GetString() ?? "USD");
-                else if (prop.Equals("purchaseDate", StringComparison.OrdinalIgnoreCase))
-                    price.PurchaseDate = reader.TokenType == JsonTokenType.Null ? null : reader.GetString();
-                else
-                    reader.Skip();
-            }
-            return price;
+            return ReadFromObject(ref reader);
         }
 
         throw new JsonException(
             $"Unexpected token '{reader.TokenType}' when deserializing ClothingPrice. " +
             "Expected a number (legacy) or an object.");
     }
+
+    private static ClothingPrice ReadFromObject(ref Utf8JsonReader reader)
+    {
+        using var doc = JsonDocument.ParseValue(ref reader);
+        var root = doc.RootElement;
+
+        decimal amount = 0m;
+        string? originalCurrency = null;
+        string? purchaseDate = null;
+
+        foreach (var property in root.EnumerateObject())
+        {
+            if (string.Equals(property.Name, "amount", StringComparison.OrdinalIgnoreCase))
+            {
+                if (property.Value.TryGetDecimal(out var parsedAmount))
+                    amount = parsedAmount;
+            }
+            else if (string.Equals(property.Name, "originalCurrency", StringComparison.OrdinalIgnoreCase))
+            {
+                if (property.Value.ValueKind != JsonValueKind.Null)
+                    originalCurrency = property.Value.GetString();
+            }
+            else if (string.Equals(property.Name, "purchaseDate", StringComparison.OrdinalIgnoreCase) &&
+                     property.Value.ValueKind != JsonValueKind.Null)
+            {
+                purchaseDate = property.Value.GetString();
+            }
+        }
+
+        originalCurrency ??= "USD";
+
+        return new ClothingPrice
+        {
+            Amount = amount,
+            OriginalCurrency = originalCurrency,
+            PurchaseDate = purchaseDate
+        };
+    }
+
+    private static ClothingPrice ReadLegacyPrice(ref Utf8JsonReader reader) => new ClothingPrice
+    {
+        Amount = reader.GetDecimal(),
+        OriginalCurrency = "USD"
+    };
 
     public override void Write(Utf8JsonWriter writer, ClothingPrice value, JsonSerializerOptions options)
     {

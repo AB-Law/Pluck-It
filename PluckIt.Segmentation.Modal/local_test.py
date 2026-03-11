@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import sys
+
+if __name__ != "__main__":
+    import pytest
+
+    pytest.skip("local utility script, not a unit test module", allow_module_level=True)
+
 import argparse
 from pathlib import Path
 from time import perf_counter

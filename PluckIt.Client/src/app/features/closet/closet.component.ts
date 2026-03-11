@@ -290,7 +290,7 @@ export class WardrobeComponent implements OnInit {
 
   @Output() itemToggled = new EventEmitter<string>();
 
-  @ViewChild('uploadRef') private uploadRef!: UploadItemComponent;
+  @ViewChild('uploadRef') private readonly uploadRef!: UploadItemComponent;
 
   // ── Wardrobe archive ─────────────────────────────────────────────────────
   readonly allItems     = signal<ClothingItem[]>([]);
@@ -363,9 +363,9 @@ export class WardrobeComponent implements OnInit {
   });
 
   constructor(
-    private wardrobe: WardrobeService,
-    private router: Router,
-    private route: ActivatedRoute,
+    private readonly wardrobe: WardrobeService,
+    private readonly router: Router,
+    private readonly route: ActivatedRoute,
   ) {}
 
   ngOnInit(): void {
@@ -518,31 +518,62 @@ export class WardrobeComponent implements OnInit {
 
     await new Promise<void>(resolve => {
       this.wardrobe.uploadForDraft(fileToSend).subscribe({
-        next: (result) => {
-          // 202 Accepted — draft is Processing; polling will detect Ready/Failed
-          this.uploadQueue.update(curr =>
-            curr.map(q => q.localId === qi.localId
-              ? { ...q, status: 'processing' as const, draftId: result.id }
-              : q),
-          );
-          this.drafts.update(curr => {
-            const without = curr.filter(d => d.id !== result.id);
-            return [result, ...without];
-          });
-          resolve();
-        },
-        error: (err) => {
-          // Network/server error — no reliable draft state; mark failed immediately
-          this.uploadQueue.update(curr =>
-            curr.map(q => q.localId === qi.localId
-              ? { ...q, status: 'failed' as const,
-                  error: err?.error?.error ?? err?.error?.detail ?? err?.message ?? 'Upload failed' }
-              : q),
-          );
-          resolve();
-        },
+        next: this._onUploadAccepted.bind(this, qi, resolve),
+        error: this._onUploadFailed.bind(this, qi, resolve),
       });
     });
+  }
+
+  private _onUploadAccepted(
+    qi: UploadQueueItem,
+    resolve: () => void,
+    result: ClothingItem,
+  ): void {
+    // 202 Accepted — draft is Processing; polling will detect Ready/Failed
+    this._setUploadQueueState(qi.localId, {
+      status: 'processing',
+      draftId: result.id,
+      error: undefined,
+    });
+    this._upsertDraftAtHead(result);
+    resolve();
+  }
+
+  private _onUploadFailed(qi: UploadQueueItem, resolve: () => void, err: unknown): void {
+    // Network/server error — no reliable draft state; mark failed immediately
+    this._setUploadQueueState(qi.localId, {
+      status: 'failed',
+      error: this._getUploadErrorMessage(err),
+    });
+    resolve();
+  }
+
+  private _setUploadQueueState(localId: string, patch: Partial<UploadQueueItem>): void {
+    this.uploadQueue.update(curr => {
+      const index = curr.findIndex(q => q.localId === localId);
+      if (index === -1) return curr;
+      const next = [...curr];
+      next[index] = { ...next[index], ...patch };
+      return next;
+    });
+  }
+
+  private _upsertDraftAtHead(draft: ClothingItem): void {
+    this.drafts.update(curr => {
+      const without = curr.filter(d => d.id !== draft.id);
+      return [draft, ...without];
+    });
+  }
+
+  private _getUploadErrorMessage(err: unknown): string {
+    const error = err as {
+      error?: {
+        error?: string;
+        detail?: string;
+      };
+      message?: string;
+    };
+    return error?.error?.error ?? error?.error?.detail ?? error?.message ?? 'Upload failed';
   }
 
   // ── Queue item actions ────────────────────────────────────────────────
@@ -700,7 +731,7 @@ export class WardrobeComponent implements OnInit {
   private buildQuery(continuationToken?: string | null) {
     const cat = this.selectedCategory();
     return {
-      category:          cat !== 'all' ? cat : undefined,
+      category:          cat === 'all' ? undefined : cat,
       sortField:         this.sortField(),
       sortDir:           this.sortDir(),
       pageSize:          24,
@@ -714,9 +745,9 @@ export class WardrobeComponent implements OnInit {
     const sd  = this.sortDir();
     this.router.navigate([], {
       queryParams: {
-        category:  cat !== 'all'       ? cat  : null,
-        sortField: sf  !== 'dateAdded' ? sf   : null,
-        sortDir:   sd  !== 'desc'      ? sd   : null,
+        category:  cat === 'all'       ? null : cat,
+        sortField: sf  === 'dateAdded' ? null : sf,
+        sortDir:   sd  === 'desc'      ? null : sd,
       },
       replaceUrl: true,
     });

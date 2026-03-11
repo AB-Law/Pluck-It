@@ -2,7 +2,6 @@ import { Component, input, output, signal, computed, inject, OnInit } from '@ang
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ClothingItem } from '../../core/models/clothing-item.model';
-import { Collection } from '../../core/models/collection.model';
 import { CollectionService } from '../../core/services/collection.service';
 import { forkJoin, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
@@ -102,7 +101,7 @@ export class AddToCollectionModalComponent implements OnInit {
   protected saving     = signal(false);
   protected selectedIds = signal(new Set<string>());
   protected errorMessage = signal<string | null>(null);
-  private collectionService = inject(CollectionService);
+  private readonly collectionService = inject(CollectionService);
 
   readonly collections = computed(() => this.collectionService.collections());
 

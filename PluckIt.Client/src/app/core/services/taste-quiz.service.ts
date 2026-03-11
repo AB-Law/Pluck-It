@@ -7,9 +7,9 @@ import { QuizSession, QuizResponse, TasteProfile } from '../models/scraped-item.
 
 @Injectable({ providedIn: 'root' })
 export class TasteQuizService {
-  private base = `${environment.chatApiUrl}/api`;
+  private readonly base = `${environment.chatApiUrl}/api`;
 
-  constructor(private http: HttpClient) {}
+  constructor(private readonly http: HttpClient) {}
 
   getOrCreateSession(): Observable<QuizSession> {
     return this.http.get<any>(`${this.base}/taste/quiz`).pipe(
@@ -23,7 +23,10 @@ export class TasteQuizService {
 
   complete(sessionId: string): Observable<TasteProfile> {
     return this.http.post<any>(`${this.base}/taste/quiz/${sessionId}/complete`, {}).pipe(
-      map(res => (res?.inferredTastes ?? res) as TasteProfile),
+      map((res) => {
+        const inferredTastes = res?.inferredTastes;
+        return inferredTastes ?? res;
+      }),
     );
   }
 
@@ -31,10 +34,12 @@ export class TasteQuizService {
     const phase = Number(raw?.phase) === 2 ? 2 : 1;
     const userId = String(raw?.userId ?? '');
     const rawId = String(raw?.id ?? '');
-    const derivedSessionId =
-      raw?.sessionId
-        ? String(raw.sessionId)
-        : (userId && rawId.startsWith(`${userId}-`) ? rawId.slice(userId.length + 1) : rawId);
+    let derivedSessionId = rawId;
+    if (raw?.sessionId != null) {
+      derivedSessionId = String(raw.sessionId);
+    } else if (userId && rawId.startsWith(`${userId}-`)) {
+      derivedSessionId = rawId.slice(userId.length + 1);
+    }
     const cards = Array.isArray(raw?.cards) ? raw.cards : [];
     const imageItems = Array.isArray(raw?.imageItems) ? raw.imageItems : [];
     const items = phase === 2
@@ -59,7 +64,7 @@ export class TasteQuizService {
     return {
       id: derivedSessionId,
       userId,
-      phase: phase as 1 | 2,
+      phase,
       items,
       isComplete: Boolean(raw?.isComplete),
       createdAt: String(raw?.createdAt ?? new Date().toISOString()),

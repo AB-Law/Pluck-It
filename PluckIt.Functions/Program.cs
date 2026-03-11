@@ -10,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using PluckIt.Core;
 using PluckIt.Functions.Auth;
+using PluckIt.Functions.Functions;
 using PluckIt.Functions.Queue;
 using PluckIt.Functions.Serialization;
 using PluckIt.Infrastructure;
@@ -24,6 +25,10 @@ var host = new HostBuilder()
         // IHttpClientFactory is already registered by the AddHttpClient("processor") call below.
         // GoogleTokenValidator is a singleton so the JWKS cache is shared across invocations.
         services.AddSingleton<GoogleTokenValidator>();
+        services.AddSingleton(sp =>
+            new WardrobeFunctionsAuthContext(
+                config["Local:DevUserId"],
+                sp.GetRequiredService<GoogleTokenValidator>()));
 
         // ── Cosmos ──────────────────────────────────────────────────────────
         var cosmosEndpoint = config["Cosmos:Endpoint"]

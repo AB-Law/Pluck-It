@@ -17,7 +17,7 @@ import json
 import logging
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from langchain_core.tools import tool
 from langchain_core.runnables import RunnableConfig
@@ -67,6 +67,107 @@ def _score_item(wear_count: int, days_since_worn: Optional[int]) -> float:
     return round(wear_count * recency_factor, 3)
 
 
+async def _load_wardrobe_items(user_id: str) -> list[dict[str, Any]]:
+    container = get_wardrobe_container()
+    items: list[dict[str, Any]] = []
+
+    async for item in container.query_items(
+        query="SELECT c.id, c.category, c.brand, c.aestheticTags, c.tags, "
+        "c.wearCount, c.lastWornAt, c.wearEvents, c.price FROM c WHERE c.userId = @userId",
+        parameters=[{"name": "@userId", "value": user_id}],
+    ):
+        items.append(item)
+
+    return items
+
+
+def _update_event_context(
+    wear_events: list[dict[str, Any]],
+    occasions_counter: Counter,
+    climate_counter: Counter,
+) -> None:
+    sorted_wear_events = sorted(
+        wear_events,
+        key=lambda e: e.get("occurredAt") or "",
+        reverse=True,
+    )
+    for event in sorted_wear_events[:10]:
+        occasion = event.get("occasion")
+        if occasion:
+            occasions_counter[occasion.lower()] += 1
+        snapshot = event.get("weatherSnapshot")
+        conditions = snapshot.get("conditions") if snapshot else None
+        if conditions:
+            climate_counter[conditions.lower()] += 1
+
+
+def _build_scored_items(items: list[dict[str, Any]]) -> tuple[
+    list[dict[str, Any]],
+    defaultdict[str, int],
+    Counter,
+    Counter,
+    int,
+]:
+    scored: list[dict[str, Any]] = []
+    occasions_counter: Counter = Counter()
+    climate_counter: Counter = Counter()
+    category_wear: defaultdict[str, int] = defaultdict(int)
+    items_with_history = 0
+
+    for item in items:
+        wear_count: int = item.get("wearCount", 0)
+        last_worn: Optional[str] = item.get("lastWornAt")
+        days_since = _recency_days(last_worn)
+        score = _score_item(wear_count, days_since)
+        category = (item.get("category") or "other").lower()
+        category_wear[category] += wear_count
+        if wear_count > 0:
+            items_with_history += 1
+
+        _update_event_context(
+            item.get("wearEvents") or [],
+            occasions_counter,
+            climate_counter,
+        )
+
+        cpw = _cost_per_wear((item.get("price") or {}).get("amount"), wear_count)
+
+        scored.append({
+            "id": item["id"],
+            "category": category,
+            "brand": item.get("brand"),
+            "aestheticTags": item.get("aestheticTags") or [],
+            "wearCount": wear_count,
+            "lastWornAt": last_worn,
+            "daysSinceLastWorn": days_since,
+            "score": score,
+            "costPerWear": cpw,
+        })
+
+    return scored, category_wear, occasions_counter, climate_counter, items_with_history
+
+
+def _build_category_summary(
+    category_wear: defaultdict[str, int],
+    scored: list[dict[str, Any]],
+) -> dict[str, dict[str, float]]:
+    score_totals: Counter = Counter()
+    score_counts: Counter = Counter()
+
+    for item in scored:
+        category = item["category"]
+        score_totals[category] += item["score"]
+        score_counts[category] += 1
+
+    return {
+        cat: {
+            "totalWears": cnt,
+            "avgScore": round(score_totals[cat] / max(1, score_counts[cat]), 3),
+        }
+        for cat, cnt in sorted(category_wear.items(), key=lambda x: -x[1])
+    }
+
+
 @tool
 async def get_wear_patterns(query: str = "", config: RunnableConfig = None) -> str:
     """
@@ -88,26 +189,11 @@ async def get_wear_patterns(query: str = "", config: RunnableConfig = None) -> s
     if not user_id:
         return json.dumps({"error": "user_id not available in config"})
 
-    container = get_wardrobe_container()
-
-    # Query wardrobe — include wear analytics fields only (no image URLs)
-    cosmos_query = (
-        "SELECT c.id, c.category, c.brand, c.aestheticTags, c.tags, "
-        "c.wearCount, c.lastWornAt, c.wearEvents, c.price "
-        "FROM c WHERE c.userId = @userId"
-    )
-    params = [{"name": "@userId", "value": user_id}]
-
     # Optional category/occasion filter passed as natural-language hint (not SQL)
     # The tool returns the full summary; the agent decides what's relevant.
 
-    items = []
     try:
-        async for item in container.query_items(
-            query=cosmos_query,
-            parameters=params,
-        ):
-            items.append(item)
+        items = await _load_wardrobe_items(user_id)
     except Exception as exc:
         logger.error("wear_patterns: Cosmos query failed: %s", exc)
         return json.dumps({"error": str(exc)})
@@ -115,55 +201,11 @@ async def get_wear_patterns(query: str = "", config: RunnableConfig = None) -> s
     if not items:
         return json.dumps({"sparse": True, "message": "Wardrobe is empty.", "items": []})
 
-    # ── Per-item scoring ──────────────────────────────────────────────────────
-    scored = []
-    occasions_counter: Counter = Counter()
-    climate_counter: Counter = Counter()
-    category_wear: defaultdict[str, int] = defaultdict(int)
-
-    for item in items:
-        wear_count: int = item.get("wearCount", 0)
-        last_worn: Optional[str] = item.get("lastWornAt")
-        days_since = _recency_days(last_worn)
-        score = _score_item(wear_count, days_since)
-        category = (item.get("category") or "other").lower()
-        category_wear[category] += wear_count
-
-        # Extract occasion and climate signals from the most recent wear events.
-        # Sort explicitly by occurredAt descending — the write path trims with
-        # OrderByDescending so list order is not guaranteed oldest→newest.
-        wear_events = item.get("wearEvents") or []
-        sorted_wear_events = sorted(
-            wear_events,
-            key=lambda e: e.get("occurredAt") or "",
-            reverse=True,
-        )
-        for ev in sorted_wear_events[:10]:
-            if ev.get("occasion"):
-                occasions_counter[ev["occasion"].lower()] += 1
-            snap = ev.get("weatherSnapshot")
-            if snap and snap.get("conditions"):
-                climate_counter[snap["conditions"].lower()] += 1
-
-        # Price/cost-per-wear
-        price_obj = item.get("price") or {}
-        price_amount = price_obj.get("amount")
-        cpw = _cost_per_wear(price_amount, wear_count)
-
-        scored.append({
-            "id": item["id"],
-            "category": category,
-            "brand": item.get("brand"),
-            "aestheticTags": item.get("aestheticTags") or [],
-            "wearCount": wear_count,
-            "lastWornAt": last_worn,
-            "daysSinceLastWorn": days_since,
-            "score": score,
-            "costPerWear": cpw,
-        })
+    scored, category_wear, occasions_counter, climate_counter, items_with_history = (
+        _build_scored_items(items)
+    )
 
     # ── Sparse wardrobe detection ─────────────────────────────────────────────
-    items_with_history = sum(1 for s in scored if s["wearCount"] > 0)
     if items_with_history < _SPARSE_THRESHOLD:
         return json.dumps({
             "sparse": True,
@@ -178,6 +220,7 @@ async def get_wear_patterns(query: str = "", config: RunnableConfig = None) -> s
 
     # ── Build ranked top-N summary ────────────────────────────────────────────
     scored.sort(key=lambda x: x["score"], reverse=True)
+    scored.sort(key=lambda x: x["score"], reverse=True)
     top_items = scored[:_SUMMARY_LIMIT]
 
     # Top occasions and climate conditions (global across all items)
@@ -185,13 +228,7 @@ async def get_wear_patterns(query: str = "", config: RunnableConfig = None) -> s
     top_conditions = [cond for cond, _ in climate_counter.most_common(3)]
 
     # Category-level wear frequency summary
-    category_summary = {
-        cat: {"totalWears": cnt, "avgScore": round(
-            sum(s["score"] for s in scored if s["category"] == cat) /
-            max(1, sum(1 for s in scored if s["category"] == cat)), 3
-        )}
-        for cat, cnt in sorted(category_wear.items(), key=lambda x: -x[1])
-    }
+    category_summary = _build_category_summary(category_wear, scored)
 
     return json.dumps({
         "sparse": False,

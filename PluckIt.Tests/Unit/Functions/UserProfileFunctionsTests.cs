@@ -16,7 +16,7 @@ public sealed class UserProfileFunctionsTests
 {
     private const string UserId = "test-user-001";
 
-    private UserProfileFunctions CreateSut(InMemoryUserProfileRepository? repo = null)
+    private static UserProfileFunctions CreateSut(InMemoryUserProfileRepository? repo = null)
     {
         var cfg = TestConfiguration.WithDevUser(UserId);
         return new UserProfileFunctions(

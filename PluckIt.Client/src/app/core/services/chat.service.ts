@@ -15,7 +15,7 @@
  */
 
 import { Injectable, inject } from '@angular/core';
-import { Observable } from 'rxjs';
+import { Observable, Subscriber } from 'rxjs';
 import { environment } from '../../../environments/environment';
 import { AuthService } from './auth.service';
 
@@ -57,63 +57,99 @@ export class ChatService {
     selectedIds?: string[],
   ): Observable<ChatEvent> {
     return new Observable<ChatEvent>(observer => {
-      const token = environment.production ? this.auth.getIdToken() : null;
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      const body = JSON.stringify({
-        message,
-        recentMessages: history,
-        selectedItemIds: selectedIds ?? null,
-      });
+      const headers = this.buildHeaders(true);
+      const body = this.buildBody(message, history, selectedIds);
 
       let cancelled = false;
 
       fetch(`${this.base}/api/chat`, { method: 'POST', headers, body })
         .then(async response => {
           if (!response.ok) {
-            observer.error(new Error(`Chat API error: HTTP ${response.status}`));
+            this.emitError(observer, response.status);
             return;
           }
-
-          const reader = response.body!.getReader();
-          const decoder = new TextDecoder();
-          let buffer = '';
-
-          while (!cancelled) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-
-            // SSE events are separated by double newlines
-            const parts = buffer.split('\n\n');
-            buffer = parts.pop() ?? '';
-
-            for (const part of parts) {
-              const line = part.trim();
-              if (!line.startsWith('data: ')) continue;
-              const raw = line.slice(6).trim();
-              if (!raw) continue;
-              try {
-                const event = JSON.parse(raw) as ChatEvent;
-                observer.next(event);
-                if (event.type === 'done') {
-                  observer.complete();
-                  return;
-                }
-              } catch {
-                // Malformed event — skip
-              }
-            }
+          if (!response.body) {
+            observer.complete();
+            return;
           }
-          observer.complete();
+          await this.readSseStream(response.body.getReader(), observer, () => cancelled);
         })
         .catch(err => observer.error(err));
 
       // Teardown: mark cancelled so the loop exits on next iteration
       return () => { cancelled = true; };
     });
+  }
+
+  private buildHeaders(includeContentType = true): Record<string, string> {
+    const token = environment.production ? this.auth.getIdToken() : null;
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (includeContentType) headers['Content-Type'] = 'application/json';
+    return headers;
+  }
+
+  private buildBody(message: string, history: ChatMessage[], selectedIds?: string[]): string {
+    return JSON.stringify({
+      message,
+      recentMessages: history,
+      selectedItemIds: selectedIds ?? null,
+    });
+  }
+
+  private emitError(observer: Subscriber<ChatEvent>, status: number): void {
+    observer.error(new Error(`Chat API error: HTTP ${status}`));
+  }
+
+  private parseSseLine(rawLine: string): ChatEvent | null {
+    const line = rawLine.trim();
+    if (!line.startsWith('data: ')) return null;
+    const payload = line.slice(6).trim();
+    if (!payload) return null;
+    try {
+      return JSON.parse(payload) as ChatEvent;
+    } catch {
+      return null;
+    }
+  }
+
+  private async readSseStream(
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+    observer: Subscriber<ChatEvent>,
+    isCancelled: () => boolean,
+  ): Promise<void> {
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (!isCancelled()) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+
+      buffer += decoder.decode(value, { stream: true });
+      const parsed = this.consumeSseBuffer(buffer, observer);
+      if (parsed.done) {
+        observer.complete();
+        return;
+      }
+      buffer = parsed.nextBuffer;
+    }
+    observer.complete();
+  }
+
+  private consumeSseBuffer(
+    inputBuffer: string,
+    observer: Subscriber<ChatEvent>,
+  ): { done: boolean; nextBuffer: string } {
+    const parts = inputBuffer.split('\n\n');
+    let nextBuffer = parts.pop() ?? '';
+    for (const part of parts) {
+      const event = this.parseSseLine(part);
+      if (!event) continue;
+      observer.next(event);
+      if (event.type === 'done') return { done: true, nextBuffer };
+    }
+    return { done: false, nextBuffer };
   }
 
   /** Retrieve the user's conversation memory summary. */
@@ -149,7 +185,7 @@ export class ChatService {
   }
 
   /** Get the latest wardrobe digest suggestions. */
-  getLatestDigest(): Observable<{ digest: unknown | null }> {
+  getLatestDigest(): Observable<{ digest: unknown }> {
     const token = environment.production ? this.auth.getIdToken() : null;
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;

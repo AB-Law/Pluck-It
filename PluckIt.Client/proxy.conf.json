@@ -1,4 +1,52 @@
 {
+  "/api/chat": {
+    "target": "http://localhost:7071",
+    "secure": false,
+    "changeOrigin": true,
+    "logLevel": "info"
+  },
+  "/api/digest": {
+    "target": "http://localhost:7071",
+    "secure": false,
+    "changeOrigin": true,
+    "logLevel": "info"
+  },
+  "/api/insights": {
+    "target": "http://localhost:7071",
+    "secure": false,
+    "changeOrigin": true,
+    "logLevel": "info"
+  },
+  "/api/scraper": {
+    "target": "http://localhost:7071",
+    "secure": false,
+    "changeOrigin": true,
+    "logLevel": "info"
+  },
+  "/api/taste": {
+    "target": "http://localhost:7071",
+    "secure": false,
+    "changeOrigin": true,
+    "logLevel": "info"
+  },
+  "/api/moods": {
+    "target": "http://localhost:7071",
+    "secure": false,
+    "changeOrigin": true,
+    "logLevel": "info"
+  },
+  "/api/process-image": {
+    "target": "http://localhost:7071",
+    "secure": false,
+    "changeOrigin": true,
+    "logLevel": "info"
+  },
+  "/api/health": {
+    "target": "http://localhost:7071",
+    "secure": false,
+    "changeOrigin": true,
+    "logLevel": "info"
+  },
   "/api": {
     "target": "http://localhost:7072",
     "secure": false,

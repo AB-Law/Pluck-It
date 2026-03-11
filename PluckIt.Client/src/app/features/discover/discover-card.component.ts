@@ -134,7 +134,7 @@ export class DiscoverCardComponent {
   feedbackSent = output<{ itemId: string; signal: 'up' | 'down'; galleryImageIndex?: number }>();
 
   voted = signal<'up' | 'down' | null>(null);
-  private scoreDelta = signal(0);
+  private readonly scoreDelta = signal(0);
 
   // Platform score = our scoreSignal ± user's current vote delta
   readonly localPlatformScore = computed(() => this.item().scoreSignal + this.scoreDelta());
@@ -143,7 +143,12 @@ export class DiscoverCardComponent {
     const prev = this.voted();
     if (prev === signal) return; // already voted same way — no-op
 
-    const prevDelta = prev === 'up' ? 1 : prev === 'down' ? -1 : 0;
+    let prevDelta = 0;
+    if (prev === 'up') {
+      prevDelta = 1;
+    } else if (prev === 'down') {
+      prevDelta = -1;
+    }
     const newDelta = signal === 'up' ? 1 : -1;
     this.scoreDelta.update(d => d - prevDelta + newDelta);
     this.voted.set(signal);

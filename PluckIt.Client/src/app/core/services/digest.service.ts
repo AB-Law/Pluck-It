@@ -9,9 +9,9 @@ import {
 
 @Injectable({ providedIn: 'root' })
 export class DigestService {
-  private base = environment.chatApiUrl;
+  private readonly base = environment.chatApiUrl;
 
-  constructor(private http: HttpClient) {}
+  constructor(private readonly http: HttpClient) {}
 
   getLatest(): Observable<{ digest: WardrobeDigest | null }> {
     return this.http.get<{ digest: WardrobeDigest | null }>(

@@ -45,7 +45,7 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (mag_a * mag_b) if mag_a and mag_b else 0.0
 
 
-async def _build_embedder() -> AzureOpenAIEmbeddings:
+def _build_embedder() -> AzureOpenAIEmbeddings:
     return AzureOpenAIEmbeddings(
         azure_endpoint=_get_env("AZURE_OPENAI_ENDPOINT"),
         api_key=_get_env("AZURE_OPENAI_API_KEY"),
@@ -73,7 +73,7 @@ async def search_scraped_items(query: str, config: RunnableConfig = None) -> str
       title, imageUrl, productUrl, buyLinks, tags, sourceId, scoreSignal.
     """
     try:
-        embedder = await _build_embedder()
+        embedder = _build_embedder()
         query_embedding: list[float] = await embedder.aembed_query(query)
     except Exception as exc:
         logger.warning("search_scraped_items: embedding failed: %s", exc)

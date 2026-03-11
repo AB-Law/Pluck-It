@@ -12,6 +12,9 @@ namespace PluckIt.Functions.Auth;
 public sealed class GoogleTokenValidator
 {
     private readonly string _clientId;
+    private readonly Uri _jwksUri;
+    private readonly string _googleIssuerHost;
+    private readonly string _googleIssuerWithScheme;
     private readonly IHttpClientFactory _httpClientFactory;
 
     private JsonWebKeySet? _cachedKeySet;
@@ -21,8 +24,26 @@ public sealed class GoogleTokenValidator
     public GoogleTokenValidator(IConfiguration configuration, IHttpClientFactory httpClientFactory)
     {
         _clientId = configuration["GoogleAuth:ClientId"]
+            ?? configuration["GoogleAuth__ClientId"]
+            ?? configuration["GOOGLE_CLIENT_ID"]
             ?? throw new InvalidOperationException(
-                "Required configuration key 'GoogleAuth__ClientId' is not set.");
+                "Required configuration key 'GoogleAuth:ClientId' (or 'GoogleAuth__ClientId', 'GOOGLE_CLIENT_ID') is not set.");
+        var jwksUrl = configuration["GoogleAuth:JwksUrl"]
+            ?? configuration["GoogleAuth:JwksUri"]
+            ?? configuration["GoogleAuth__JwksUrl"]
+            ?? configuration["GoogleAuth__JwksUri"]
+            ?? configuration["GOOGLE_AUTH_JWKS_URL"]
+            ?? configuration["GOOGLE_AUTH_JWKSURI"]
+            ?? "https://www.googleapis.com/oauth2/v3/certs";
+        if (!Uri.TryCreate(jwksUrl, UriKind.Absolute, out var jwksUri))
+            throw new InvalidOperationException(
+                "Required configuration key 'GoogleAuth:JwksUrl' (or 'GoogleAuth:JwksUri') is not set or invalid.");
+        _jwksUri = jwksUri;
+        _googleIssuerHost = configuration["GoogleAuth:IssuerHost"] ??
+            configuration["GoogleAuth:Issuer"] ??
+            "accounts.google.com";
+        var issuerScheme = configuration["GoogleAuth:IssuerScheme"] ?? Uri.UriSchemeHttps;
+        _googleIssuerWithScheme = BuildIssuerWithScheme(_googleIssuerHost, issuerScheme);
         _httpClientFactory = httpClientFactory;
     }
 
@@ -40,7 +61,7 @@ public sealed class GoogleTokenValidator
 
             var result = await handler.ValidateTokenAsync(idToken, new TokenValidationParameters
             {
-                ValidIssuers = ["accounts.google.com", "https://accounts.google.com"],
+                ValidIssuers = [_googleIssuerHost, _googleIssuerWithScheme],
                 ValidAudience = _clientId,
                 IssuerSigningKeys = keySet.Keys,
                 ValidateLifetime = true,
@@ -56,6 +77,17 @@ public sealed class GoogleTokenValidator
         {
             return null;
         }
+    }
+
+    private static string BuildIssuerWithScheme(string issuerHost, string issuerScheme)
+    {
+        if (Uri.TryCreate(issuerHost, UriKind.Absolute, out var issuerWithScheme))
+            return issuerWithScheme.GetLeftPart(UriPartial.Authority).TrimEnd('/');
+
+        if (string.IsNullOrWhiteSpace(issuerScheme))
+            issuerScheme = Uri.UriSchemeHttps;
+
+        return new UriBuilder(issuerScheme, issuerHost).Uri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
     }
 
     // ── JWKS caching ─────────────────────────────────────────────────────────
@@ -74,7 +106,7 @@ public sealed class GoogleTokenValidator
                 return _cachedKeySet;
 
             var client = _httpClientFactory.CreateClient();
-            var json = await client.GetStringAsync("https://www.googleapis.com/oauth2/v3/certs");
+            var json = await client.GetStringAsync(_jwksUri);
             _cachedKeySet = new JsonWebKeySet(json);
 
             // Google rotates keys infrequently; 6 hours is a safe cache TTL

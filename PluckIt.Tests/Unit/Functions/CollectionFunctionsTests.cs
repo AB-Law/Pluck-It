@@ -34,14 +34,13 @@ public sealed class CollectionFunctionsTests
         CreatedAt     = DateTimeOffset.UtcNow
     };
 
-    private CollectionFunctions CreateSut(InMemoryCollectionRepository? repo = null, string userId = OwnerId)
+    private static CollectionFunctions CreateSut(InMemoryCollectionRepository? repo = null, string userId = OwnerId)
     {
         var cfg = TestConfiguration.WithDevUser(userId);
         return new CollectionFunctions(
             repo ?? new InMemoryCollectionRepository(),
             TestFactory.CreateTokenValidator(cfg),
-            cfg,
-            TestFactory.NullLogger<CollectionFunctions>());
+            cfg);
     }
 
     // ── GetCollections ───────────────────────────────────────────────────────
@@ -87,8 +86,7 @@ public sealed class CollectionFunctionsTests
         var sut = new CollectionFunctions(
             new InMemoryCollectionRepository(),
             TestFactory.CreateTokenValidator(cfg),
-            cfg,
-            TestFactory.NullLogger<CollectionFunctions>());
+            cfg);
 
         var result = await sut.GetCollections(
             TestRequest.Get("http://localhost/api/collections"), CancellationToken.None);

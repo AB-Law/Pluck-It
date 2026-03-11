@@ -18,9 +18,9 @@ import {
 
 @Injectable({ providedIn: 'root' })
 export class WardrobeService {
-  private base = environment.apiUrl;
+  private readonly base = environment.apiUrl;
 
-  constructor(private http: HttpClient) {}
+  constructor(private readonly http: HttpClient) {}
 
   /**
    * Fetch a page of wardrobe items using full multidimensional filter + sort support.
@@ -35,7 +35,7 @@ export class WardrobeService {
     if (query?.condition)           qp = qp.set('condition',         query.condition);
     if (query?.tags?.length)        qp = qp.set('tags',              query.tags.join(','));
     if (query?.aestheticTags?.length)
-                                    qp = qp.set('aestheticTags',     query.aestheticTags!.join(','));
+                                    qp = qp.set('aestheticTags',     query.aestheticTags.join(','));
     if (query?.priceMin  != null)   qp = qp.set('priceMin',          String(query.priceMin));
     if (query?.priceMax  != null)   qp = qp.set('priceMax',          String(query.priceMax));
     if (query?.minWears  != null)   qp = qp.set('minWears',          String(query.minWears));

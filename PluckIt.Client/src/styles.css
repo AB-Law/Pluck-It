@@ -3,10 +3,8 @@
 @import "tailwindcss";
 
 /* @source paths are relative to THIS file (src/styles.css), so ./app/ → src/app/ */
-@source "./app/**/*.ts";
-@source "./app/**/*.html";
 
-@theme {
+:root {
   --color-primary: #258df4;
   --color-background-dark: #000000;
   --color-card-dark: #1A1A1A;

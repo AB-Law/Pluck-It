@@ -12,7 +12,6 @@ namespace PluckIt.Infrastructure;
 
 public class BlobSasService : IBlobSasService
 {
-  private readonly string _accountName;
   private readonly StorageSharedKeyCredential _credential;
   private readonly string _archiveContainer;
   private readonly string _uploadsContainer;
@@ -22,7 +21,6 @@ public class BlobSasService : IBlobSasService
   public BlobSasService(string accountName, string accountKey, string archiveContainer,
       string uploadsContainer = "uploads")
   {
-    _accountName = accountName ?? throw new ArgumentNullException(nameof(accountName));
     _credential = new StorageSharedKeyCredential(accountName, accountKey);
     _archiveContainer = archiveContainer ?? throw new ArgumentNullException(nameof(archiveContainer));
     _uploadsContainer = uploadsContainer;

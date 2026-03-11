@@ -7,6 +7,7 @@ import { WardrobeService } from '../../core/services/wardrobe.service';
 import { AuthService } from '../../core/services/auth.service';
 import { ClothingItem } from '../../core/models/clothing-item.model';
 import { CreateCollectionModalComponent } from './create-collection-modal.component';
+import { EMPTY, map, switchMap, tap } from 'rxjs';
 
 @Component({
   selector: 'app-collections',
@@ -205,11 +206,11 @@ export class CollectionsComponent implements OnInit {
   protected shareLabel       = signal('Copy Link');
   protected collectionItemsMap = signal<Record<string, ClothingItem[]>>({});
 
-  private collectionService = inject(CollectionService);
-  private wardrobeService   = inject(WardrobeService);
-  private authService       = inject(AuthService);
-  private route             = inject(ActivatedRoute);
-  private router            = inject(Router);
+  private readonly collectionService = inject(CollectionService);
+  private readonly wardrobeService   = inject(WardrobeService);
+  private readonly authService       = inject(AuthService);
+  private readonly route             = inject(ActivatedRoute);
+  private readonly router            = inject(Router);
 
   readonly collections = computed(() => this.collectionService.collections());
 
@@ -220,22 +221,25 @@ export class CollectionsComponent implements OnInit {
   });
 
   ngOnInit(): void {
-    this.collectionService.loadAll().subscribe(() => {
-      this.loading.set(false);
-      // Handle ?join=collectionId share-link flow
-      const joinId = this.route.snapshot.queryParamMap.get('join');
-      if (joinId) {
-        this.collectionService.join(joinId).subscribe({
-          next: () => {
-            this.collectionService.loadAll().subscribe(() => {
-              const col = this.collections().find(c => c.id === joinId);
-              if (col) this.selectCollection(col);
-            });
-            this.router.navigate([], { queryParams: {} });
-          },
-        });
-      }
-    });
+    this.collectionService
+      .loadAll()
+      .pipe(
+        tap(() => this.loading.set(false)),
+        switchMap(() => {
+          const joinId = this.route.snapshot.queryParamMap.get('join');
+          if (!joinId) return EMPTY;
+
+          return this.collectionService.join(joinId).pipe(
+            switchMap(() => this.collectionService.loadAll().pipe(map(() => joinId))),
+          );
+        }),
+        tap(joinId => {
+          const col = this.collections().find(c => c.id === joinId);
+          if (col) this.selectCollection(col);
+          this.router.navigate([], { queryParams: {} });
+        }),
+      )
+      .subscribe();
   }
 
   selectCollection(col: Collection): void {
@@ -250,7 +254,7 @@ export class CollectionsComponent implements OnInit {
   }
 
   copyShareLink(col: Collection): void {
-    const url = `${window.location.origin}/collections?join=${col.id}`;
+    const url = `${globalThis.location.origin}/collections?join=${col.id}`;
     navigator.clipboard.writeText(url).then(() => {
       this.shareLabel.set('Copied!');
       setTimeout(() => this.shareLabel.set('Copy Link'), 2000);

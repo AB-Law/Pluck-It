@@ -22,6 +22,82 @@ public class CleanupFunctions(
     CosmosClient cosmosClient,
     ILogger<CleanupFunctions> logger)
 {
+    private const string TransparentSuffix = "-transparent.png";
+
+    private static (string dbName, string containerName) GetCosmosConfig()
+    {
+        var dbName = Environment.GetEnvironmentVariable("Cosmos__Database") ?? "PluckIt";
+        var containerName = Environment.GetEnvironmentVariable("Cosmos__Container") ?? "Wardrobe";
+        return (dbName, containerName);
+    }
+
+    private static (string accountName, string archiveContainer) GetStorageConfig()
+    {
+        var accountName = Environment.GetEnvironmentVariable("STORAGE_ACCOUNT_NAME") ?? "";
+        var archiveContainer = Environment.GetEnvironmentVariable("ARCHIVE_CONTAINER_NAME") ?? "archive";
+        return (accountName, archiveContainer);
+    }
+
+    private static string ExtractItemIdFromBlobName(string blobName)
+    {
+        if (blobName.EndsWith(TransparentSuffix, StringComparison.OrdinalIgnoreCase))
+        {
+            return blobName[..^TransparentSuffix.Length];
+        }
+
+        return blobName;
+    }
+
+    private static string BuildBlobUrl(string accountName, string archiveContainer, string blobName)
+        => $"https://{accountName}.blob.core.windows.net/{archiveContainer}/{blobName}";
+
+    private async Task<HashSet<string>> GetKnownItemIdsAsync(CancellationToken cancellationToken)
+    {
+        var knownIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var (dbName, containerName) = GetCosmosConfig();
+        var container = cosmosClient.GetContainer(dbName, containerName);
+
+        var query = new QueryDefinition("SELECT c.id FROM c WHERE IS_DEFINED(c.imageUrl)");
+        var iterator = container.GetItemQueryStreamIterator(
+            query,
+            requestOptions: new QueryRequestOptions
+            {
+                MaxItemCount = 500,
+            });
+
+        while (iterator.HasMoreResults)
+        {
+            using var response = await iterator.ReadNextAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                break;
+            }
+
+            using var doc = await JsonDocument.ParseAsync(response.Content, cancellationToken: cancellationToken);
+            if (!doc.RootElement.TryGetProperty("Documents", out var docs))
+            {
+                continue;
+            }
+
+            foreach (var item in docs.EnumerateArray())
+            {
+                if (!item.TryGetProperty("id", out var idProp))
+                {
+                    continue;
+                }
+
+                var id = idProp.GetString();
+                if (!string.IsNullOrEmpty(id))
+                {
+                    knownIds.Add(id);
+                }
+            }
+        }
+
+        return knownIds;
+    }
+
     // cron: second minute hour day month day-of-week
     // "0 0 2 * * *" = 02:00:00 UTC every day
     [Function(nameof(CleanUpOrphanBlobs))]
@@ -33,77 +109,36 @@ public class CleanupFunctions(
 
         // ── 1. Collect all known item IDs from Cosmos (cross-partition) ───────
         // We read only the /id field to minimise RU cost.
-        var knownIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
         {
-            // Iterate every container the wardrobe uses; we query the same database/container
-            // that's registered in DI — we rely on naming convention here since CleanupFunctions
-            // doesn't have a typed IWardrobeRepository (to avoid loading all items into memory).
-            // The CosmosClient is the shared singleton; we look up items by scanning with minimal projection.
-            // Database / container names fall back to the same defaults as Program.cs.
-            var dbName = Environment.GetEnvironmentVariable("Cosmos__Database") ?? "PluckIt";
-            var containerName = Environment.GetEnvironmentVariable("Cosmos__Container") ?? "Wardrobe";
-            var container = cosmosClient.GetContainer(dbName, containerName);
+            var knownIds = await GetKnownItemIdsAsync(cancellationToken);
 
-            var query = new QueryDefinition("SELECT c.id FROM c WHERE IS_DEFINED(c.imageUrl)");
-            var iterator = container.GetItemQueryStreamIterator(query, requestOptions: new QueryRequestOptions
+            // ── 2. List blobs and delete orphans ──────────────────────────────
+            int deleted = 0, skipped = 0;
+            var (accountName, archiveContainer) = GetStorageConfig();
+
+            await foreach (var blobName in sasService.ListArchiveBlobNamesAsync())
             {
-                MaxItemCount = 500,
-            });
+                var itemId = ExtractItemIdFromBlobName(blobName);
 
-            while (iterator.HasMoreResults)
-            {
-                using var response = await iterator.ReadNextAsync(cancellationToken);
-                if (!response.IsSuccessStatusCode) break;
-
-                using var doc = await System.Text.Json.JsonDocument.ParseAsync(response.Content, cancellationToken: cancellationToken);
-                if (doc.RootElement.TryGetProperty("Documents", out var docs))
+                if (knownIds.Contains(itemId))
                 {
-                    foreach (var item in docs.EnumerateArray())
-                    {
-                        if (item.TryGetProperty("id", out var idProp))
-                            knownIds.Add(idProp.GetString() ?? string.Empty);
-                    }
+                    skipped++;
+                    continue;
                 }
+
+                var blobUrl = BuildBlobUrl(accountName, archiveContainer, blobName);
+                await sasService.DeleteBlobAsync(blobUrl, cancellationToken);
+                deleted++;
             }
+
+            logger.LogInformation(
+                "Orphan blob cleanup complete. Deleted: {Deleted}, Skipped (matched): {Skipped}",
+                deleted, skipped);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to query Cosmos for known item IDs. Aborting cleanup.");
-            return;
         }
-
-        logger.LogInformation("Found {Count} known item IDs in Cosmos", knownIds.Count);
-
-        // ── 2. List blobs and delete orphans ──────────────────────────────────
-        int deleted = 0, skipped = 0;
-
-        await foreach (var blobName in sasService.ListArchiveBlobNamesAsync())
-        {
-            // Blob naming convention: "{item_id}-transparent.png"
-            // Extract the item ID prefix by stripping the "-transparent.png" suffix
-            var itemId = blobName.EndsWith("-transparent.png", StringComparison.OrdinalIgnoreCase)
-                ? blobName[..^"-transparent.png".Length]
-                : blobName;
-
-            if (knownIds.Contains(itemId))
-            {
-                skipped++;
-                continue;
-            }
-
-            // Reconstruct a blob URL for the delete helper
-            var accountName = Environment.GetEnvironmentVariable("STORAGE_ACCOUNT_NAME") ?? "";
-            var archiveContainer = Environment.GetEnvironmentVariable("ARCHIVE_CONTAINER_NAME") ?? "archive";
-            var blobUrl = $"https://{accountName}.blob.core.windows.net/{archiveContainer}/{blobName}";
-
-            logger.LogInformation("Deleting orphan blob: {BlobName}", blobName);
-            await sasService.DeleteBlobAsync(blobUrl, cancellationToken);
-            deleted++;
-        }
-
-        logger.LogInformation(
-            "Orphan blob cleanup complete. Deleted: {Deleted}, Skipped (matched): {Skipped}",
-            deleted, skipped);
     }
 }

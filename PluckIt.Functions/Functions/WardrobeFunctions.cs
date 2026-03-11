@@ -1,9 +1,10 @@
 using System.Net;
+using System.Globalization;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using PluckIt.Core;
 using PluckIt.Functions.Auth;
@@ -13,16 +14,28 @@ using PluckIt.Functions.Serialization;
 
 namespace PluckIt.Functions.Functions;
 
+public sealed class WardrobeFunctionsAuthContext(string? localDevUserId, GoogleTokenValidator tokenValidator)
+{
+    public string? LocalDevUserId { get; } = localDevUserId;
+    public GoogleTokenValidator TokenValidator { get; } = tokenValidator;
+}
+
 public class WardrobeFunctions(
     IWardrobeRepository repo,
     IWearHistoryRepository wearHistoryRepo,
     IStylingActivityRepository stylingActivityRepo,
     IBlobSasService sasService,
-    IConfiguration config,
-    GoogleTokenValidator tokenValidator,
     IImageJobQueue jobQueue,
+    WardrobeFunctionsAuthContext authContext,
     ILogger<WardrobeFunctions> logger)
 {
+    private const string ContentTypeHeader = "Content-Type";
+    private const string JsonContentType = "application/json; charset=utf-8";
+    private const string OctetStream = "application/octet-stream";
+    private const string InvalidRequestBodyMessage = "Invalid request body.";
+    private const string NoImageProvidedMessage = "No image provided.";
+    private const string RetryDraftConflictMessage = "Only Failed drafts can be retried.";
+    private const string ContentTypeErrorMessage = "Could not store image. Please try again.";
     // ── GET /api/wardrobe ───────────────────────────────────────────────────
 
     [Function(nameof(GetWardrobe))]
@@ -34,60 +47,63 @@ public class WardrobeFunctions(
         if (!authed0)
             return req.CreateResponse(System.Net.HttpStatusCode.Unauthorized);
 
-        var qs       = ParseQueryString(req.Url);
-        var pageSize = int.TryParse(qs.GetValueOrDefault("pageSize"), out var s) ? Math.Clamp(s, 1, 100) : 24;
+        if (!TryBuildWardrobeQuery(req.Url, out var wardrobeQuery, out var wardrobeQueryValidationMessage))
+            return await JsonError(req, HttpStatusCode.BadRequest, wardrobeQueryValidationMessage);
 
-        // ── Parse condition (string enum) ───────────────────────────────────
-        ItemCondition? condition = null;
-        if (qs.TryGetValue("condition", out var condStr) &&
-            Enum.TryParse<ItemCondition>(condStr, ignoreCase: true, out var condParsed))
-            condition = condParsed;
-
-        // ── Parse numeric filters ───────────────────────────────────────────
-        decimal? priceMin = decimal.TryParse(qs.GetValueOrDefault("priceMin"), out var pmin) ? pmin : null;
-        decimal? priceMax = decimal.TryParse(qs.GetValueOrDefault("priceMax"), out var pmax) ? pmax : null;
-        int?     minWears = int.TryParse(qs.GetValueOrDefault("minWears"), out var mw) ? mw : null;
-        int?     maxWears = int.TryParse(qs.GetValueOrDefault("maxWears"), out var xw) ? xw : null;
-
-        // ── Validate range pairings ─────────────────────────────────────────
-        if (priceMin.HasValue && priceMax.HasValue && priceMin.Value > priceMax.Value)
-            return await JsonError(req, HttpStatusCode.BadRequest, "priceMin must not exceed priceMax.");
-        if (minWears.HasValue && maxWears.HasValue && minWears.Value > maxWears.Value)
-            return await JsonError(req, HttpStatusCode.BadRequest, "minWears must not exceed maxWears.");
-
-        // ── Parse sort ──────────────────────────────────────────────────────
-        var sortField = qs.GetValueOrDefault("sortField") is string sf &&
-                        WardrobeSortField.Allowlist.Contains(sf, StringComparer.OrdinalIgnoreCase)
-                        ? sf : WardrobeSortField.DateAdded;
-        var sortDir   = qs.GetValueOrDefault("sortDir") is string sd &&
-                        string.Equals(sd, "asc", StringComparison.OrdinalIgnoreCase)
-                        ? "asc" : "desc";
-
-        var wardrobeQuery = new WardrobeQuery
-        {
-            Category          = qs.GetValueOrDefault("category"),
-            Brand             = qs.GetValueOrDefault("brand"),
-            Condition         = condition,
-            Tags              = qs.TryGetValue("tags", out var t)
-                                  ? t.Split(',', StringSplitOptions.RemoveEmptyEntries) : null,
-            AestheticTags     = qs.TryGetValue("aestheticTags", out var at)
-                                  ? at.Split(',', StringSplitOptions.RemoveEmptyEntries) : null,
-            PriceMin          = priceMin,
-            PriceMax          = priceMax,
-            MinWears          = minWears,
-            MaxWears          = maxWears,
-            SortField         = sortField,
-            SortDir           = sortDir,
-            PageSize          = pageSize,
-            ContinuationToken = qs.GetValueOrDefault("continuationToken"),
-        };
-
-        var paged  = await repo.GetAllAsync(userId!, wardrobeQuery, cancellationToken);
+        var paged = await repo.GetAllAsync(userId!, wardrobeQuery, cancellationToken);
         // Enrich each item's image URL with a short-lived SAS token
         foreach (var item in paged.Items)
             item.ImageUrl = sasService.GenerateSasUrl(item.ImageUrl);
 
         return await JsonOk(req, paged, PluckItJsonContext.Default.WardrobePagedResult);
+    }
+
+    private static bool TryBuildWardrobeQuery(
+        Uri uri,
+        out WardrobeQuery query,
+        out string message)
+    {
+        message = string.Empty;
+        var qs = ParseQueryString(uri);
+
+        var pageSize = ParseOptionalInt(qs.GetValueOrDefault("pageSize"), 24, 1, 100);
+        var priceMin = ParseOptionalDecimal(qs.GetValueOrDefault("priceMin"));
+        var priceMax = ParseOptionalDecimal(qs.GetValueOrDefault("priceMax"));
+        var minWears = ParseOptionalIntOrNull(qs.GetValueOrDefault("minWears"));
+        var maxWears = ParseOptionalIntOrNull(qs.GetValueOrDefault("maxWears"));
+
+        if (priceMin.HasValue && priceMax.HasValue && priceMin.Value > priceMax.Value)
+        {
+            message = "priceMin must not exceed priceMax.";
+            query = default!;
+            return false;
+        }
+
+        if (minWears.HasValue && maxWears.HasValue && minWears.Value > maxWears.Value)
+        {
+            message = "minWears must not exceed maxWears.";
+            query = default!;
+            return false;
+        }
+
+        query = new WardrobeQuery
+        {
+            Category          = qs.GetValueOrDefault("category"),
+            Brand             = qs.GetValueOrDefault("brand"),
+            Condition         = ParseCondition(qs.GetValueOrDefault("condition")),
+            Tags              = ParseCsv(qs, "tags"),
+            AestheticTags     = ParseCsv(qs, "aestheticTags"),
+            PriceMin          = priceMin,
+            PriceMax          = priceMax,
+            MinWears          = minWears,
+            MaxWears          = maxWears,
+            SortField         = ParseSortField(qs.GetValueOrDefault("sortField")),
+            SortDir           = ParseSortDirection(qs.GetValueOrDefault("sortDir")),
+            PageSize          = pageSize,
+            ContinuationToken = qs.GetValueOrDefault("continuationToken"),
+        };
+
+        return true;
     }
 
     // ── GET /api/wardrobe/{id} ──────────────────────────────────────────────
@@ -129,7 +145,7 @@ public class WardrobeFunctions(
         }
         catch
         {
-            return await JsonError(req, HttpStatusCode.BadRequest, "Invalid request body.");
+                return await JsonError(req, HttpStatusCode.BadRequest, InvalidRequestBodyMessage);
         }
 
         if (updated is null || !string.Equals(id, updated.Id, StringComparison.OrdinalIgnoreCase))
@@ -198,7 +214,7 @@ public class WardrobeFunctions(
             }
             catch
             {
-                return await JsonError(req, HttpStatusCode.BadRequest, "Invalid request body.");
+            return await JsonError(req, HttpStatusCode.BadRequest, InvalidRequestBodyMessage);
             }
         }
 
@@ -343,7 +359,7 @@ public class WardrobeFunctions(
         }
         catch
         {
-            return await JsonError(req, HttpStatusCode.BadRequest, "Invalid request body.");
+                return await JsonError(req, HttpStatusCode.BadRequest, InvalidRequestBodyMessage);
         }
 
         if (body is null || string.IsNullOrWhiteSpace(body.ItemId))
@@ -466,7 +482,7 @@ public class WardrobeFunctions(
         }
         catch
         {
-            return await JsonError(req, HttpStatusCode.BadRequest, "Invalid request body.");
+                return await JsonError(req, HttpStatusCode.BadRequest, InvalidRequestBodyMessage);
         }
 
         if (body is null)
@@ -498,9 +514,9 @@ public class WardrobeFunctions(
             return req.CreateResponse(System.Net.HttpStatusCode.Unauthorized);
 
         // Extract image bytes from multipart/form-data or raw body
-        var contentType = req.Headers.TryGetValues("Content-Type", out var cts)
-            ? cts.FirstOrDefault() ?? "application/octet-stream"
-            : "application/octet-stream";
+        var contentType = req.Headers.TryGetValues(ContentTypeHeader, out var cts)
+            ? cts.FirstOrDefault() ?? OctetStream
+            : OctetStream;
 
         byte[] imageBytes;
         string mediaType;
@@ -509,7 +525,7 @@ public class WardrobeFunctions(
         {
             (imageBytes, mediaType) = await MultipartReader.ReadFirstFileAsync(req.Body, contentType);
             if (imageBytes.Length == 0)
-                return await JsonError(req, HttpStatusCode.BadRequest, "No image provided.");
+                return await JsonError(req, HttpStatusCode.BadRequest, NoImageProvidedMessage);
         }
         else
         {
@@ -518,7 +534,7 @@ public class WardrobeFunctions(
             imageBytes = ms.ToArray();
             mediaType = contentType.Split(';')[0].Trim();
             if (imageBytes.Length == 0)
-                return await JsonError(req, HttpStatusCode.BadRequest, "No image provided.");
+                return await JsonError(req, HttpStatusCode.BadRequest, NoImageProvidedMessage);
         }
 
         var itemId = $"upload-{Guid.NewGuid():N}";
@@ -533,7 +549,7 @@ public class WardrobeFunctions(
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to upload raw image to blob storage.");
-            return await JsonError(req, HttpStatusCode.ServiceUnavailable, "Could not store image. Please try again.");
+            return await JsonError(req, HttpStatusCode.ServiceUnavailable, ContentTypeErrorMessage);
         }
 
         // Write Processing draft atomically — CancellationToken.None so a client disconnect
@@ -548,7 +564,8 @@ public class WardrobeFunctions(
             DraftUpdatedAt = now,
         };
         await repo.UpsertAsync(draftDoc, CancellationToken.None);
-        logger.LogInformation("Draft {ItemId} created for user {UserId}, status Processing.", itemId, userId);
+        if (logger.IsEnabled(LogLevel.Information))
+            logger.LogInformation("Draft {ItemId} created for user {UserId}, status Processing.", itemId, userId);
 
         // Enqueue the processing job — the queue worker handles the full pipeline
         // asynchronously, so this request returns immediately with 202 Accepted.
@@ -560,11 +577,12 @@ public class WardrobeFunctions(
                 Attempt: 1,
                 EnqueuedAt: now),
             CancellationToken.None);
-        logger.LogInformation("Draft {ItemId} enqueued for async processing.", itemId);
+        if (logger.IsEnabled(LogLevel.Information))
+            logger.LogInformation("Draft {ItemId} enqueued for async processing.", itemId);
 
         // Return 202 Accepted with the Processing draft for immediate UI feedback.
         var response = req.CreateResponse(HttpStatusCode.Accepted);
-        response.Headers.Add("Content-Type", "application/json; charset=utf-8");
+        response.Headers.Add(ContentTypeHeader, JsonContentType);
         await response.WriteStringAsync(
             JsonSerializer.Serialize(draftDoc, PluckItJsonContext.Default.ClothingItem));
         return response;
@@ -588,9 +606,8 @@ public class WardrobeFunctions(
         var result = await repo.GetDraftsAsync(userId!, pageSize, continuationToken, cancellationToken);
 
         // Enrich Ready drafts with SAS image URLs for preview
-        foreach (var item in result.Items)
-            if (!string.IsNullOrEmpty(item.ImageUrl))
-                item.ImageUrl = sasService.GenerateSasUrl(item.ImageUrl);
+        foreach (var item in result.Items.Where(item => !string.IsNullOrEmpty(item.ImageUrl)))
+            item.ImageUrl = sasService.GenerateSasUrl(item.ImageUrl);
 
         return await JsonOk(req, result, PluckItJsonContext.Default.WardrobeDraftsResult);
     }
@@ -643,7 +660,7 @@ public class WardrobeFunctions(
             return req.CreateResponse(HttpStatusCode.NotFound);
 
         if (item.DraftStatus != DraftStatus.Failed)
-            return await JsonError(req, HttpStatusCode.Conflict, "Only Failed drafts can be retried.");
+            return await JsonError(req, HttpStatusCode.Conflict, RetryDraftConflictMessage);
 
         if (string.IsNullOrEmpty(item.RawImageBlobUrl))
             return await JsonError(req, HttpStatusCode.Gone, "Raw image no longer available for retry.");
@@ -654,7 +671,8 @@ public class WardrobeFunctions(
         item.DraftUpdatedAt = now;
         item.DraftError = null;
         await repo.UpsertAsync(item, CancellationToken.None);
-        logger.LogInformation("Retrying failed draft {ItemId} for user {UserId}.", id, userId);
+        if (logger.IsEnabled(LogLevel.Information))
+            logger.LogInformation("Retrying failed draft {ItemId} for user {UserId}.", id, userId);
 
         // Enqueue for async processing — worker will handle the full pipeline
         await jobQueue.EnqueueAsync(
@@ -668,7 +686,7 @@ public class WardrobeFunctions(
 
         // Return 202 Accepted with the current (Processing) draft
         var response = req.CreateResponse(HttpStatusCode.Accepted);
-        response.Headers.Add("Content-Type", "application/json; charset=utf-8");
+        response.Headers.Add(ContentTypeHeader, JsonContentType);
         await response.WriteStringAsync(
             JsonSerializer.Serialize(item, PluckItJsonContext.Default.ClothingItem));
         return response;
@@ -682,26 +700,25 @@ public class WardrobeFunctions(
         CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
-        logger.LogInformation("CleanupAbandonedDrafts starting at {Now}.", now);
+        if (logger.IsEnabled(LogLevel.Information))
+            logger.LogInformation("CleanupAbandonedDrafts starting at {Now}.", now);
 
         // Pass 1: Processing drafts stuck > 2 hours → Failed
         var cutoff2h = now.AddHours(-2);
         var abandoned = await repo.GetByDraftStatusAsync(
             DraftStatus.Processing, cutoff2h, maxItems: 200, cancellationToken);
-        logger.LogInformation("Found {Count} abandoned Processing drafts.", abandoned.Count);
         foreach (var item in abandoned)
         {
             await repo.SetDraftTerminalAsync(
                 item.Id, item.UserId, DraftStatus.Failed,
                 null, null, "Timed out during processing.",
-                now, CancellationToken.None);
+                CancellationToken.None);
         }
 
         // Pass 2: Failed drafts older than 7 days → delete doc + blobs
         var cutoff7d = now.AddDays(-7);
         var stale = await repo.GetByDraftStatusAsync(
             DraftStatus.Failed, cutoff7d, maxItems: 200, cancellationToken);
-        logger.LogInformation("Found {Count} stale Failed drafts to purge.", stale.Count);
         foreach (var item in stale)
         {
             await repo.DeleteAsync(item.Id, item.UserId, CancellationToken.None);
@@ -711,7 +728,8 @@ public class WardrobeFunctions(
                 await sasService.DeleteBlobAsync(item.ImageUrl, CancellationToken.None);
         }
 
-        logger.LogInformation("CleanupAbandonedDrafts: transitioned {A}, purged {S}.",
+        if (logger.IsEnabled(LogLevel.Information))
+            logger.LogInformation("CleanupAbandonedDrafts: transitioned {A}, purged {S}.",
             abandoned.Count, stale.Count);
     }
 
@@ -734,7 +752,7 @@ public class WardrobeFunctions(
         }
         catch
         {
-            return await JsonError(req, HttpStatusCode.BadRequest, "Invalid request body.");
+            return await JsonError(req, HttpStatusCode.BadRequest, InvalidRequestBodyMessage);
         }
 
         if (item is null)
@@ -750,7 +768,7 @@ public class WardrobeFunctions(
 
         var response = req.CreateResponse(HttpStatusCode.Created);
         response.Headers.Add("Location", $"/api/wardrobe/{item.Id}");
-        response.Headers.Add("Content-Type", "application/json; charset=utf-8");
+        response.Headers.Add(ContentTypeHeader, JsonContentType);
         await response.WriteStringAsync(
             JsonSerializer.Serialize(item, PluckItJsonContext.Default.ClothingItem));
         return response;
@@ -771,12 +789,12 @@ public class WardrobeFunctions(
             if (header?.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) == true)
             {
                 var token = header["Bearer ".Length..];
-                var sub = await tokenValidator.ValidateAsync(token);
+                var sub = await authContext.TokenValidator.ValidateAsync(token);
                 if (sub is not null) return (true, sub);
             }
         }
 
-        var devId = config["Local:DevUserId"];
+        var devId = authContext.LocalDevUserId;
         if (!string.IsNullOrEmpty(devId)) return (true, devId);
 
         return (false, null);
@@ -786,16 +804,7 @@ public class WardrobeFunctions(
         HttpRequestData req, T body, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo)
     {
         var response = req.CreateResponse(HttpStatusCode.OK);
-        response.Headers.Add("Content-Type", "application/json; charset=utf-8");
-        await response.WriteStringAsync(JsonSerializer.Serialize(body, typeInfo));
-        return response;
-    }
-
-    private static async Task<HttpResponseData> JsonUnprocessable<T>(
-        HttpRequestData req, T body, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo)
-    {
-        var response = req.CreateResponse(HttpStatusCode.UnprocessableEntity);
-        response.Headers.Add("Content-Type", "application/json; charset=utf-8");
+        response.Headers.Add(ContentTypeHeader, JsonContentType);
         await response.WriteStringAsync(JsonSerializer.Serialize(body, typeInfo));
         return response;
     }
@@ -804,7 +813,7 @@ public class WardrobeFunctions(
         HttpRequestData req, HttpStatusCode status, string message)
     {
         var response = req.CreateResponse(status);
-        response.Headers.Add("Content-Type", "application/json; charset=utf-8");
+        response.Headers.Add(ContentTypeHeader, JsonContentType);
         await response.WriteStringAsync(
             JsonSerializer.Serialize(new ErrorResponse(message), PluckItJsonContext.Default.ErrorResponse));
         return response;
@@ -815,10 +824,10 @@ public class WardrobeFunctions(
         if (string.IsNullOrWhiteSpace(value))
             return null;
 
-        if (DateTimeOffset.TryParse(value, out var dto))
+        if (DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AllowWhiteSpaces, out var dto))
             return dto;
 
-        if (DateOnly.TryParse(value, out var date))
+        if (DateOnly.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
         {
             var dt = endOfDay
                 ? date.ToDateTime(TimeOnly.MaxValue, DateTimeKind.Utc)
@@ -828,6 +837,42 @@ public class WardrobeFunctions(
 
         return null;
     }
+
+    private static ItemCondition? ParseCondition(string? raw)
+    {
+        if (!Enum.TryParse<ItemCondition>(raw, ignoreCase: true, out var value))
+            return null;
+        return value;
+    }
+
+    private static decimal? ParseOptionalDecimal(string? raw)
+        => decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out var value) ? value : null;
+
+    private static int ParseOptionalInt(string? raw, int defaultValue, int min, int max)
+        => int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
+            ? Math.Clamp(value, min, max)
+            : defaultValue;
+
+    private static int? ParseOptionalIntOrNull(string? raw)
+    {
+        if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
+            return null;
+        return value;
+    }
+
+    private static string ParseSortField(string? raw)
+        => raw is string sortField &&
+           WardrobeSortField.Allowlist.Contains(sortField, StringComparer.OrdinalIgnoreCase)
+                ? sortField
+                : WardrobeSortField.DateAdded;
+
+    private static string ParseSortDirection(string? raw)
+        => string.Equals(raw, "asc", StringComparison.OrdinalIgnoreCase) ? "asc" : "desc";
+
+    private static string[]? ParseCsv(Dictionary<string, string> query, string key)
+        => query.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            : null;
 
     /// <summary>Parses a URL query string into a dictionary without System.Web dependency.</summary>
     private static Dictionary<string, string> ParseQueryString(Uri uri)
@@ -853,10 +898,12 @@ public class WardrobeFunctions(
 /// </summary>
 internal static class MultipartReader
 {
+    private const string OctetStream = "application/octet-stream";
+
     internal static async Task<(byte[] Bytes, string MediaType)> ReadFirstFileAsync(Stream body, string contentType)
     {
         var boundary = ExtractBoundary(contentType);
-        if (boundary is null) return ([], "application/octet-stream");
+        if (boundary is null) return ([], OctetStream);
 
         using var ms = new MemoryStream();
         await body.CopyToAsync(ms);
@@ -867,19 +914,19 @@ internal static class MultipartReader
 
         // Find first boundary line
         var start = IndexOf(data, delimiter, 0);
-        if (start < 0) return ([], "application/octet-stream");
+        if (start < 0) return ([], OctetStream);
 
         // Skip past boundary + CRLF to reach part headers
         var headerStart = start + delimiter.Length + 2;
 
         // Find the blank line separating headers from content
         var contentStart = IndexOf(data, crlfcrlf, headerStart);
-        if (contentStart < 0) return ([], "application/octet-stream");
+        if (contentStart < 0) return ([], OctetStream);
         contentStart += 4; // skip \r\n\r\n
 
         // Parse Content-Type from part headers
         var headersText = Encoding.UTF8.GetString(data, headerStart, contentStart - headerStart - 4);
-        var mediaType = "application/octet-stream";
+        var mediaType = OctetStream;
         foreach (var line in headersText.Split('\n'))
         {
             var trimmed = line.Trim();

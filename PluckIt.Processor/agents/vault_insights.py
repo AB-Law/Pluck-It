@@ -93,31 +93,39 @@ def _normalize_color_name(raw: Optional[str]) -> Optional[str]:
     return None
 
 
+def _extract_color_from_colour_entry(entry: dict) -> Optional[str]:
+    from_name = _normalize_color_name(entry.get("name"))
+    if from_name:
+        return from_name
+
+    hexv = str(entry.get("hex") or "").lower().strip()
+    if hexv in {"#000000", "#111111", "#1a1a1a"}:
+        return "black"
+    if hexv in {"#ffffff", "#f5f5f5", "#fafafa"}:
+        return "white"
+    if hexv in {"#808080", "#a9a9a9", "#c0c0c0"}:
+        return "grey"
+    return None
+
+
+def _find_first_color(entries: list, extractor) -> Optional[str]:
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        color = extractor(entry)
+        if color:
+            return color
+    return None
+
+
 def _item_primary_color(item: dict) -> Optional[str]:
     colours = item.get("colours") or []
     tags = item.get("tags") or []
 
-    for c in colours:
-        if isinstance(c, dict):
-            from_name = _normalize_color_name(c.get("name"))
-            if from_name:
-                return from_name
-
-            hexv = str(c.get("hex") or "").lower().strip()
-            # Lightweight named buckets for common dark/light neutrals.
-            if hexv in {"#000000", "#111111", "#1a1a1a"}:
-                return "black"
-            if hexv in {"#ffffff", "#f5f5f5", "#fafafa"}:
-                return "white"
-            if hexv in {"#808080", "#a9a9a9", "#c0c0c0"}:
-                return "grey"
-
-    for t in tags:
-        from_tag = _normalize_color_name(t)
-        if from_tag:
-            return from_tag
-
-    return None
+    color = _find_first_color(colours, _extract_color_from_colour_entry)
+    if color:
+        return color
+    return _find_first_color(tags, _normalize_color_name)
 
 
 def _months_since(date_added: Optional[str], now: datetime) -> int:
@@ -242,26 +250,35 @@ def _get_top_color_insight(events: list[dict], item_by_id: dict) -> Optional[dic
         return {"color": top_color, "pct": round((count / total) * 100.0, 1)}
     return None
 
+def _normalize_price_dict(price_raw) -> dict:
+    if isinstance(price_raw, dict):
+        return price_raw
+    return {"amount": price_raw}
+
+
+def _converted_price(item: dict, currency: str) -> Optional[float]:
+    price = _normalize_price_dict(item.get("price") or {})
+    return _convert(float(price.get("amount") or 0), price.get("originalCurrency"), currency)
+
+
 def _get_unworn_insights(items: list[dict], now: datetime, currency: str) -> tuple[Optional[float], Optional[dict]]:
     cutoff = now - timedelta(days=90)
     unworn_count = 0
     max_amount = -1.0
     most_expensive = None
-    
+
     for item in items:
         wear_count = int(item.get("wearCount") or 0)
         last_worn = _parse_iso(item.get("lastWornAt"))
         if last_worn is None or last_worn < cutoff:
             unworn_count += 1
-            
+
         if wear_count == 0:
-            price = item.get("price") or {}
-            if not isinstance(price, dict): price = {"amount": price}
-            converted = _convert(float(price.get("amount") or 0), price.get("originalCurrency"), currency)
+            converted = _converted_price(item, currency)
             if converted and converted > max_amount:
                 max_amount = converted
                 most_expensive = {"itemId": item.get("id"), "amount": round(converted, 2), "currency": currency}
-                
+
     pct = round((unworn_count / len(items)) * 100.0, 1) if items else None
     return pct, most_expensive
 

@@ -50,11 +50,11 @@ os.environ.setdefault(
 )
 
 import azure.functions as func
-from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi import FastAPI, Depends, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
-from PIL import Image, UnidentifiedImageError
+from PIL import Image
 from pillow_heif import register_heif_opener
 
 from agents.auth import get_user_id
@@ -71,6 +71,12 @@ _ISO_UTC_SUFFIX = "Z"
 _DB_LIMIT_PARAM = "@limit"
 _DB_USER_ID_PARAM = "@uid"
 _TASTE_MODULE_NAME_TAG = "agents.taste_calibration"
+_WEBP_MEDIA_TYPE = "image/webp"
+_ARCHIVE_BLOB_SUFFIX = "-transparent.webp"
+_WEBP_QUALITY = 85
+_WEBP_METHOD = 6
+_ERR_NO_IMAGE_PROVIDED = "No image provided."
+_ERR_MOOD_NOT_FOUND = "Mood not found."
 
 background_tasks = set()
 
@@ -142,7 +148,7 @@ def _normalize_image(image_bytes: bytes) -> bytes:
             buf = io.BytesIO()
             img.save(buf, format="JPEG", quality=95)
             return buf.getvalue()
-    except (UnidentifiedImageError, Exception):
+    except Exception:
         return image_bytes
 
 
@@ -189,6 +195,89 @@ def _get_blob_service():
         f"EndpointSuffix=core.windows.net"
     )
     return BlobServiceClient.from_connection_string(conn_str)
+
+
+async def _extract_process_image_payload(request: Request) -> tuple[bytes, str]:
+    image_bytes: Optional[bytes] = None
+    filename = f"{uuid.uuid4()}.png"
+    provided_item_id: Optional[str] = None
+
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        file = form.get("image")
+        if file and hasattr(file, "read"):
+            image_bytes = await file.read()
+            filename = getattr(file, "filename", filename) or filename
+        item_id_field = form.get("item_id")
+        if item_id_field and isinstance(item_id_field, str):
+            provided_item_id = item_id_field.strip() or None
+    else:
+        image_bytes = await request.body()
+
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail=_ERR_NO_IMAGE_PROVIDED)
+
+    if provided_item_id:
+        item_id = provided_item_id
+    else:
+        base = filename.rsplit(".", 1)[0] if "." in filename else filename
+        item_id = f"{base}-{uuid.uuid4().hex[:8]}"
+    return image_bytes, item_id
+
+
+def _get_archive_blob(item_id: str):
+    output_blob_name = f"{item_id}{_ARCHIVE_BLOB_SUFFIX}"
+    blob_service = _get_blob_service()
+    archive_container = _get_env("ARCHIVE_CONTAINER_NAME")
+    return blob_service.get_blob_client(
+        container=archive_container, blob=output_blob_name
+    )
+
+
+def _get_cached_archive_url(archive_blob) -> Optional[str]:
+    from azure.core.exceptions import ResourceNotFoundError
+
+    try:
+        archive_blob.get_blob_properties()
+        return archive_blob.url
+    except ResourceNotFoundError:
+        return None
+
+
+async def _process_image_payload_to_webp(image_bytes: bytes, item_id: str) -> bytes:
+    try:
+        transparent_png = await asyncio.to_thread(_segment_with_modal, image_bytes)
+        logger.info("process-image: Modal BiRefNet segmentation succeeded")
+    except Exception as modal_ex:
+        logger.warning(
+            "process-image: Modal segmentation failed for %s (%s); falling back to rembg",
+            item_id,
+            modal_ex,
+        )
+        try:
+            transparent_png = await asyncio.to_thread(_remove_background, image_bytes)
+        except Exception as ex:
+            logger.exception("Background removal failed for %s: %s", item_id, ex)
+            raise HTTPException(status_code=500, detail=f"Failed to process image: {ex}")
+
+    try:
+        with Image.open(io.BytesIO(transparent_png)) as rgba_img:
+            webp_buf = io.BytesIO()
+            rgba_img.save(webp_buf, format="WEBP", quality=_WEBP_QUALITY, method=_WEBP_METHOD)
+            return webp_buf.getvalue()
+    except Exception as ex:
+        logger.exception("WebP conversion failed for item %s: %s", item_id, ex)
+        raise HTTPException(status_code=500, detail=f"WebP conversion failed: {ex}")
+
+
+def _upload_archive_blob(archive_blob, webp_data: bytes, item_id: str) -> str:
+    try:
+        archive_blob.upload_blob(webp_data, overwrite=True, content_type=_WEBP_MEDIA_TYPE)
+        return archive_blob.url
+    except Exception as ex:
+        logger.exception("Blob upload failed for item %s: %s", item_id, ex)
+        raise HTTPException(status_code=500, detail=f"Failed to upload image: {ex}")
 
 
 def _infer_basic_tags(image: Image.Image) -> dict[str, Any]:
@@ -267,7 +356,15 @@ async def health():
 
 # ── Process image ─────────────────────────────────────────────────────────────
 
-@fastapi_app.post("/api/process-image", status_code=201)
+@fastapi_app.post(
+    "/api/process-image",
+    status_code=201,
+    responses={
+        201: {"description": "Image processed and stored in archive storage."},
+        400: {"description": "No image provided."},
+        500: {"description": "Image processing failed."},
+    },
+)
 async def process_image(request: Request):
     """
     Accept an image as multipart/form-data (field 'image') or raw bytes.
@@ -278,92 +375,22 @@ async def process_image(request: Request):
     Returns {id, imageUrl}.
     """
     logger.info("process-image: received request")
+    image_bytes, item_id = await _extract_process_image_payload(request)
+    archive_blob = _get_archive_blob(item_id)
 
-    image_bytes: Optional[bytes] = None
-    filename = f"{uuid.uuid4()}.png"
-    provided_item_id: Optional[str] = None
-
-    content_type = request.headers.get("content-type", "")
-    if "multipart/form-data" in content_type:
-        form = await request.form()
-        file = form.get("image")
-        if file and hasattr(file, "read"):
-            image_bytes = await file.read()
-            filename = getattr(file, "filename", filename) or filename
-        item_id_field = form.get("item_id")
-        if item_id_field and isinstance(item_id_field, str):
-            provided_item_id = item_id_field.strip() or None
-    else:
-        image_bytes = await request.body()
-
-    if not image_bytes:
-        raise HTTPException(status_code=400, detail="No image provided.")
-
-    # Determine item id upfront so we can check for an existing archive blob.
-    if provided_item_id:
-        item_id = provided_item_id
-    else:
-        base = filename.rsplit(".", 1)[0] if "." in filename else filename
-        item_id = f"{base}-{uuid.uuid4().hex[:8]}"
-    output_blob_name = f"{item_id}-transparent.webp"
-
-    # ── Check if the archive blob already exists (previous run completed but
-    # .NET was disconnected before it could read the response).  Skip
-    # segmentation entirely and return the existing URL so we don't waste a
-    # Modal cold-start on a retry.
-    from azure.storage.blob import BlobClient
-    from azure.core.exceptions import ResourceNotFoundError
-    blob_service = _get_blob_service()
-    archive_container = _get_env("ARCHIVE_CONTAINER_NAME")
-    archive_blob: BlobClient = blob_service.get_blob_client(
-        container=archive_container, blob=output_blob_name
-    )
-    try:
-        archive_blob.get_blob_properties()
-        logger.info("process-image: archive blob already exists for %s, skipping segmentation", item_id)
-        return {"id": item_id, "imageUrl": archive_blob.url, "mediaType": "image/webp"}
-    except ResourceNotFoundError:
-        pass  # blob doesn't exist yet — proceed with segmentation
-
-    # Attempt Modal BiRefNet first; fall back to rembg on any error.
-    # Both functions are CPU/network-bound — run in a thread pool so the asyncio
-    # event loop is never blocked (blocking loop causes gRPC heartbeat misses and
-    # the Functions host kills the Python worker mid-request).
-    try:
-        transparent_png = await asyncio.to_thread(_segment_with_modal, image_bytes)
-        logger.info("process-image: Modal BiRefNet segmentation succeeded")
-    except Exception as modal_ex:
-        logger.warning(
-            "process-image: Modal segmentation failed (%s); falling back to rembg",
-            modal_ex,
+    cached_archive_url = _get_cached_archive_url(archive_blob)
+    if cached_archive_url:
+        logger.info(
+            "process-image: archive blob already exists for %s, skipping segmentation",
+            item_id,
         )
-        try:
-            transparent_png = await asyncio.to_thread(_remove_background, image_bytes)
-        except Exception as ex:
-            logger.exception("Background removal failed: %s", ex)
-            raise HTTPException(status_code=500, detail=f"Failed to process image: {ex}")
+        return {"id": item_id, "imageUrl": cached_archive_url, "mediaType": _WEBP_MEDIA_TYPE}
 
-    # Convert transparent RGBA image to lossy WebP with alpha (q=85, method=6).
-    # Pillow 10+ encodes WebP with alpha when the source is RGBA.
-    # method=6 gives maximum compression ratio with acceptable CPU overhead.
-    try:
-        with Image.open(io.BytesIO(transparent_png)) as rgba_img:
-            webp_buf = io.BytesIO()
-            rgba_img.save(webp_buf, format="WEBP", quality=85, method=6)
-            transparent_webp = webp_buf.getvalue()
-    except Exception as ex:
-        logger.exception("WebP conversion failed for item %s: %s", item_id, ex)
-        raise HTTPException(status_code=500, detail=f"WebP conversion failed: {ex}")
-
-    try:
-        archive_blob.upload_blob(transparent_webp, overwrite=True, content_type="image/webp")
-        archive_url = archive_blob.url
-    except Exception as ex:
-        logger.exception("Blob upload failed: %s", ex)
-        raise HTTPException(status_code=500, detail=f"Failed to upload image: {ex}")
+    transparent_webp = await _process_image_payload_to_webp(image_bytes, item_id)
+    archive_url = _upload_archive_blob(archive_blob, transparent_webp, item_id)
 
     logger.info("process-image: item %s → %s (WebP, %d bytes)", item_id, archive_url, len(transparent_webp))
-    return {"id": item_id, "imageUrl": archive_url, "mediaType": "image/webp"}
+    return {"id": item_id, "imageUrl": archive_url, "mediaType": _WEBP_MEDIA_TYPE}
 
 
 # ── Chat endpoint (SSE streaming) ─────────────────────────────────────────────
@@ -375,6 +402,12 @@ class ChatRequest(BaseModel):
 
 
 @fastapi_app.post("/api/chat", responses={
+    200: {"description": "SSE stream of stylist agent responses."},
+    400: {"description": "Invalid prompt or mood selection."},
+    401: {"description": "Authentication failed."},
+    500: {"description": "Agent logic error or streaming failure."}
+})
+@fastapi_app.post("/api/chat/", responses={
     200: {"description": "SSE stream of stylist agent responses."},
     400: {"description": "Invalid prompt or mood selection."},
     401: {"description": "Authentication failed."},
@@ -463,7 +496,15 @@ async def update_memory(body: MemoryUpdateRequest, user_id: Annotated[str, Depen
 
 # ── Digest results endpoint ───────────────────────────────────────────────────
 
-@fastapi_app.post("/api/digest/run")
+@fastapi_app.post(
+    "/api/digest/run",
+    responses={
+        200: {"description": "Digest generation request was accepted."},
+        400: {"description": "Invalid request or unsupported option."},
+        401: {"description": "Authentication failed."},
+        500: {"description": "Could not run digest."},
+    },
+)
 async def run_digest_now(user_id: Annotated[str, Depends(get_user_id)], force: bool = True):
     """Manually trigger digest generation for the authenticated user.
     Useful for local dev/testing — production relies on the Monday timer trigger.
@@ -486,7 +527,14 @@ async def run_digest_now(user_id: Annotated[str, Depends(get_user_id)], force: b
         raise HTTPException(status_code=500, detail="Could not run digest.")
 
 
-@fastapi_app.get("/api/digest/latest")
+@fastapi_app.get(
+    "/api/digest/latest",
+    responses={
+        200: {"description": "Most recent digest returned."},
+        401: {"description": "Authentication failed."},
+        500: {"description": "Could not load digest."},
+    },
+)
 async def get_latest_digest(user_id: Annotated[str, Depends(get_user_id)]):
     """Return the most recently generated wardrobe digest for the user."""
     from agents.db import get_digests_container
@@ -514,19 +562,26 @@ async def get_latest_digest(user_id: Annotated[str, Depends(get_user_id)]):
         raise HTTPException(status_code=500, detail="Could not load digest.")
 
 
-@fastapi_app.get("/api/insights/vault")
+@fastapi_app.get(
+    "/api/insights/vault",
+    responses={
+        200: {"description": "Vault insight data returned."},
+        401: {"description": "Authentication failed."},
+        500: {"description": "Could not compute vault insights."},
+    },
+)
 async def get_vault_insights(
     user_id: Annotated[str, Depends(get_user_id)],
-    windowDays: int = 90,
-    targetCpw: float = 100.0,
+    window_days: Annotated[int, Query(alias="windowDays")] = 90,
+    target_cpw: Annotated[float, Query(alias="targetCpw")] = 100.0,
 ):
     """Return deterministic behavior + CPW insights for the vault surface."""
     from agents.vault_insights import compute_vault_insights
     try:
         result = await compute_vault_insights(
             user_id=user_id,
-            window_days=windowDays,
-            target_cpw=targetCpw,
+            window_days=window_days,
+            target_cpw=target_cpw,
         )
         return result
     except Exception as exc:
@@ -541,9 +596,16 @@ class DigestFeedbackRequest(BaseModel):
     signal: str  # "up" | "down"
 
 
-@fastapi_app.get("/api/digest/feedback")
+@fastapi_app.get(
+    "/api/digest/feedback",
+    responses={
+        200: {"description": "Digest feedback returned."},
+        401: {"description": "Authentication failed."},
+        500: {"description": "Could not load feedback."},
+    },
+)
 async def get_digest_feedback(
-    digestId: str,
+    digest_id: Annotated[str, Query(alias="digestId")],
     user_id: Annotated[str, Depends(get_user_id)],
 ):
     """Return all feedback the user has already given for a specific digest.
@@ -556,11 +618,11 @@ async def get_digest_feedback(
         async for item in container.query_items(
             query=(
                 "SELECT c.suggestionIndex, c.signal FROM c "
-                "WHERE c.userId = @userId AND c.digestId = @digestId"
+                "WHERE c.userId = @userId AND c.digestId = @digest_id"
             ),
             parameters=[
                 {"name": "@userId",   "value": user_id},
-                {"name": "@digestId", "value": digestId},
+                {"name": "@digest_id", "value": digest_id},
             ],
         ):
             results.append(item)
@@ -570,7 +632,15 @@ async def get_digest_feedback(
     return {"feedback": results}
 
 
-@fastapi_app.post("/api/digest/feedback")
+@fastapi_app.post(
+    "/api/digest/feedback",
+    responses={
+        200: {"description": "Digest feedback recorded."},
+        400: {"description": "Invalid feedback signal."},
+        401: {"description": "Authentication failed."},
+        500: {"description": "Could not save feedback."},
+    },
+)
 async def post_digest_feedback(
     body: DigestFeedbackRequest,
     user_id: Annotated[str, Depends(get_user_id)],
@@ -615,7 +685,14 @@ class SeedMoodsRequest(BaseModel):
     months_back: int = 3
 
 
-@fastapi_app.post("/api/moods/seed")
+@fastapi_app.post(
+    "/api/moods/seed",
+    responses={
+        200: {"description": "Moods seeding triggered."},
+        401: {"description": "Authentication failed."},
+        500: {"description": "Sitemap seeder failed."},
+    },
+)
 async def seed_moods(body: SeedMoodsRequest = SeedMoodsRequest()):
     """
     One-time sitemap seeder — populates the Moods container from publication
@@ -637,8 +714,18 @@ async def seed_moods(body: SeedMoodsRequest = SeedMoodsRequest()):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@fastapi_app.get("/api/moods")
-async def list_moods(primaryMood: Optional[str] = None):
+@fastapi_app.get(
+    "/api/moods",
+    responses={
+        200: {"description": "Latest mood catalog entries."},
+        400: {"description": "Unknown primary mood filter."},
+        401: {"description": "Authentication failed."},
+        500: {"description": "Could not load moods."},
+    },
+)
+async def list_moods(
+    primary_mood: Annotated[Optional[str], Query(alias="primaryMood")] = None
+):
     """
     List all fashion trend moods, optionally filtered by primaryMood category.
     Results are ordered by trendScore (most-mentioned first).
@@ -649,20 +736,20 @@ async def list_moods(primaryMood: Optional[str] = None):
     from agents.db import get_moods_container
     container = get_moods_container()
 
-    if primaryMood is not None and primaryMood not in PRIMARY_MOODS:
+    if primary_mood is not None and primary_mood not in PRIMARY_MOODS:
         raise HTTPException(
             status_code=400,
-            detail=f"Unknown primaryMood '{primaryMood}'. Valid values: {', '.join(PRIMARY_MOODS)}",
+            detail=f"Unknown primaryMood '{primary_mood}'. Valid values: {', '.join(PRIMARY_MOODS)}",
         )
 
     try:
-        if primaryMood:
+        if primary_mood:
             query = (
                 f"SELECT * FROM c WHERE c.primaryMood = @primaryMood "
                 f"ORDER BY c.trendScore DESC OFFSET 0 LIMIT {_DB_LIMIT_PARAM}"
             )
             parameters = [
-                {"name": "@primaryMood", "value": primaryMood},
+                {"name": "@primaryMood", "value": primary_mood},
                 {"name": _DB_LIMIT_PARAM,       "value": _MOOD_LIST_LIMIT},
             ]
         else:
@@ -683,7 +770,15 @@ async def list_moods(primaryMood: Optional[str] = None):
         raise HTTPException(status_code=500, detail="Could not load moods.")
 
 
-@fastapi_app.get("/api/moods/{mood_id}")
+@fastapi_app.get(
+    "/api/moods/{mood_id}",
+    responses={
+        200: {"description": "Mood returned."},
+        401: {"description": "Authentication failed."},
+        404: {"description": "Mood not found."},
+        500: {"description": "Could not load mood."},
+    },
+)
 async def get_mood(mood_id: str):
     """Return a single mood document by its ID."""
     from agents.db import get_moods_container
@@ -694,7 +789,7 @@ async def get_mood(mood_id: str):
         # Extract the primaryMood prefix by matching against the known vocabulary.
         parts = mood_id.split("-")
         if len(parts) < 2:
-            raise HTTPException(status_code=404, detail="Mood not found.")
+            raise HTTPException(status_code=404, detail=_ERR_MOOD_NOT_FOUND)
 
         # Try progressively longer prefixes to handle multi-word primary moods
         partition_key = None
@@ -706,7 +801,7 @@ async def get_mood(mood_id: str):
                 break
 
         if partition_key is None:
-            raise HTTPException(status_code=404, detail="Mood not found.")
+            raise HTTPException(status_code=404, detail=_ERR_MOOD_NOT_FOUND)
 
         item = await container.read_item(item=mood_id, partition_key=partition_key)
         for key in _COSMOS_INTERNAL_KEYS:
@@ -716,7 +811,7 @@ async def get_mood(mood_id: str):
         raise
     except Exception as exc:
         logger.exception("Failed to load mood %s: %s", mood_id, exc)
-        raise HTTPException(status_code=404, detail="Mood not found.")
+        raise HTTPException(status_code=404, detail=_ERR_MOOD_NOT_FOUND)
 
 
 # ── Scraper security helpers ──────────────────────────────────────────────────
@@ -725,26 +820,9 @@ import ipaddress
 import socket
 from urllib.parse import urlparse
 
-# Private / reserved ranges that must never be fetched (SSRF prevention).
-_BLOCKED_NETWORKS = [
-    ipaddress.ip_network(r) for r in [
-        "0.0.0.0/8",          # "This" network
-        "10.0.0.0/8",         # Private
-        "100.64.0.0/10",      # Shared address space
-        "127.0.0.0/8",        # Loopback
-        "169.254.0.0/16",     # Link-local / Azure IMDS
-        "172.16.0.0/12",      # Private
-        "192.168.0.0/16",     # Private
-        "198.18.0.0/15",      # Benchmarking
-        "198.51.100.0/24",    # Documentation
-        "203.0.113.0/24",     # Documentation
-        "224.0.0.0/4",        # Multicast
-        "240.0.0.0/4",        # Reserved
-        "::1/128",            # IPv6 loopback
-        "fc00::/7",           # IPv6 unique local
-        "fe80::/10",          # IPv6 link-local
-    ]
-]
+
+def _is_private_or_reserved_address(ip: ipaddress._BaseAddress) -> bool:
+    return not ip.is_global
 
 
 def _validate_scraper_url(url: str) -> None:
@@ -779,7 +857,7 @@ def _validate_scraper_url(url: str) -> None:
     except ValueError:
         pass
 
-    # Resolve DNS and check every returned address against blocked ranges
+    # Resolve DNS and check every returned address.
     try:
         resolved = socket.getaddrinfo(hostname, None)
     except socket.gaierror:
@@ -791,12 +869,11 @@ def _validate_scraper_url(url: str) -> None:
             ip = ipaddress.ip_address(addr_str)
         except ValueError:
             continue
-        for net in _BLOCKED_NETWORKS:
-            if ip in net:
-                raise HTTPException(
-                    status_code=400,
-                    detail="URL resolves to a private or reserved address.",
-                )
+        if _is_private_or_reserved_address(ip):
+            raise HTTPException(
+                status_code=400,
+                detail="URL resolves to a private or reserved address.",
+            )
 
 
 def _require_admin(user_id: Annotated[str, Depends(get_user_id)]) -> str:
@@ -826,6 +903,7 @@ class SubscribeRequest(BaseModel):
 
 
 @fastapi_app.get("/api/scraper/sources", responses={
+    401: {"description": "Authentication failed."},
     200: {
         "description": "List of scraper sources with subscription status.",
         "content": {
@@ -847,7 +925,8 @@ class SubscribeRequest(BaseModel):
                 }
             }
         }
-    }
+    },
+    500: {"description": "Could not load sources."},
 })
 async def list_scraper_sources(user_id: Annotated[str, Depends(get_user_id)]):
     """List all active scraper sources (global + user-created)."""
@@ -927,6 +1006,7 @@ def _check_needs_client_ingest(source: dict) -> bool:
         }
     },
     400: {"description": "Invalid URL or other input error."},
+    401: {"description": "Authentication failed."},
     500: {"description": "Failed to generate scraper config or save source."}
 })
 async def suggest_scraper_source(
@@ -988,6 +1068,7 @@ async def suggest_scraper_source(
     },
     404: {"description": "Source not found."},
     409: {"description": "Lease already held by another user."},
+    401: {"description": "Authentication failed."},
     500: {"description": "Could not acquire lease."}
 })
 async def acquire_scraper_lease(source_id: str, user_id: Annotated[str, Depends(get_user_id)]):
@@ -1006,7 +1087,7 @@ async def acquire_scraper_lease(source_id: str, user_id: Annotated[str, Depends(
             parameters=[{"name": "@id", "value": source_id}]
         )]
         if not items:
-            raise HTTPException(status_code=404, detail=_ERR_SOURCE_NOT_FOUND)
+            raise HTTPException(status_code=404, detail=_ERR_SOURCE_NOT_FOUND_MESSAGE)
         source = items[0]
         
         # Check if existing lease is still active
@@ -1048,8 +1129,6 @@ async def ingest_reddit_data(body: RedditIngestBatch, user_id: Annotated[str, De
     """
     from agents.scrapers.reddit_scraper import RedditScraper
     from agents.scraper_runner import ingest_items
-    import random
-
     await _check_user_ban(user_id)
     source = await _get_source_and_verify_sub(body.source_id)
     expected_sub = source.get("config", {}).get("subreddit", "").lower()
@@ -1063,8 +1142,6 @@ async def ingest_reddit_data(body: RedditIngestBatch, user_id: Annotated[str, De
 
     # Spot-check logic: 10% chance
     verified = True
-    do_audit = random.random() < 0.1
-    # In production, we'd trigger a background audit here if do_audit is True
 
     loop = asyncio.get_event_loop()
     upserted = await loop.run_in_executor(
@@ -1135,6 +1212,7 @@ async def admin_unban_user(
             }
         }
     },
+    401: {"description": "Authentication failed."},
     500: {"description": "Could not subscribe to source."}
 })
 async def subscribe_to_source(
@@ -1188,6 +1266,7 @@ async def subscribe_to_source(
             }
         }
     },
+    401: {"description": "Authentication failed."},
     500: {"description": "Could not unsubscribe from source."}
 })
 async def unsubscribe_from_source(
@@ -1210,127 +1289,163 @@ async def unsubscribe_from_source(
     return {"sourceId": source_id, "subscribed": False}
 
 
-@fastapi_app.get("/api/scraper/items")
+def _parse_cursor_token(token: Optional[str]) -> tuple[Optional[Any], Optional[str]]:
+    if not token:
+        return None, None
+    try:
+        raw = base64.urlsafe_b64decode(token.encode()).decode()
+        payload = json.loads(raw)
+        return payload.get("k"), payload.get("id")
+    except Exception:
+        return None, None
+
+
+def _build_continuation_token(token_key: Any, doc_id: str) -> Optional[str]:
+    if token_key is None or not doc_id:
+        return None
+    payload = json.dumps({"k": token_key, "id": doc_id})
+    return base64.urlsafe_b64encode(payload.encode()).decode()
+
+
+def _normalise_sort(sort_by: str) -> str:
+    return sort_by if sort_by in {"score", "recent"} else "score"
+
+
+def _since_iso(range_key: str) -> Optional[str]:
+    now = datetime.now(timezone.utc)
+    windows = {
+        "1h": timedelta(hours=1),
+        "1d": timedelta(days=1),
+        "7d": timedelta(days=7),
+        "30d": timedelta(days=30),
+    }
+    delta = windows.get(range_key)
+    if delta is None:
+        return None
+    return (now - delta).isoformat()
+
+
+def _build_scraped_items_query(
+    sort_by: str,
+    effective_page_size: int,
+    source_ids: list[str],
+    tag_filters: list[str],
+    since: Optional[str],
+    cursor_key: Optional[Any],
+) -> tuple[str, list[dict]]:
+    order_clause = (
+        "c.userId ASC, c.scoreSignal DESC"
+        if sort_by == "score"
+        else "c.userId ASC, c.scrapedAt DESC"
+    )
+
+    where_clauses = ["c.userId = 'global'"]
+    params: list[dict] = [{"name": _DB_LIMIT_PARAM, "value": effective_page_size + 1}]
+
+    if source_ids:
+        where_clauses.append("ARRAY_CONTAINS(@sourceIds, c.sourceId)")
+        params.append({"name": "@sourceIds", "value": source_ids})
+
+    if tag_filters:
+        where_clauses.append(
+            "EXISTS (SELECT VALUE t FROM t IN c.tags WHERE ARRAY_CONTAINS(@tags, LOWER(t)))"
+        )
+        params.append({"name": "@tags", "value": tag_filters})
+
+    if since:
+        where_clauses.append(
+            "("
+            "(IS_DEFINED(c.sourceCreatedAt) AND c.sourceCreatedAt >= @since)"
+            " OR "
+            "(NOT IS_DEFINED(c.sourceCreatedAt) AND c.scrapedAt >= @since)"
+            ")"
+        )
+        params.append({"name": "@since", "value": since})
+
+    if cursor_key is not None:
+        if sort_by == "score":
+            where_clauses.append("c.scoreSignal < @cursorKey")
+            params.append({"name": "@cursorKey", "value": int(cursor_key)})
+        else:
+            where_clauses.append("c.scrapedAt < @cursorKey")
+            params.append({"name": "@cursorKey", "value": str(cursor_key)})
+
+    query = (
+        f"SELECT * FROM c WHERE {' AND '.join(where_clauses)} "
+        f"ORDER BY {order_clause} OFFSET 0 LIMIT @limit"
+    )
+    return query, params
+
+
+async def _query_scraped_items(
+    container,
+    query: str,
+    params: list[dict],
+    partition_key: Optional[str],
+) -> list[dict]:
+    items: list[dict] = []
+    iterator_kwargs = {"query": query, "parameters": params}
+    if partition_key is not None:
+        iterator_kwargs["partition_key"] = partition_key
+    iterator = container.query_items(**iterator_kwargs)
+    async for doc in iterator:
+        for key in _COSMOS_INTERNAL_KEYS:
+            doc.pop(key, None)
+        items.append(doc)
+    return items
+
+
+@fastapi_app.get(
+    "/api/scraper/items",
+    responses={
+        200: {"description": "Scraped items returned."},
+        401: {"description": "Authentication failed."},
+        500: {"description": "Could not load items."},
+    },
+)
 async def list_scraped_items(
     user_id: Annotated[str, Depends(get_user_id)],
-    sortBy: str = "score",
-    pageSize: int = 50,
-    sourceIds: Optional[str] = None,
+    sort_by: Annotated[str, Query(alias="sortBy")] = "score",
+    page_size: Annotated[int, Query(alias="pageSize")] = 50,
+    source_ids: Annotated[Optional[str], Query(alias="sourceIds")] = None,
     tags: Optional[str] = None,
-    timeRange: str = "all",
-    continuationToken: Optional[str] = None,
+    time_range: Annotated[str, Query(alias="timeRange")] = "all",
+    continuation_token: Annotated[Optional[str], Query(alias="continuationToken")] = None,
 ):
     """List scraped items for the discover feed (global pool)."""
     from agents.db import get_scraped_items_container
 
-    def _parse_cursor(token: Optional[str]) -> tuple[Optional[Any], Optional[str]]:
-        if not token:
-            return None, None
-        try:
-            raw = base64.urlsafe_b64decode(token.encode()).decode()
-            payload = json.loads(raw)
-            return payload.get("k"), payload.get("id")
-        except Exception:
-            return None, None
-
-    def _encode_cursor(key: Any, doc_id: str) -> Optional[str]:
-        if key is None or not doc_id:
-            return None
-        payload = json.dumps({"k": key, "id": doc_id})
-        return base64.urlsafe_b64encode(payload.encode()).decode()
-
-    def _since_iso(range_key: str) -> Optional[str]:
-        now = datetime.now(timezone.utc)
-        windows = {
-            "1h": timedelta(hours=1),
-            "1d": timedelta(days=1),
-            "7d": timedelta(days=7),
-            "30d": timedelta(days=30),
-        }
-        delta = windows.get(range_key)
-        if delta is None:
-            return None
-        return (now - delta).isoformat()
-
+    cursor_key, _ = _parse_cursor_token(continuation_token)
     container = get_scraped_items_container()
+    sort_by = _normalise_sort(sort_by)
+
     try:
-        sortBy = sortBy if sortBy in {"score", "recent"} else "score"
-        order_clause = (
-            "c.userId ASC, c.scoreSignal DESC"
-            if sortBy == "score"
-            else "c.userId ASC, c.scrapedAt DESC"
-        )
-        cursor_key, cursor_id = _parse_cursor(continuationToken)
-        where_clauses = ["c.userId = 'global'"]
-        effective_page_size = max(1, min(pageSize, 100))
-        params: list[dict] = [{"name": "@limit", "value": effective_page_size + 1}]
-
-        source_ids = [s.strip() for s in (sourceIds or "").split(",") if s.strip()]
-        if source_ids:
-            where_clauses.append("ARRAY_CONTAINS(@sourceIds, c.sourceId)")
-            params.append({"name": "@sourceIds", "value": source_ids})
-
+        effective_page_size = max(1, min(page_size, 100))
+        source_filter_ids = [s.strip() for s in (source_ids or "").split(",") if s.strip()]
         tag_filters = [t.strip().lower() for t in (tags or "").split(",") if t.strip()]
-        if tag_filters:
-            where_clauses.append(
-                "EXISTS (SELECT VALUE t FROM t IN c.tags WHERE ARRAY_CONTAINS(@tags, LOWER(t)))"
-            )
-            params.append({"name": "@tags", "value": tag_filters})
-
-        since = _since_iso(timeRange)
-        if since:
-            where_clauses.append(
-                "("
-                "(IS_DEFINED(c.sourceCreatedAt) AND c.sourceCreatedAt >= @since)"
-                " OR "
-                "(NOT IS_DEFINED(c.sourceCreatedAt) AND c.scrapedAt >= @since)"
-                ")"
-            )
-            params.append({"name": "@since", "value": since})
-
-        if cursor_key is not None:
-            if sortBy == "score":
-                where_clauses.append("c.scoreSignal < @cursorKey")
-                params.append({"name": "@cursorKey", "value": int(cursor_key)})
-            else:
-                where_clauses.append("c.scrapedAt < @cursorKey")
-                params.append({"name": "@cursorKey", "value": str(cursor_key)})
-
-        query = (
-            f"SELECT * FROM c WHERE {' AND '.join(where_clauses)} "
-            f"ORDER BY {order_clause} OFFSET 0 LIMIT @limit"
+        since = _since_iso(time_range)
+        query, params = _build_scraped_items_query(
+            sort_by=sort_by,
+            effective_page_size=effective_page_size,
+            source_ids=source_filter_ids,
+            tag_filters=tag_filters,
+            since=since,
+            cursor_key=cursor_key,
         )
 
-        items = []
         try:
-            # Fast path for containers partitioned by /userId.
-            iterator = container.query_items(
-                query=query,
-                parameters=params,
-                partition_key="global",
-            )
-            async for doc in iterator:
-                for key in _COSMOS_INTERNAL_KEYS:
-                    doc.pop(key, None)
-                items.append(doc)
+            items = await _query_scraped_items(container, query, params, partition_key="global")
         except Exception:
             # Fallback for containers partitioned by a different key.
-            iterator = container.query_items(
-                query=query,
-                parameters=params,
-            )
-            async for doc in iterator:
-                for key in _COSMOS_INTERNAL_KEYS:
-                    doc.pop(key, None)
-                items.append(doc)
+            items = await _query_scraped_items(container, query, params, partition_key=None)
 
         has_more = len(items) > effective_page_size
         page_items = items[:effective_page_size]
         next_token = None
         if has_more and page_items:
             last = page_items[-1]
-            cursor_value = last.get("scoreSignal") if sortBy == "score" else last.get("scrapedAt")
-            next_token = _encode_cursor(cursor_value, last.get("id", ""))
+            cursor_value = last.get("scoreSignal") if sort_by == "score" else last.get("scrapedAt")
+            next_token = _build_continuation_token(cursor_value, last.get("id", ""))
 
         return {"items": page_items, "nextContinuationToken": next_token}
     except Exception as exc:
@@ -1340,7 +1455,15 @@ async def list_scraped_items(
 
 
 
-@fastapi_app.post("/api/scraper/items/{item_id}/feedback")
+@fastapi_app.post(
+    "/api/scraper/items/{item_id}/feedback",
+    responses={
+        200: {"description": "Feedback recorded."},
+        400: {"description": "Invalid feedback signal."},
+        401: {"description": "Authentication failed."},
+        500: {"description": "Could not record feedback."},
+    },
+)
 async def feedback_scraped_item(
     item_id: str,
     body: dict,
@@ -1406,7 +1529,15 @@ async def feedback_scraped_item(
 
 
 
-@fastapi_app.post("/api/scraper/run/{source_id}")
+@fastapi_app.post(
+    "/api/scraper/run/{source_id}",
+    responses={
+        200: {"description": "Scraper run started for source."},
+        401: {"description": "Authentication failed."},
+        403: {"description": "Admin access required."},
+        500: {"description": "Scrape failed."},
+    },
+)
 async def run_scraper_source(
     source_id: str,
     _: Annotated[str, Depends(_require_admin)],
@@ -1433,7 +1564,14 @@ class QuizResponse(BaseModel):
     scrapedItemId: Optional[str] = None     # Phase 2
 
 
-@fastapi_app.get("/api/taste/quiz")
+@fastapi_app.get(
+    "/api/taste/quiz",
+    responses={
+        200: {"description": "Active quiz session returned."},
+        401: {"description": "Authentication failed."},
+        500: {"description": "Could not load quiz."},
+    },
+)
 async def get_taste_quiz(user_id: Annotated[str, Depends(get_user_id)]):
     """Get (or create) the active taste quiz session for the current user."""
     try:
@@ -1450,7 +1588,15 @@ async def get_taste_quiz(user_id: Annotated[str, Depends(get_user_id)]):
         raise HTTPException(status_code=500, detail="Could not load quiz.")
 
 
-@fastapi_app.post("/api/taste/quiz/{session_id}/respond")
+@fastapi_app.post(
+    "/api/taste/quiz/{session_id}/respond",
+    responses={
+        200: {"description": "Quiz response recorded."},
+        400: {"description": "Invalid quiz signal."},
+        401: {"description": "Authentication failed."},
+        500: {"description": "Could not record response."},
+    },
+)
 async def record_quiz_response(
     session_id: str,
     body: QuizResponse,
@@ -1465,7 +1611,7 @@ async def record_quiz_response(
         session = await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: __import__(
-                "agents.taste_calibration", fromlist=["record_response"]
+                _TASTE_MODULE_NAME_TAG, fromlist=["record_response"]
             ).record_response(user_id, session_id, response_dict),
         )
         return {
@@ -1478,7 +1624,14 @@ async def record_quiz_response(
         raise HTTPException(status_code=500, detail="Could not record response.")
 
 
-@fastapi_app.post("/api/taste/quiz/{session_id}/complete")
+@fastapi_app.post(
+    "/api/taste/quiz/{session_id}/complete",
+    responses={
+        200: {"description": "Quiz completed and profile updated."},
+        401: {"description": "Authentication failed."},
+        500: {"description": "Could not complete quiz."},
+    },
+)
 async def complete_taste_quiz(
     session_id: str,
     user_id: Annotated[str, Depends(get_user_id)],
@@ -1488,7 +1641,7 @@ async def complete_taste_quiz(
         inferred = await asyncio.get_event_loop().run_in_executor(
             None,
             lambda: __import__(
-                "agents.taste_calibration", fromlist=["complete_quiz"]
+                _TASTE_MODULE_NAME_TAG, fromlist=["complete_quiz"]
             ).complete_quiz(user_id, session_id),
         )
         return {"sessionId": session_id, "inferredTastes": inferred}

@@ -52,7 +52,6 @@ public interface IWardrobeRepository
     string? processedBlobUrl,
     ClothingMetadata? metadata,
     string? errorMessage,
-    DateTimeOffset now,
     CancellationToken cancellationToken = default);
 
   /// <summary>

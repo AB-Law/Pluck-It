@@ -28,111 +28,140 @@ public class ClothingMetadataService : IClothingMetadataService
 
   public async Task<ClothingMetadata> ExtractMetadataAsync(BinaryData imageData, string mediaType, CancellationToken cancellationToken = default)
   {
-    // Return empty metadata rather than letting OpenAI reject formats it can't decode
-    // (e.g. HEIC/HEIF, BMP, TIFF).
-    if (!_supportedMediaTypes.Contains(mediaType))
-      return new ClothingMetadata(null, null, Array.Empty<string>(), Array.Empty<ClothingColour>());
+    if (!IsSupportedMediaType(mediaType))
+      return EmptyMetadata();
 
-    var systemPrompt =
-      """
-      You are an expert fashion analyst. Analyze the clothing item visible in the image.
-      Return ONLY valid JSON — no markdown, no code fences, no extra text — with exactly these fields:
-      {
-        "brand": "<detected brand name, or null if not visible>",
-        "category": "<one value from the allowed list>",
-        "tags": ["<tag>", ...],
-        "colours": [{ "name": "<colour name>", "hex": "<#rrggbb>" }, ...]
-      }
-
-      Allowed category values (pick the single best match, use exact casing):
-      Tops, Bottoms, Outerwear, Footwear, Accessories, Knitwear, Dresses, Activewear, Swimwear, Underwear
-
-      For tags, be thorough — include ALL of the following that apply (lowercase, concise):
-        • Brand name (e.g. "dior", "nike", "zara") — always include if brand is detected
-        • Category synonym (e.g. "t-shirt", "tee", "jeans", "hoodie", "sneakers")
-        • Material / fabric (e.g. "cotton", "denim", "leather", "mesh", "linen", "polyester")
-        • Pattern / print (e.g. "solid", "striped", "plaid", "graphic", "floral", "logo print",
-          "camo", "tie-dye", "animal print")
-        • Fit / silhouette (e.g. "slim fit", "oversized", "relaxed", "cropped", "baggy", "fitted")
-        • Style / vibe (e.g. "streetwear", "casual", "formal", "smart casual", "workwear",
-          "athletic", "vintage", "preppy", "bohemian", "minimalist")
-        • Occasion (e.g. "everyday", "gym", "office", "evening", "beach", "party")
-        • Season (e.g. "summer", "winter", "all-season") if clearly suited to one season
-        • Notable details (e.g. "short sleeve", "long sleeve", "zip-up", "button-down",
-          "distressed", "embroidered", "mesh panel", "high-top", "low-top")
-        • Any visible text, graphic, or motif (e.g. "band tee", "logo tee", "slogan")
-      Aim for 6–12 tags. More specific tags make the item easier to find later.
-
-      For colours, list the 1-3 main colours visible on the garment itself (ignore background).
-      """;
-
-    var messages = new ChatMessage[]
+    try
     {
-      new SystemChatMessage(systemPrompt),
+      var raw = await FetchMetadataTextAsync(imageData, mediaType, cancellationToken);
+      var normalized = StripCodeFence(raw);
+      return ParseMetadata(normalized);
+    }
+    catch
+    {
+      return EmptyMetadata();
+    }
+  }
+
+  private static bool IsSupportedMediaType(string mediaType) =>
+    _supportedMediaTypes.Contains(mediaType);
+
+  private async Task<string> FetchMetadataTextAsync(BinaryData imageData, string mediaType,
+      CancellationToken cancellationToken)
+  {
+    var messages = BuildChatMessages(imageData, mediaType);
+    var options = new ChatCompletionOptions { Temperature = 0.2f };
+    var result = await _chatClient.CompleteChatAsync(messages, options, cancellationToken);
+    return result.Value.Content[0].Text?.Trim() ?? "{}";
+  }
+
+  private static ChatMessage[] BuildChatMessages(BinaryData imageData, string mediaType)
+  {
+    return new ChatMessage[]
+    {
+      new SystemChatMessage(MetadataSystemPrompt),
       new UserChatMessage(
         ChatMessageContentPart.CreateTextPart("Analyze this clothing item:"),
         ChatMessageContentPart.CreateImagePart(imageData, mediaType)),
     };
-
-    var options = new ChatCompletionOptions { Temperature = 0.2f };
-
-    string raw;
-    try
-    {
-      var result = await _chatClient.CompleteChatAsync(messages, options, cancellationToken);
-      raw = result.Value.Content[0].Text?.Trim() ?? "{}";
-    }
-    catch
-    {
-      // OpenAI rejected the request (unsupported image, quota, transient error) —
-      // degrade gracefully so the upload flow still completes.
-      return new ClothingMetadata(null, null, Array.Empty<string>(), Array.Empty<ClothingColour>());
-    }
-
-    // Strip markdown code fences if model wraps response
-    if (raw.StartsWith("```"))
-    {
-      var newline = raw.IndexOf('\n');
-      var lastFence = raw.LastIndexOf("```");
-      if (newline >= 0 && lastFence > newline)
-        raw = raw[(newline + 1)..lastFence].Trim();
-    }
-
-    try
-    {
-      using var doc = JsonDocument.Parse(raw);
-      var root = doc.RootElement;
-
-      var brand = root.TryGetProperty("brand", out var b) && b.ValueKind == JsonValueKind.String
-        ? b.GetString()
-        : null;
-
-      var category = root.TryGetProperty("category", out var c) && c.ValueKind == JsonValueKind.String
-        ? c.GetString()
-        : null;
-
-      var tags = new List<string>();
-      if (root.TryGetProperty("tags", out var tagsEl) && tagsEl.ValueKind == JsonValueKind.Array)
-        foreach (var tag in tagsEl.EnumerateArray())
-          if (tag.GetString() is string s)
-            tags.Add(s);
-
-      var colours = new List<ClothingColour>();
-      if (root.TryGetProperty("colours", out var coloursEl) && coloursEl.ValueKind == JsonValueKind.Array)
-        foreach (var col in coloursEl.EnumerateArray())
-        {
-          var name = col.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
-          var hex = col.TryGetProperty("hex", out var h) ? h.GetString() ?? "" : "";
-          if (!string.IsNullOrEmpty(name))
-            colours.Add(new ClothingColour(name, hex));
-        }
-
-      return new ClothingMetadata(brand, category, tags, colours);
-    }
-    catch
-    {
-      // Fallback: return empty metadata rather than crashing the upload flow
-      return new ClothingMetadata(null, null, Array.Empty<string>(), Array.Empty<ClothingColour>());
-    }
   }
+
+  private static string StripCodeFence(string raw)
+  {
+    if (!raw.StartsWith("```"))
+      return raw;
+
+    var newline = raw.IndexOf('\n');
+    var lastFence = raw.LastIndexOf("```");
+    if (newline < 0 || lastFence <= newline)
+      return raw;
+
+    return raw[(newline + 1)..lastFence].Trim();
+  }
+
+  private static ClothingMetadata ParseMetadata(string rawJson)
+  {
+    using var doc = JsonDocument.Parse(rawJson);
+    var root = doc.RootElement;
+
+    return new ClothingMetadata(
+      GetOptionalString(root, "brand"),
+      GetOptionalString(root, "category"),
+      ReadTags(root),
+      ReadColours(root));
+  }
+
+  private static string? GetOptionalString(JsonElement root, string propertyName)
+  {
+    return root.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
+      ? value.GetString()
+      : null;
+  }
+
+  private static List<string> ReadTags(JsonElement root)
+  {
+    var tags = new List<string>();
+    if (!root.TryGetProperty("tags", out var tagsEl) || tagsEl.ValueKind != JsonValueKind.Array)
+      return tags;
+
+    foreach (var tag in tagsEl.EnumerateArray())
+    {
+      if (tag.GetString() is string s)
+        tags.Add(s);
+    }
+
+    return tags;
+  }
+
+  private static List<ClothingColour> ReadColours(JsonElement root)
+  {
+    var colours = new List<ClothingColour>();
+    if (!root.TryGetProperty("colours", out var coloursEl) || coloursEl.ValueKind != JsonValueKind.Array)
+      return colours;
+
+    foreach (var col in coloursEl.EnumerateArray())
+    {
+      var name = GetOptionalString(col, "name") ?? "";
+      var hex = GetOptionalString(col, "hex") ?? "";
+      if (!string.IsNullOrEmpty(name))
+        colours.Add(new ClothingColour(name, hex));
+    }
+
+    return colours;
+  }
+
+  private static ClothingMetadata EmptyMetadata() =>
+    new(null, null, Array.Empty<string>(), Array.Empty<ClothingColour>());
+
+  private static string MetadataSystemPrompt => """
+    You are an expert fashion analyst. Analyze the clothing item visible in the image.
+    Return ONLY valid JSON — no markdown, no code fences, no extra text — with exactly these fields:
+    {
+      "brand": "<detected brand name, or null if not visible>",
+      "category": "<one value from the allowed list>",
+      "tags": ["<tag>", ...],
+      "colours": [{ "name": "<colour name>", "hex": "<#rrggbb>" }, ...]
+    }
+
+    Allowed category values (pick the single best match, use exact casing):
+    Tops, Bottoms, Outerwear, Footwear, Accessories, Knitwear, Dresses, Activewear, Swimwear, Underwear
+
+    For tags, be thorough — include ALL of the following that apply (lowercase, concise):
+      • Brand name (e.g. "dior", "nike", "zara") — always include if brand is detected
+      • Category synonym (e.g. "t-shirt", "tee", "jeans", "hoodie", "sneakers")
+      • Material / fabric (e.g. "cotton", "denim", "leather", "mesh", "linen", "polyester")
+      • Pattern / print (e.g. "solid", "striped", "plaid", "graphic", "floral", "logo print",
+        "camo", "tie-dye", "animal print")
+      • Fit / silhouette (e.g. "slim fit", "oversized", "relaxed", "cropped", "baggy", "fitted")
+      • Style / vibe (e.g. "streetwear", "casual", "formal", "smart casual", "workwear",
+        "athletic", "vintage", "preppy", "bohemian", "minimalist")
+      • Occasion (e.g. "everyday", "gym", "office", "evening", "beach", "party")
+      • Season (e.g. "summer", "winter", "all-season") if clearly suited to one season
+      • Notable details (e.g. "short sleeve", "long sleeve", "zip-up", "button-down",
+        "distressed", "embroidered", "mesh panel", "high-top", "low-top")
+      • Any visible text, graphic, or motif (e.g. "band tee", "logo tee", "slogan")
+    Aim for 6–12 tags. More specific tags make the item easier to find later.
+
+    For colours, list the 1-3 main colours visible on the garment itself (ignore background).
+    """;
 }

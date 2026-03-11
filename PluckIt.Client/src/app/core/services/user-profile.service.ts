@@ -34,12 +34,12 @@ const DEFAULT_PROFILE: UserProfile = {
 
 @Injectable({ providedIn: 'root' })
 export class UserProfileService {
-  private base = environment.apiUrl;
+  private readonly base = environment.apiUrl;
 
   /** Reactive profile signal — null until loaded. */
   readonly profile = signal<UserProfile | null>(null);
 
-  constructor(private http: HttpClient) {}
+  constructor(private readonly http: HttpClient) {}
 
   load(): Observable<UserProfile> {
     return this.http.get<UserProfile>(`${this.base}/api/profile`).pipe(
