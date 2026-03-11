@@ -815,7 +815,7 @@ async def list_scraper_sources(user_id: str = Depends(get_user_id)):
     try:
         sources = []
         async for doc in sources_container.query_items(
-            query="SELECT c.id, c.name, c.sourceType, c.isGlobal, c.lastScrapedAt FROM c WHERE c.isActive = true",
+            query="SELECT c.id, c.name, c.sourceType, c.isGlobal, c.lastScrapedAt, c.config, c.leaseExpiresAt FROM c WHERE c.isActive = true",
         ):
             for key in _COSMOS_INTERNAL_KEYS:
                 doc.pop(key, None)
@@ -913,7 +913,15 @@ async def acquire_scraper_lease(source_id: str, user_id: str = Depends(get_user_
     container = get_scraper_sources_container()
 
     try:
-        source = await container.read_item(item=source_id, partition_key=source_id)
+        # ScraperSources is partitioned by sourceType, but we only have ID here.
+        # Use a cross-partition query to find the source.
+        items = [i async for i in container.query_items(
+            query="SELECT * FROM c WHERE c.id = @id",
+            parameters=[{"name": "@id", "value": source_id}]
+        )]
+        if not items:
+            raise HTTPException(status_code=404, detail="Source not found.")
+        source = items[0]
         
         # Check if existing lease is still active
         lease_expires = source.get("leaseExpiresAt")
@@ -953,9 +961,16 @@ async def ingest_reddit_data(body: RedditIngestBatch, user_id: str = Depends(get
     # 2. Load source and verify subreddit binding
     sources_container = get_scraper_sources_container()
     try:
-        source = await container_read_item(sources_container, body.source_id)
+        items = [i async for i in sources_container.query_items(
+            query="SELECT * FROM c WHERE c.id = @id",
+            parameters=[{"name": "@id", "value": body.source_id}]
+        )]
+        if not items:
+            raise HTTPException(status_code=404, detail="Source not found.")
+        source = items[0]
         expected_sub = source.get("config", {}).get("subreddit", "").lower()
     except Exception:
+        if isinstance(exc, HTTPException): raise
         raise HTTPException(status_code=404, detail="Source not found.")
 
     # 3. Process raw posts through RedditScraper (validates NSFW, domains, subreddits)
@@ -999,10 +1014,6 @@ async def admin_unban_user(
     except Exception:
         raise HTTPException(status_code=404, detail="User ban record not found.")
 
-
-async def container_read_item(container, item_id: str):
-    """Helper for async container read because read_item is an awaitable."""
-    return await container.read_item(item=item_id, partition_key=item_id)
 
 
 @fastapi_app.post("/api/scraper/subscribe/{source_id}", status_code=201)

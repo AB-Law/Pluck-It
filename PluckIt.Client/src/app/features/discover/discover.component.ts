@@ -425,7 +425,7 @@ export class DiscoverComponent implements OnInit {
   }
 
   private fetchAndIngestReddit(sourceId: string, subreddit: string): void {
-    const url = `https://www.reddit.com/r/${subreddit}/hot.json?limit=50`;
+    const url = `/reddit-api/r/${subreddit}/hot.json?limit=50`;
     fetch(url)
       .then(res => res.json())
       .then(data => {
