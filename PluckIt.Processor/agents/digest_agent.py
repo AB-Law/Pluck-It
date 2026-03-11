@@ -119,241 +119,185 @@ def run_digest_for_user(user_id: str, force: bool = False) -> Optional[dict]:
     """
     Synchronous digest run for a single user. Returns the digest dict or None
     if skipped (wardrobe unchanged) or on error.
-    Set force=True to bypass the wardrobe hash guard (useful for manual/dev triggers).
     """
-    # ── 1. Load wardrobe ──────────────────────────────────────────────────────
+    # 1. Load data
+    wardrobe_data = _load_user_wardrobe(user_id)
+    if not wardrobe_data or not wardrobe_data["item_ids"]:
+        return None
+
+    profile_container = get_user_profiles_container_sync()
+    profile = _get_user_profile(profile_container, user_id)
+    
+    # 2. Skip checks
+    current_hash = compute_wardrobe_hash(wardrobe_data["item_ids"])
+    if _should_skip_digest(profile, current_hash, force):
+        return None
+
+    # 3. Analyze wardrobe & feedback
+    ranked_items, category_counts, climate_signals = _analyze_wardrobe(wardrobe_data["items"])
+    liked, disliked = _load_recent_feedback(user_id)
+    
+    climate_zone = profile.get("climateZone")
+    if not climate_zone and profile.get("locationCity"):
+        climate_zone = _infer_climate_zone(profile["locationCity"], climate_signals)
+
+    # 4. Generate Suggestions via LLM
+    items_with_history = sum(1 for s in ranked_items if s["wearCount"] > 0)
+    suggestions = _generate_suggestions(
+        profile, ranked_items, category_counts, liked, disliked, 
+        climate_zone, items_with_history, len(wardrobe_data["items"])
+    )
+    if not suggestions:
+        return None
+
+    # 5. Finalize and Save
+    style_confidence = _compute_style_confidence(suggestions, category_counts, ranked_items)
+    digest = _create_digest_doc(user_id, current_hash, suggestions, items_with_history, 
+                                wardrobe_data["item_ids"], profile, climate_zone)
+    
+    _save_digest_and_update_profile(profile_container, profile, digest, style_confidence, climate_zone)
+    
+    return digest
+
+def _load_user_wardrobe(user_id: str) -> Optional[dict]:
     try:
-        wardrobe_container = get_wardrobe_container_sync()
-        item_ids: list[str] = []
-        wardrobe_items: list[dict] = []
-        for item in wardrobe_container.query_items(
-            query=(
-                "SELECT c.id, c.category, c.colours, c.tags, c.brand, c.aestheticTags, "
-                "c.wearCount, c.lastWornAt, c.wearEvents, c.price "
-                "FROM c WHERE c.userId = @userId"
-            ),
+        container = get_wardrobe_container_sync()
+        items = []
+        ids = []
+        for item in container.query_items(
+            query="SELECT c.id, c.category, c.colours, c.tags, c.brand, c.aestheticTags, "
+                  "c.wearCount, c.lastWornAt, c.wearEvents, c.price FROM c WHERE c.userId = @userId",
             parameters=[{"name": "@userId", "value": user_id}],
         ):
-            item_ids.append(item["id"])
-            wardrobe_items.append(item)
+            ids.append(item["id"])
+            items.append(item)
+        return {"items": items, "item_ids": ids}
     except Exception as exc:
         logger.warning("Digest: failed to load wardrobe for %s: %s", user_id, exc)
-        return None
+    return None
 
-    if not item_ids:
-        return None
-
-    current_hash = compute_wardrobe_hash(item_ids)
-
-    # ── 2. Load user profile + hash-guard ────────────────────────────────────
-    profile_container = get_user_profiles_container_sync()
+def _get_user_profile(container: any, user_id: str) -> dict:
     try:
-        profile = profile_container.read_item(item=user_id, partition_key=user_id)
+        return container.read_item(item=user_id, partition_key=user_id)
     except Exception:
-        profile = {}
+        return {}
 
-    last_hash = profile.get("wardrobeHashAtLastDigest")
-    if not force and last_hash == current_hash:
-        logger.info("Digest: wardrobe unchanged for %s (hash %s), skipping.", user_id, current_hash)
-        return None
-
+def _should_skip_digest(profile: dict, current_hash: str, force: bool) -> bool:
+    if not force and profile.get("wardrobeHashAtLastDigest") == current_hash:
+        return True
     if not profile.get("recommendationOptIn", True):
-        logger.info("Digest: user %s has opted out of recommendations, skipping.", user_id)
-        return None
+        return True
+    return False
 
-    style_prefs: list[str] = profile.get("stylePreferences") or []
-    preferred_colours: list[str] = profile.get("preferredColours") or []
-    fav_brands: list[str] = profile.get("favoriteBrands") or []
-    location_city: Optional[str] = profile.get("locationCity")
-    existing_climate_zone: Optional[str] = profile.get("climateZone")
-
-    # ── 3. Build wear-ranked top-50 summary (caps prompt tokens for p95 AC) ──
-    category_counts: Counter = Counter()
-    wear_conditions: list[str] = []
-
-    for item in wardrobe_items:
-        cat = (item.get("category") or "other").lower()
-        category_counts[cat] += 1
-
+def _analyze_wardrobe(items: list[dict]) -> tuple[list[dict], Counter, list[str]]:
+    counts = Counter()
+    signals = []
     scored = []
-    for item in wardrobe_items:
-        wear_count = item.get("wearCount", 0)
-        last_worn = item.get("lastWornAt")
-        score = _recency_score(wear_count, last_worn)
+    for item in items:
         cat = (item.get("category") or "other").lower()
-
-        # Collect climate signals from the most recent wear events,
-        # sorted explicitly by occurredAt to avoid relying on list order.
-        wear_events = item.get("wearEvents") or []
-        if wear_events:
-            sorted_events = sorted(
-                wear_events,
-                key=lambda ev: ev.get("occurredAt") or "",
-                reverse=True,
-            )
-            for ev in sorted_events[:5]:
-                snap = ev.get("weatherSnapshot") or {}
-                if snap.get("conditions"):
-                    wear_conditions.append(snap["conditions"].lower())
+        counts[cat] += 1
+        
+        wear_count = item.get("wearCount", 0)
+        score = _recency_score(wear_count, item.get("lastWornAt"))
+        
+        # Collect climate signals from top 5 events
+        events = sorted(item.get("wearEvents") or [], key=lambda e: e.get("occurredAt") or "", reverse=True)
+        for ev in events[:5]:
+            cond = (ev.get("weatherSnapshot") or {}).get("conditions")
+            if cond:
+                signals.append(cond.lower())
 
         price_raw = item.get("price")
-        if isinstance(price_raw, dict):
-            price_amount = price_raw.get("amount")
-        elif isinstance(price_raw, (int, float)):
-            price_amount = price_raw  # legacy flat-number format
-        else:
-            price_amount = None
+        price_amount = price_raw.get("amount") if isinstance(price_raw, dict) else (price_raw if isinstance(price_raw, (int, float)) else None)
         cpw = round(price_amount / wear_count, 2) if price_amount and wear_count > 0 else None
 
         scored.append({
-            "category": cat,
-            "brand": item.get("brand"),
-            "aestheticTags": item.get("aestheticTags") or [],
-            "wearCount": wear_count,
-            "lastWornAt": last_worn,
-            "score": score,
-            "costPerWear": cpw,
+            "category": cat, "brand": item.get("brand"), "aestheticTags": item.get("aestheticTags") or [],
+            "wearCount": wear_count, "lastWornAt": item.get("lastWornAt"), "score": score, "costPerWear": cpw,
         })
-
+    
     scored.sort(key=lambda x: x["score"], reverse=True)
-    top_items = scored[:_PROMPT_ITEM_LIMIT]
+    return scored[:_PROMPT_ITEM_LIMIT], counts, signals
 
-    items_with_history = sum(1 for s in scored if s["wearCount"] > 0)
-    sparse = items_with_history < 5
-
-    # ── 4. Load recent feedback (last 90 days via TTL container) ─────────────
-    liked_items: list[str] = []
-    disliked_items: list[str] = []
+def _load_recent_feedback(user_id: str) -> tuple[list[str], list[str]]:
+    liked, disliked = [], []
     try:
-        feedback_container = get_digest_feedback_container_sync()
-        for fb in feedback_container.query_items(
+        container = get_digest_feedback_container_sync()
+        for fb in container.query_items(
             query="SELECT * FROM c WHERE c.userId = @userId ORDER BY c.createdAt DESC OFFSET 0 LIMIT 30",
             parameters=[{"name": "@userId", "value": user_id}],
         ):
             if fb.get("signal") == "up":
-                liked_items.append(fb.get("suggestionDescription", ""))
+                liked.append(fb.get("suggestionDescription", ""))
             elif fb.get("signal") == "down":
-                disliked_items.append(fb.get("suggestionDescription", ""))
-    except Exception as exc:
-        logger.debug("Digest: could not load feedback for %s (non-critical): %s", user_id, exc)
+                disliked.append(fb.get("suggestionDescription", ""))
+    except Exception:
+        pass
+    return liked, disliked
 
-    # ── 5. Infer climate zone if missing ─────────────────────────────────────
-    climate_zone = existing_climate_zone
-    if not climate_zone and location_city:
-        climate_zone = _infer_climate_zone(location_city, wear_conditions)
-
-    # ── 6. Build LLM prompt ───────────────────────────────────────────────────
-    wardrobe_summary = json.dumps(dict(category_counts.most_common(12)))
-    top_items_summary = json.dumps(top_items[:20])  # Further cap for prompt length
-
-    profile_summary = (
-        f"Styles: {', '.join(style_prefs) or 'not specified'}. "
-        f"Preferred colours: {', '.join(preferred_colours) or 'not specified'}. "
-        f"Favourite brands: {', '.join(fav_brands) or 'not specified'}. "
-        f"Climate zone: {climate_zone or 'unknown'}. "
-        f"Wear history: {items_with_history} of {len(wardrobe_items)} items worn at least once."
-    )
-
-    sparse_note = (
-        "\nNote: this user has limited wear history. Broaden suggestions across all "
-        "major categories rather than focusing on frequently-worn styles."
-        if sparse else ""
-    )
-
-    feedback_note = ""
-    if liked_items or disliked_items:
-        feedback_note = (
-            f"\nPrevious feedback — user LIKED: {'; '.join(liked_items[:5]) or 'none'}. "
-            f"User DISLIKED: {'; '.join(disliked_items[:5]) or 'none'}. "
-            "Avoid repeating disliked suggestions. Lean into liked styles."
-        )
-
-    prompt = f"""You are a personal stylist reviewing a wardrobe.
-
-User profile: {profile_summary}
-Wardrobe composition (category → item count): {wardrobe_summary}
-Most-worn items (recency-weighted, top 20): {top_items_summary}
-{sparse_note}{feedback_note}
-
-Generate 3-5 specific purchase suggestions that would genuinely improve this wardrobe.
-Prioritise suggestions that complement items the user already wears frequently (closet-first).
-For each suggestion provide:
-  - A clear description of the item (type, colour, style)
-  - A concrete rationale (must reference a specific signal: wear frequency, climate, style gap, or occasion pattern)
-  - Keep each suggestion to 1-2 sentences
-
-Return a JSON array of objects: [{{"item": "...", "rationale": "..."}}]
-Only return the JSON array, no other text."""
-
-    # ── 7. Run LLM ────────────────────────────────────────────────────────────
+def _generate_suggestions(profile, scored, counts, liked, disliked, climate, worn_count, total_count) -> list:
     try:
+        sparse = worn_count < 5
+        style_prefs = profile.get("stylePreferences") or []
+        profile_summary = (
+            f"Styles: {', '.join(style_prefs) or 'none'}. "
+            f"Colours: {', '.join(profile.get('preferredColours') or []) or 'none'}. "
+            f"Climate: {climate or 'unknown'}. Wear: {worn_count}/{total_count} worn."
+        )
+        feedback_note = f"\nLiked: {'; '.join(liked[:5])}. Disliked: {'; '.join(disliked[:5])}." if liked or disliked else ""
+        sparse_note = "\nNote: limited wear history. Broaden suggestions." if sparse else ""
+
+        prompt = f"""Personal stylist. Profile: {profile_summary}
+Wardrobe: {json.dumps(dict(counts.most_common(12)))}
+Top items: {json.dumps(scored[:20])}
+{sparse_note}{feedback_note}
+3-5 purchase suggestions (item, rationale) in JSON array format."""
+
         llm = _build_digest_llm()
-        response = llm.invoke([
-            SystemMessage(content="You are a fashion-forward personal stylist. Be specific and practical."),
-            HumanMessage(content=prompt),
-        ])
-        raw = response.content.strip()
+        resp = llm.invoke([SystemMessage(content="Stylist. JSON only."), HumanMessage(content=prompt)])
+        raw = resp.content.strip()
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
         suggestions = json.loads(raw)
-        # Normalise legacy "reason" key to "rationale"
         for s in suggestions:
             if "reason" in s and "rationale" not in s:
                 s["rationale"] = s.pop("reason")
+        return suggestions
     except Exception as exc:
-        logger.error("Digest: LLM error for user %s: %s", user_id, exc)
+        logger.error("Digest: LLM error: %s", exc)
+    return []
+
+def _compute_style_confidence(suggestions, counts, scored) -> Optional[float]:
+    high_wear_cats = {c for c, n in counts.items() if n >= 3 and sum(s["wearCount"] for s in scored if s["category"] == c) > 0}
+    if not suggestions or not high_wear_cats:
         return None
+    aligned = sum(1 for s in suggestions if any(kw in (s.get("item", "") + s.get("rationale", "")).lower() for kw in high_wear_cats))
+    return round(aligned / len(suggestions), 2)
 
-    # ── 8. Compute styleConfidenceProfile ────────────────────────────────────
-    # Score = fraction of suggestions that map to a category the user wears frequently.
-    high_wear_categories = {
-        cat for cat, cnt in category_counts.items()
-        if cnt >= 3 and category_counts[cat] > 0
-        and sum(s["wearCount"] for s in scored if s["category"] == cat) > 0
-    }
-    if suggestions and high_wear_categories:
-        aligned = sum(
-            1 for s in suggestions
-            if any(kw in (s.get("item", "") + s.get("rationale", "")).lower()
-                   for kw in high_wear_categories)
-        )
-        style_confidence = round(aligned / len(suggestions), 2)
-    else:
-        style_confidence = None
-
-    digest_id = f"{user_id}-{current_hash}"
-    digest = {
-        "id": digest_id,
+def _create_digest_doc(user_id, current_hash, suggestions, worn_count, all_ids, profile, climate) -> dict:
+    return {
+        "id": f"{user_id}-{current_hash}",
         "userId": user_id,
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "wardrobeHash": current_hash,
         "suggestions": suggestions,
-        "stylesConsidered": style_prefs,
-        "totalItems": len(item_ids),
-        "itemsWithWearHistory": items_with_history,
-        "climateZone": climate_zone,
+        "stylesConsidered": profile.get("stylePreferences") or [],
+        "totalItems": len(all_ids),
+        "itemsWithWearHistory": worn_count,
+        "climateZone": climate,
     }
 
-    # ── 9. Save digest ────────────────────────────────────────────────────────
+def _save_digest_and_update_profile(profile_container, profile, digest, confidence, climate):
     try:
-        digests_container = get_digests_container_sync()
-        digests_container.upsert_item(digest)
-    except Exception as exc:
-        logger.error("Digest: failed to save digest for %s: %s", user_id, exc)
-
-    # ── 10. Update UserProfile analytics fields ───────────────────────────────
-    try:
-        profile["wardrobeHashAtLastDigest"] = current_hash
-        if style_confidence is not None:
-            profile["styleConfidenceProfile"] = style_confidence
-        if climate_zone and not existing_climate_zone:
-            profile["climateZone"] = climate_zone
+        get_digests_container_sync().upsert_item(digest)
+        profile["wardrobeHashAtLastDigest"] = digest["wardrobeHash"]
+        if confidence is not None:
+            profile["styleConfidenceProfile"] = confidence
+        if climate and not profile.get("climateZone"):
+            profile["climateZone"] = climate
         profile_container.upsert_item(profile)
     except Exception as exc:
-        logger.warning("Digest: failed to update profile for %s: %s", user_id, exc)
-
-    logger.info("Digest: completed for user %s — %d suggestions.", user_id, len(suggestions))
-    return digest
+        logger.warning("Digest: final save failed: %s", exc)
 
 
 def run_weekly_digest() -> None:

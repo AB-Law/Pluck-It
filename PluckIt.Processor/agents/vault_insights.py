@@ -157,168 +157,136 @@ async def compute_vault_insights(
     cutoff = now - timedelta(days=max(1, window_days))
     fx_date, fx_status = _ensure_fx_cache()
 
-    wardrobe = get_wardrobe_container()
-    wear_events = get_wear_events_container()
-    profiles = get_user_profiles_container()
-
-    profile_currency = "USD"
-    try:
-        profile = await profiles.read_item(item=user_id, partition_key=user_id)
-        profile_currency = (profile.get("currencyCode") or "USD").upper()
-    except Exception:
-        pass
-
-    items: list[dict] = []
-    async for item in wardrobe.query_items(
-        query=(
-            "SELECT c.id, c.wearCount, c.lastWornAt, c.price, c.colours, c.tags, c.dateAdded "
-            "FROM c WHERE c.userId = @userId"
-        ),
-        parameters=[{"name": "@userId", "value": user_id}],
-    ):
-        items.append(item)
+    currency = await _get_profile_currency(user_id)
+    items, window_events = await _fetch_user_data(user_id, cutoff)
 
     if not items:
-        return {
-            "generatedAt": now.isoformat(),
-            "currency": profile_currency,
-            "insufficientData": True,
-            "fxDate": fx_date,
-            "conversionStatus": fx_status,
-            "behavioralInsights": {
-                "topColorWearShare": None,
-                "unworn90dPct": None,
-                "mostExpensiveUnworn": None,
-                "sparseHistory": True,
-            },
-            "cpwIntel": [],
-        }
+        return _insufficient_data_response(now, currency, fx_date, fx_status)
 
-    window_events: list[dict] = []
-    async for ev in wear_events.query_items(
-        query=(
-            "SELECT c.itemId, c.occurredAt FROM c WHERE c.userId = @userId "
-            "AND c.occurredAt >= @cutoff"
-        ),
-        parameters=[
-            {"name": "@userId", "value": user_id},
-            {"name": "@cutoff", "value": cutoff.isoformat()},
-        ],
-    ):
-        window_events.append(ev)
-
+    # 1. Behavioral Insights
     item_by_id = {i.get("id"): i for i in items if i.get("id")}
     window_wears = Counter([e.get("itemId") for e in window_events if e.get("itemId")])
+    
+    top_color = _get_top_color_insight(window_events, item_by_id)
+    unworn_90, most_exp_unworn = _get_unworn_insights(items, now, currency)
+    items_with_history = sum(1 for i in items if int(i.get("wearCount") or 0) > 0)
 
-    denominator = 0
-    color_counter: Counter[str] = Counter()
-    for ev in window_events:
-        item = item_by_id.get(ev.get("itemId"))
-        if not item:
-            continue
-        color = _item_primary_color(item)
-        if not color:
-            continue
-        denominator += 1
-        color_counter[color] += 1
-
-    top_color_share = None
-    if denominator > 0 and color_counter:
-        top_color, top_count = color_counter.most_common(1)[0]
-        top_color_share = {
-            "color": top_color,
-            "pct": round((top_count / denominator) * 100.0, 1),
-        }
-
-    unworn_cutoff = now - timedelta(days=90)
-    unworn_count = 0
-    for item in items:
-        last_worn = _parse_iso(item.get("lastWornAt"))
-        if last_worn is None or last_worn < unworn_cutoff:
-            unworn_count += 1
-    unworn_90 = round((unworn_count / len(items)) * 100.0, 1) if items else None
-
-    most_expensive_unworn = None
-    max_amount = -1.0
-    for item in items:
-        if int(item.get("wearCount") or 0) > 0:
-            continue
-        price = item.get("price") or {}
-        if not isinstance(price, dict):
-            price = {"amount": price}
-        amount = price.get("amount")
-        if amount is None:
-            continue
-        converted = _convert(float(amount), price.get("originalCurrency"), profile_currency)
-        if converted is None:
-            continue
-        if converted > max_amount:
-            max_amount = converted
-            most_expensive_unworn = {
-                "itemId": item.get("id"),
-                "amount": round(converted, 2),
-                "currency": profile_currency,
-            }
-
-    cpw_intel = []
-    items_with_history = 0
-    for item in items:
-        item_id = item.get("id")
-        wear_count = int(item.get("wearCount") or 0)
-        if wear_count > 0:
-            items_with_history += 1
-
-        price = item.get("price") or {}
-        if not isinstance(price, dict):
-            price = {"amount": price}
-        amount = price.get("amount")
-        converted = _convert(float(amount), price.get("originalCurrency"), profile_currency) if amount is not None else None
-
-        cpw = None
-        if converted is not None and wear_count > 0:
-            cpw = round(converted / max(wear_count, 1), 2)
-
-        break_even = cpw is not None and wear_count > 0 and cpw <= target_cpw
-
-        forecast = None
-        if converted is not None and target_cpw > 0:
-            required_wears = int(math.ceil(converted / target_cpw))
-            additional = max(required_wears - wear_count, 0)
-            rate_recent = window_wears.get(item_id, 0) / 3.0
-            if rate_recent > 0:
-                wear_rate = rate_recent
-            else:
-                wear_rate = max(0.3, wear_count / _months_since(item.get("dateAdded"), now))
-
-            if wear_rate > 0:
-                months_to_target = int(math.ceil(additional / wear_rate))
-                projected = _add_months(now, months_to_target)
-                forecast = {
-                    "targetCpw": float(target_cpw),
-                    "projectedMonth": projected.strftime("%Y-%m"),
-                    "projectedWearsNeeded": additional,
-                }
-
-        cpw_intel.append({
-            "itemId": item_id,
-            "cpw": cpw,
-            "badge": _badge(cpw, wear_count, target_cpw),
-            "breakEvenReached": break_even,
-            "breakEvenTargetCpw": float(target_cpw),
-            "forecast": forecast,
-        })
+    # 2. Per-item CPW Intel
+    cpw_intel = [
+        _compute_item_intel(item, target_cpw, currency, window_wears, now)
+        for item in items
+    ]
 
     return {
         "generatedAt": now.isoformat(),
-        "currency": profile_currency,
+        "currency": currency,
         "insufficientData": False,
         "fxDate": fx_date,
         "conversionStatus": fx_status,
         "behavioralInsights": {
-            "topColorWearShare": top_color_share,
+            "topColorWearShare": top_color,
             "unworn90dPct": unworn_90,
-            "mostExpensiveUnworn": most_expensive_unworn,
+            "mostExpensiveUnworn": most_exp_unworn,
             "sparseHistory": items_with_history < 5,
         },
         "cpwIntel": cpw_intel,
+    }
+
+async def _get_profile_currency(user_id: str) -> str:
+    try:
+        profiles = get_user_profiles_container()
+        profile = await profiles.read_item(item=user_id, partition_key=user_id)
+        return (profile.get("currencyCode") or "USD").upper()
+    except Exception:
+        return "USD"
+
+async def _fetch_user_data(user_id: str, cutoff: datetime) -> tuple[list[dict], list[dict]]:
+    wardrobe = get_wardrobe_container()
+    wear_events = get_wear_events_container()
+    
+    items = []
+    async for item in wardrobe.query_items(
+        query="SELECT c.id, c.wearCount, c.lastWornAt, c.price, c.colours, c.tags, c.dateAdded FROM c WHERE c.userId = @userId",
+        parameters=[{"name": "@userId", "value": user_id}],
+    ):
+        items.append(item)
+        
+    events = []
+    async for ev in wear_events.query_items(
+        query="SELECT c.itemId, c.occurredAt FROM c WHERE c.userId = @userId AND c.occurredAt >= @cutoff",
+        parameters=[{"name": "@userId", "value": user_id}, {"name": "@cutoff", "value": cutoff.isoformat()}],
+    ):
+        events.append(ev)
+        
+    return items, events
+
+def _insufficient_data_response(now, currency, fx_date, fx_status) -> dict:
+    return {
+        "generatedAt": now.isoformat(), "currency": currency, "insufficientData": True,
+        "fxDate": fx_date, "conversionStatus": fx_status,
+        "behavioralInsights": {"topColorWearShare": None, "unworn90dPct": None, "mostExpensiveUnworn": None, "sparseHistory": True},
+        "cpwIntel": [],
+    }
+
+def _get_top_color_insight(events: list[dict], item_by_id: dict) -> Optional[dict]:
+    counter = Counter()
+    total = 0
+    for ev in events:
+        item = item_by_id.get(ev.get("itemId"))
+        color = _item_primary_color(item) if item else None
+        if color:
+            counter[color] += 1
+            total += 1
+    if total > 0:
+        top_color, count = counter.most_common(1)[0]
+        return {"color": top_color, "pct": round((count / total) * 100.0, 1)}
+    return None
+
+def _get_unworn_insights(items: list[dict], now: datetime, currency: str) -> tuple[Optional[float], Optional[dict]]:
+    cutoff = now - timedelta(days=90)
+    unworn_count = 0
+    max_amount = -1.0
+    most_expensive = None
+    
+    for item in items:
+        wear_count = int(item.get("wearCount") or 0)
+        last_worn = _parse_iso(item.get("lastWornAt"))
+        if last_worn is None or last_worn < cutoff:
+            unworn_count += 1
+            
+        if wear_count == 0:
+            price = item.get("price") or {}
+            if not isinstance(price, dict): price = {"amount": price}
+            converted = _convert(float(price.get("amount") or 0), price.get("originalCurrency"), currency)
+            if converted and converted > max_amount:
+                max_amount = converted
+                most_expensive = {"itemId": item.get("id"), "amount": round(converted, 2), "currency": currency}
+                
+    pct = round((unworn_count / len(items)) * 100.0, 1) if items else None
+    return pct, most_expensive
+
+def _compute_item_intel(item: dict, target_cpw: float, currency: str, window_wears: Counter, now: datetime) -> dict:
+    item_id = item.get("id")
+    wear_count = int(item.get("wearCount") or 0)
+    price = item.get("price") or {}
+    if not isinstance(price, dict): price = {"amount": price}
+    
+    converted = _convert(float(price.get("amount") or 0), price.get("originalCurrency"), currency) if price.get("amount") else None
+    cpw = round(converted / wear_count, 2) if converted and wear_count > 0 else None
+    
+    forecast = None
+    if converted and target_cpw > 0:
+        needed = int(math.ceil(converted / target_cpw))
+        additional = max(needed - wear_count, 0)
+        recent_rate = window_wears.get(item_id, 0) / 3.0
+        wear_rate = recent_rate if recent_rate > 0 else max(0.3, wear_count / _months_since(item.get("dateAdded"), now))
+        
+        if wear_rate > 0:
+            projected = _add_months(now, int(math.ceil(additional / wear_rate)))
+            forecast = {"targetCpw": float(target_cpw), "projectedMonth": projected.strftime("%Y-%m"), "projectedWearsNeeded": additional}
+
+    return {
+        "itemId": item_id, "cpw": cpw, "badge": _badge(cpw, wear_count, target_cpw),
+        "breakEvenReached": cpw is not None and wear_count > 0 and cpw <= target_cpw,
+        "breakEvenTargetCpw": float(target_cpw), "forecast": forecast,
     }

@@ -236,27 +236,27 @@ import { CpwIntelItem, VaultInsightsResponse } from '../../core/models/vault-ins
 })
 export class VaultComponent implements OnInit {
 
-  protected allItems     = signal<ClothingItem[]>([]);
+  protected allItems = signal<ClothingItem[]>([]);
   protected selectedItem = signal<ClothingItem | null>(null);
-  protected editingItem  = signal<ClothingItem | null>(null);
-  protected sharingItem  = signal<ClothingItem | null>(null);
-  protected loading      = signal(true);
-  protected loadingMore  = signal(false);
-  protected hasMore      = signal(false);
-  protected nextToken    = signal<string | null>(null);
-  protected searchQuery  = signal('');
+  protected editingItem = signal<ClothingItem | null>(null);
+  protected sharingItem = signal<ClothingItem | null>(null);
+  protected loading = signal(true);
+  protected loadingMore = signal(false);
+  protected hasMore = signal(false);
+  protected nextToken = signal<string | null>(null);
+  protected searchQuery = signal('');
   protected wearSuggestions = signal<WearSuggestionItem[]>([]);
   protected insights = signal<VaultInsightsResponse | null>(null);
   protected loadingInsights = signal(false);
 
   protected readonly activeFilters = signal<VaultFilters>({
-    group:      'all',
+    group: 'all',
     priceRange: [0, 999_999],
-    minWears:   0,
-    brand:      '',
-    condition:  '',
-    sortField:  'dateAdded',
-    sortDir:    'desc',
+    minWears: 0,
+    brand: '',
+    condition: '',
+    sortField: 'dateAdded',
+    sortDir: 'desc',
   });
 
   constructor(
@@ -265,23 +265,23 @@ export class VaultComponent implements OnInit {
     private profileService: UserProfileService,
     private router: Router,
     private route: ActivatedRoute,
-  ) {}
+  ) { }
 
   ngOnInit(): void {
     this.profileService.load().subscribe();
 
     // Restore filters from URL query params
-    const params    = this.route.snapshot.queryParamMap;
-    const priceMin  = Number(params.get('priceMin') ?? 0);
-    const priceMax  = Number(params.get('priceMax') ?? 999_999);
+    const params = this.route.snapshot.queryParamMap;
+    const priceMin = Number(params.get('priceMin') ?? 0);
+    const priceMax = Number(params.get('priceMax') ?? 999_999);
     const restored: VaultFilters = {
-      group:      (params.get('group')     as SmartGroup)        ?? 'all',
+      group: (params.get('group') as SmartGroup) ?? 'all',
       priceRange: [priceMin, priceMax],
-      minWears:   Number(params.get('minWears') ?? 0),
-      brand:      params.get('brand')    ?? '',
-      condition:  (params.get('condition') as ItemCondition | '') ?? '',
-      sortField:  (params.get('sortField') as WardrobeSortField)  ?? 'dateAdded',
-      sortDir:    (params.get('sortDir')   as 'asc' | 'desc')     ?? 'desc',
+      minWears: Number(params.get('minWears') ?? 0),
+      brand: params.get('brand') ?? '',
+      condition: (params.get('condition') as ItemCondition | '') ?? '',
+      sortField: (params.get('sortField') as WardrobeSortField) ?? 'dateAdded',
+      sortDir: (params.get('sortDir') as 'asc' | 'desc') ?? 'desc',
     };
     this.activeFilters.set(restored);
     this.loadItems(restored);
@@ -367,7 +367,7 @@ export class VaultComponent implements OnInit {
 
     const rand = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      : `${Date.now()}-${Array.from(crypto.getRandomValues(new Uint32Array(1)))[0].toString(16)}`;
     this.wardrobeService.logWear(item.id, {
       source: 'vault_card',
       clientEventId: `wear-${rand}`,
@@ -408,14 +408,14 @@ export class VaultComponent implements OnInit {
         this.onWearLogged(updated);
         this.wearSuggestions.update(list => list.filter(x => x.suggestionId !== s.suggestionId));
       },
-      error: () => {},
+      error: () => { },
     });
   }
 
   dismissSuggestion(s: WearSuggestionItem): void {
     this.wardrobeService.updateWearSuggestionStatus(s.suggestionId, { status: 'Dismissed' }).subscribe({
       next: () => this.wearSuggestions.update(list => list.filter(x => x.suggestionId !== s.suggestionId)),
-      error: () => {},
+      error: () => { },
     });
   }
 
@@ -468,14 +468,14 @@ export class VaultComponent implements OnInit {
   private buildQuery(filters: VaultFilters, continuationToken?: string | null): WardrobeQuery {
     const [priceMin, priceMax] = filters.priceRange;
     return {
-      brand:             filters.brand        || undefined,
-      condition:         filters.condition ? (filters.condition as ItemCondition) : undefined,
-      priceMin:          priceMin  > 0        ? priceMin  : undefined,
-      priceMax:          priceMax  < 999_999  ? priceMax  : undefined,
-      minWears:          filters.minWears > 0 ? filters.minWears : undefined,
-      sortField:         filters.sortField,
-      sortDir:           filters.sortDir,
-      pageSize:          24,
+      brand: filters.brand || undefined,
+      condition: filters.condition ? (filters.condition as ItemCondition) : undefined,
+      priceMin: priceMin > 0 ? priceMin : undefined,
+      priceMax: priceMax < 999_999 ? priceMax : undefined,
+      minWears: filters.minWears > 0 ? filters.minWears : undefined,
+      sortField: filters.sortField,
+      sortDir: filters.sortDir,
+      pageSize: 24,
       continuationToken: continuationToken ?? undefined,
     };
   }
@@ -484,14 +484,14 @@ export class VaultComponent implements OnInit {
     const [priceMin, priceMax] = f.priceRange;
     this.router.navigate([], {
       queryParams: {
-        group:      f.group     !== 'all'       ? f.group      : null,
-        priceMin:   priceMin    > 0             ? priceMin     : null,
-        priceMax:   priceMax    < 999_999       ? priceMax     : null,
-        minWears:   f.minWears  > 0             ? f.minWears   : null,
-        brand:      f.brand                     ? f.brand      : null,
-        condition:  f.condition                 ? f.condition  : null,
-        sortField:  f.sortField !== 'dateAdded' ? f.sortField  : null,
-        sortDir:    f.sortDir   !== 'desc'      ? f.sortDir    : null,
+        group: f.group !== 'all' ? f.group : null,
+        priceMin: priceMin > 0 ? priceMin : null,
+        priceMax: priceMax < 999_999 ? priceMax : null,
+        minWears: f.minWears > 0 ? f.minWears : null,
+        brand: f.brand ? f.brand : null,
+        condition: f.condition ? f.condition : null,
+        sortField: f.sortField !== 'dateAdded' ? f.sortField : null,
+        sortDir: f.sortDir !== 'desc' ? f.sortDir : null,
       },
       replaceUrl: true,
     });

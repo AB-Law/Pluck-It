@@ -250,6 +250,7 @@ def test_scrape_does_not_extract_buy_links():
             url="https://i.redd.it/reps.jpg",
             selftext="Buy: https://item.taobao.com/item.htm?id=999",
             score=300,
+            permalink="/r/qualityreps/comments/abc/reps_haul/",
         )
     ]
     listing = _reddit_listing(posts)

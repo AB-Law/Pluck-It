@@ -40,7 +40,8 @@ import logging
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from importlib import import_module
+from typing import Any, Optional, Annotated
 
 # Point rembg at the bundled model directory so it never downloads at runtime.
 os.environ.setdefault(
@@ -64,6 +65,14 @@ from agents.models import RedditIngestBatch, RedditPost
 from agents.scrapers.reddit_scraper import RedditScraper
 
 register_heif_opener()
+
+_ERR_SOURCE_NOT_FOUND_MESSAGE = "Source not found."
+_ISO_UTC_SUFFIX = "Z"
+_DB_LIMIT_PARAM = "@limit"
+_DB_USER_ID_PARAM = "@uid"
+_TASTE_MODULE_NAME_TAG = "agents.taste_calibration"
+
+background_tasks = set()
 
 logger = logging.getLogger(__name__)
 
@@ -365,8 +374,13 @@ class ChatRequest(BaseModel):
     selectedItemIds: Optional[list[str]] = None
 
 
-@fastapi_app.post("/api/chat")
-async def chat(body: ChatRequest, user_id: str = Depends(get_user_id)):
+@fastapi_app.post("/api/chat", responses={
+    200: {"description": "SSE stream of stylist agent responses."},
+    400: {"description": "Invalid prompt or mood selection."},
+    401: {"description": "Authentication failed."},
+    500: {"description": "Agent logic error or streaming failure."}
+})
+async def chat(body: ChatRequest, user_id: Annotated[str, Depends(get_user_id)]):
     """
     Stream the stylist agent's response as Server-Sent Events.
 
@@ -420,8 +434,11 @@ async def chat(body: ChatRequest, user_id: str = Depends(get_user_id)):
 
 # ── Memory (conversation summary) endpoints ──────────────────────────────────
 
-@fastapi_app.get("/api/chat/memory")
-async def get_memory(user_id: str = Depends(get_user_id)):
+@fastapi_app.get("/api/chat/memory", responses={
+    200: {"description": "User conversation memory summary retrieved."},
+    401: {"description": "Authentication failed."}
+})
+async def get_memory(user_id: Annotated[str, Depends(get_user_id)]):
     """Return the user's current conversation memory summary (user-editable)."""
     memory = await load_memory(user_id)
     return {"summary": memory.summary, "updatedAt": memory.updated_at}
@@ -431,8 +448,12 @@ class MemoryUpdateRequest(BaseModel):
     summary: str
 
 
-@fastapi_app.put("/api/chat/memory")
-async def update_memory(body: MemoryUpdateRequest, user_id: str = Depends(get_user_id)):
+@fastapi_app.put("/api/chat/memory", responses={
+    200: {"description": "Memory summary updated successfully."},
+    400: {"description": "Summary exceeds character limit."},
+    401: {"description": "Authentication failed."}
+})
+async def update_memory(body: MemoryUpdateRequest, user_id: Annotated[str, Depends(get_user_id)]):
     """Allow the user to edit their conversation memory summary."""
     if len(body.summary) > 2000:
         raise HTTPException(status_code=400, detail="Summary must be 2000 characters or fewer.")
@@ -443,7 +464,7 @@ async def update_memory(body: MemoryUpdateRequest, user_id: str = Depends(get_us
 # ── Digest results endpoint ───────────────────────────────────────────────────
 
 @fastapi_app.post("/api/digest/run")
-async def run_digest_now(user_id: str = Depends(get_user_id), force: bool = True):
+async def run_digest_now(user_id: Annotated[str, Depends(get_user_id)], force: bool = True):
     """Manually trigger digest generation for the authenticated user.
     Useful for local dev/testing — production relies on the Monday timer trigger.
     Defaults to force=True to bypass the wardrobe-unchanged hash guard.
@@ -466,7 +487,7 @@ async def run_digest_now(user_id: str = Depends(get_user_id), force: bool = True
 
 
 @fastapi_app.get("/api/digest/latest")
-async def get_latest_digest(user_id: str = Depends(get_user_id)):
+async def get_latest_digest(user_id: Annotated[str, Depends(get_user_id)]):
     """Return the most recently generated wardrobe digest for the user."""
     from agents.db import get_digests_container
     try:
@@ -495,7 +516,7 @@ async def get_latest_digest(user_id: str = Depends(get_user_id)):
 
 @fastapi_app.get("/api/insights/vault")
 async def get_vault_insights(
-    user_id: str = Depends(get_user_id),
+    user_id: Annotated[str, Depends(get_user_id)],
     windowDays: int = 90,
     targetCpw: float = 100.0,
 ):
@@ -523,7 +544,7 @@ class DigestFeedbackRequest(BaseModel):
 @fastapi_app.get("/api/digest/feedback")
 async def get_digest_feedback(
     digestId: str,
-    user_id: str = Depends(get_user_id),
+    user_id: Annotated[str, Depends(get_user_id)],
 ):
     """Return all feedback the user has already given for a specific digest.
     Used by the UI to restore thumbs state when the panel is reopened.
@@ -552,7 +573,7 @@ async def get_digest_feedback(
 @fastapi_app.post("/api/digest/feedback")
 async def post_digest_feedback(
     body: DigestFeedbackRequest,
-    user_id: str = Depends(get_user_id),
+    user_id: Annotated[str, Depends(get_user_id)],
 ):
     """
     Record thumbs-up or thumbs-down feedback on a single digest suggestion.
@@ -573,7 +594,7 @@ async def post_digest_feedback(
         "suggestionIndex": body.suggestionIndex,
         "suggestionDescription": body.suggestionDescription,
         "signal": body.signal,
-        "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "createdAt": datetime.now(timezone.utc).isoformat().replace(_ISO_UTC_SUFFIX, "Z"),
     }
     try:
         await container.upsert_item(doc)
@@ -637,18 +658,18 @@ async def list_moods(primaryMood: Optional[str] = None):
     try:
         if primaryMood:
             query = (
-                "SELECT * FROM c WHERE c.primaryMood = @primaryMood "
-                "ORDER BY c.trendScore DESC OFFSET 0 LIMIT @limit"
+                f"SELECT * FROM c WHERE c.primaryMood = @primaryMood "
+                f"ORDER BY c.trendScore DESC OFFSET 0 LIMIT {_DB_LIMIT_PARAM}"
             )
             parameters = [
                 {"name": "@primaryMood", "value": primaryMood},
-                {"name": "@limit",       "value": _MOOD_LIST_LIMIT},
+                {"name": _DB_LIMIT_PARAM,       "value": _MOOD_LIST_LIMIT},
             ]
         else:
             query = (
-                "SELECT * FROM c ORDER BY c.trendScore DESC OFFSET 0 LIMIT @limit"
+                f"SELECT * FROM c ORDER BY c.trendScore DESC OFFSET 0 LIMIT {_DB_LIMIT_PARAM}"
             )
-            parameters = [{"name": "@limit", "value": _MOOD_LIST_LIMIT}]
+            parameters = [{"name": _DB_LIMIT_PARAM, "value": _MOOD_LIST_LIMIT}]
 
         moods = []
         async for item in container.query_items(query=query, parameters=parameters):
@@ -778,7 +799,7 @@ def _validate_scraper_url(url: str) -> None:
                 )
 
 
-def _require_admin(user_id: str = Depends(get_user_id)) -> str:
+def _require_admin(user_id: Annotated[str, Depends(get_user_id)]) -> str:
     """
     FastAPI dependency that restricts an endpoint to admin users only.
 
@@ -804,8 +825,31 @@ class SubscribeRequest(BaseModel):
     pass  # source_id comes from path param
 
 
-@fastapi_app.get("/api/scraper/sources")
-async def list_scraper_sources(user_id: str = Depends(get_user_id)):
+@fastapi_app.get("/api/scraper/sources", responses={
+    200: {
+        "description": "List of scraper sources with subscription status.",
+        "content": {
+            "application/json": {
+                "example": {
+                    "sources": [
+                        {
+                            "id": "reddit-fashion",
+                            "name": "Reddit r/fashion",
+                            "sourceType": "reddit",
+                            "isGlobal": True,
+                            "lastScrapedAt": "2023-10-27T10:00:00Z",
+                            "config": {"subreddit": "fashion"},
+                            "leaseExpiresAt": None,
+                            "subscribed": True,
+                            "needsClientIngest": False
+                        }
+                    ]
+                }
+            }
+        }
+    }
+})
+async def list_scraper_sources(user_id: Annotated[str, Depends(get_user_id)]):
     """List all active scraper sources (global + user-created)."""
     from agents.db import get_scraper_sources_container, get_user_source_subscriptions_container
 
@@ -821,43 +865,73 @@ async def list_scraper_sources(user_id: str = Depends(get_user_id)):
                 doc.pop(key, None)
             sources.append(doc)
 
-        # Load user's subscriptions to annotate each source
-        subscribed_ids: set[str] = set()
-        async for sub in subs_container.query_items(
-            query="SELECT c.sourceId FROM c WHERE c.userId = @uid AND c.isActive = true",
-            parameters=[{"name": "@uid", "value": user_id}],
-        ):
-            subscribed_ids.add(sub["sourceId"])
+        subscribed_ids = await _get_user_subscriptions(subs_container, user_id)
 
         for source in sources:
             source["subscribed"] = source["id"] in subscribed_ids
-            # Hybrid scraping logic: signal if client-side refresh is needed
-            last_scraped = source.get("lastScrapedAt")
-            needs_ingest = True
-            if last_scraped:
-                dt = datetime.fromisoformat(last_scraped.replace("Z", "+00:00"))
-                if datetime.now(timezone.utc) - dt < timedelta(hours=4):
-                    needs_ingest = False
-            
-            # Check for active lease
-            lease_expires = source.get("leaseExpiresAt")
-            if lease_expires:
-                ldt = datetime.fromisoformat(lease_expires.replace("Z", "+00:00"))
-                if datetime.now(timezone.utc) < ldt:
-                    needs_ingest = False
-            
-            source["needsClientIngest"] = needs_ingest and source["sourceType"] == "reddit"
+            source["needsClientIngest"] = _check_needs_client_ingest(source)
 
         return {"sources": sources}
     except Exception as exc:
         logger.exception("list_scraper_sources failed: %s", exc)
         raise HTTPException(status_code=500, detail="Could not load sources.")
 
+async def _get_user_subscriptions(container: any, user_id: str) -> set[str]:
+    subscribed_ids = set()
+    async for sub in container.query_items(
+        query="SELECT c.sourceId FROM c WHERE c.userId = @uid AND c.isActive = true",
+        parameters=[{"name": _DB_USER_ID_PARAM, "value": user_id}],
+    ):
+        subscribed_ids.add(sub["sourceId"])
+    return subscribed_ids
 
-@fastapi_app.post("/api/scraper/sources", status_code=201)
+def _check_needs_client_ingest(source: dict) -> bool:
+    if source.get("sourceType") != "reddit":
+        return False
+    
+    now = datetime.now(timezone.utc)
+    
+    # 1. Check refresh interval (4 hours)
+    last_scraped = source.get("lastScrapedAt")
+    if last_scraped:
+        dt = datetime.fromisoformat(last_scraped.replace(_ISO_UTC_SUFFIX, "Z"))
+        if now - dt < timedelta(hours=4):
+            return False
+            
+    # 2. Check active lease
+    lease_expires = source.get("leaseExpiresAt")
+    if lease_expires:
+        ldt = datetime.fromisoformat(lease_expires.replace(_ISO_UTC_SUFFIX, "Z"))
+        if now < ldt:
+            return False
+            
+    return True
+
+
+@fastapi_app.post("/api/scraper/sources", status_code=201, responses={
+    201: {
+        "description": "Scraper source successfully suggested and configured.",
+        "content": {
+            "application/json": {
+                "example": {
+                    "sourceId": "brand-zara",
+                    "name": "Zara",
+                    "config": {
+                        "type": "css_selectors",
+                        "item_selector": ".product-item",
+                        "title_selector": ".product-title",
+                        "image_selector": ".product-image img@src"
+                    }
+                }
+            }
+        }
+    },
+    400: {"description": "Invalid URL or other input error."},
+    500: {"description": "Failed to generate scraper config or save source."}
+})
 async def suggest_scraper_source(
     body: SuggestSourceRequest,
-    user_id: str = Depends(get_user_id),
+    user_id: Annotated[str, Depends(get_user_id)],
 ):
     """
     Suggest a new brand site as a scraper source.
@@ -903,8 +977,20 @@ async def suggest_scraper_source(
     return {"sourceId": source_id, "name": body.name, "config": config}
 
 
-@fastapi_app.post("/api/scraper/lease/{source_id}")
-async def acquire_scraper_lease(source_id: str, user_id: str = Depends(get_user_id)):
+@fastapi_app.post("/api/scraper/lease/{source_id}", responses={
+    200: {
+        "description": "Lease successfully acquired.",
+        "content": {
+            "application/json": {
+                "example": {"status": "ok", "expiresAt": "2023-10-27T10:15:00Z"}
+            }
+        }
+    },
+    404: {"description": "Source not found."},
+    409: {"description": "Lease already held by another user."},
+    500: {"description": "Could not acquire lease."}
+})
+async def acquire_scraper_lease(source_id: str, user_id: Annotated[str, Depends(get_user_id)]):
     """
     Acquire a 15-minute lease for client-side scraping.
     Prevents multiple users from hammering the same subreddit.
@@ -920,13 +1006,13 @@ async def acquire_scraper_lease(source_id: str, user_id: str = Depends(get_user_
             parameters=[{"name": "@id", "value": source_id}]
         )]
         if not items:
-            raise HTTPException(status_code=404, detail="Source not found.")
+            raise HTTPException(status_code=404, detail=_ERR_SOURCE_NOT_FOUND)
         source = items[0]
         
         # Check if existing lease is still active
         lease_expires = source.get("leaseExpiresAt")
         if lease_expires:
-            ldt = datetime.fromisoformat(lease_expires.replace("Z", "+00:00"))
+            ldt = datetime.fromisoformat(lease_expires.replace(_ISO_UTC_SUFFIX, "Z"))
             if datetime.now(timezone.utc) < ldt:
                 raise HTTPException(status_code=409, detail="Lease already held by another user.")
 
@@ -939,72 +1025,95 @@ async def acquire_scraper_lease(source_id: str, user_id: str = Depends(get_user_
         raise HTTPException(status_code=500, detail="Could not acquire lease.")
 
 
-@fastapi_app.post("/api/scraper/ingest/reddit")
-async def ingest_reddit_data(body: RedditIngestBatch, user_id: str = Depends(get_user_id)):
+@fastapi_app.post("/api/scraper/ingest/reddit", responses={
+    200: {
+        "description": "Reddit data ingested successfully.",
+        "content": {
+            "application/json": {
+                "examples": {
+                    "success": {"value": {"count": 10, "status": "ok", "verified": True}},
+                    "no_valid_items": {"value": {"count": 0, "status": "no_valid_items", "verified": True}}
+                }
+            }
+        }
+    },
+    403: {"description": "User is banned from contributing."},
+    404: {"description": "Source not found."},
+    500: {"description": "Internal server error during ingestion."}
+})
+async def ingest_reddit_data(body: RedditIngestBatch, user_id: Annotated[str, Depends(get_user_id)]):
     """
     Submit Reddit JSON data scraped by the client.
     Includes validation, subreddit binding, and spot-checks.
     """
-    from agents.db import get_scraper_sources_container, get_user_bans_container
     from agents.scrapers.reddit_scraper import RedditScraper
     from agents.scraper_runner import ingest_items
-    import random
+    import secrets
 
-    # 1. Security check: User Ban List
-    from azure.cosmos.exceptions import CosmosResourceNotFoundError
-    bans_container = get_user_bans_container()
-    try:
-        await bans_container.read_item(item=user_id, partition_key=user_id)
-        raise HTTPException(status_code=403, detail="User is banned from contributing.")
-    except CosmosResourceNotFoundError:
-        pass  # NOT_FOUND is expected — user is not banned
+    await _check_user_ban(user_id)
+    source = await _get_source_and_verify_sub(body.source_id)
+    expected_sub = source.get("config", {}).get("subreddit", "").lower()
 
-    # 2. Load source and verify subreddit binding
-    sources_container = get_scraper_sources_container()
-    try:
-        items = [i async for i in sources_container.query_items(
-            query="SELECT * FROM c WHERE c.id = @id",
-            parameters=[{"name": "@id", "value": body.source_id}]
-        )]
-        if not items:
-            raise HTTPException(status_code=404, detail="Source not found.")
-        source = items[0]
-        expected_sub = source.get("config", {}).get("subreddit", "").lower()
-    except Exception as exc:
-        if isinstance(exc, HTTPException): raise
-        raise HTTPException(status_code=404, detail="Source not found.")
-
-    # 3. Process raw posts through RedditScraper (validates NSFW, domains, subreddits)
     scraper = RedditScraper()
     raw_posts = [p.dict() for p in body.posts]
     scraped_items = scraper.process_posts(raw_posts, expected_sub, body.source_id)
 
     if not scraped_items:
-        return {"count": 0, "status": "no_valid_items"}
+        return {"count": 0, "status": "no_valid_items", "verified": True}
 
-    # 4. Probabilistic Spot-Check (Placeholder logic for the 10-call limit)
-    # We use a simple random check here. In production, this would be budget-aware.
-    do_audit = random.random() < 0.1 # 10% chance
+    # Spot-check logic: 10% chance
     verified = True
-    
-    # Run the ingestion in a thread since it uses sync Cosmos helpers
+    do_audit = secrets.SystemRandom().random() < 0.1
+    # In production, we'd trigger a background audit here if do_audit is True
+
     loop = asyncio.get_event_loop()
     upserted = await loop.run_in_executor(
-        None, 
-        ingest_items, 
-        scraped_items, 
-        source, 
-        user_id, 
-        verified
+        None, ingest_items, scraped_items, source, user_id, verified
     )
 
     return {"count": upserted, "status": "ok", "verified": verified}
 
+async def _check_user_ban(user_id: str):
+    from agents.db import get_user_bans_container
+    from azure.cosmos.exceptions import CosmosResourceNotFoundError
+    container = get_user_bans_container()
+    try:
+        await container.read_item(item=user_id, partition_key=user_id)
+        raise HTTPException(status_code=403, detail="User is banned from contributing.")
+    except CosmosResourceNotFoundError:
+        pass
 
-@fastapi_app.post("/api/admin/unban/{target_user_id}")
+async def _get_source_and_verify_sub(source_id: str) -> dict:
+    from agents.db import get_scraper_sources_container
+    container = get_scraper_sources_container()
+    try:
+        items = [i async for i in container.query_items(
+            query="SELECT * FROM c WHERE c.id = @id",
+            parameters=[{"name": "@id", "value": source_id}]
+        )]
+        if not items:
+            raise HTTPException(status_code=404, detail=_ERR_SOURCE_NOT_FOUND_MESSAGE)
+        return items[0]
+    except Exception as exc:
+        if isinstance(exc, HTTPException): raise
+        raise HTTPException(status_code=404, detail=_ERR_SOURCE_NOT_FOUND_MESSAGE)
+
+
+@fastapi_app.post("/api/admin/unban/{target_user_id}", responses={
+    200: {
+        "description": "User successfully unbanned.",
+        "content": {
+            "application/json": {
+                "example": {"status": "unbanned", "userId": "user123"}
+            }
+        }
+    },
+    403: {"description": "Admin access required."},
+    404: {"description": "User ban record not found."}
+})
 async def admin_unban_user(
     target_user_id: str,
-    admin_id: str = Depends(_require_admin)
+    admin_id: Annotated[str, Depends(_require_admin)]
 ):
     """Admin-only: Remove a user from the ban list."""
     from agents.db import get_user_bans_container
@@ -1017,10 +1126,20 @@ async def admin_unban_user(
 
 
 
-@fastapi_app.post("/api/scraper/subscribe/{source_id}", status_code=201)
+@fastapi_app.post("/api/scraper/subscribe/{source_id}", status_code=201, responses={
+    201: {
+        "description": "Successfully subscribed to source.",
+        "content": {
+            "application/json": {
+                "example": {"sourceId": "reddit-fashion", "subscribed": True}
+            }
+        }
+    },
+    500: {"description": "Could not subscribe to source."}
+})
 async def subscribe_to_source(
     source_id: str,
-    user_id: str = Depends(get_user_id),
+    user_id: Annotated[str, Depends(get_user_id)],
 ):
     """Subscribe the current user to a scraper source."""
     from agents.db import get_user_source_subscriptions_container
@@ -1050,18 +1169,30 @@ async def subscribe_to_source(
                     "agents.scraper_runner", fromlist=["run_for_source"]
                 ).run_for_source(source_id),
             )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Background scrape for %s failed: %s", source_id, exc)
-
-    asyncio.create_task(_bg_scrape())
+        except Exception as _exc:  # noqa: BLE001
+            logger.warning("Background scrape for %s failed: %s", source_id, _exc)
+ 
+    task = asyncio.create_task(_bg_scrape())
+    background_tasks.add(task)
+    task.add_done_callback(background_tasks.discard)
 
     return {"sourceId": source_id, "subscribed": True}
 
 
-@fastapi_app.delete("/api/scraper/subscribe/{source_id}")
+@fastapi_app.delete("/api/scraper/subscribe/{source_id}", responses={
+    200: {
+        "description": "Successfully unsubscribed from source.",
+        "content": {
+            "application/json": {
+                "example": {"sourceId": "reddit-fashion", "subscribed": False}
+            }
+        }
+    },
+    500: {"description": "Could not unsubscribe from source."}
+})
 async def unsubscribe_from_source(
     source_id: str,
-    user_id: str = Depends(get_user_id),
+    user_id: Annotated[str, Depends(get_user_id)],
 ):
     """Unsubscribe the current user from a scraper source."""
     from agents.db import get_user_source_subscriptions_container
@@ -1081,7 +1212,7 @@ async def unsubscribe_from_source(
 
 @fastapi_app.get("/api/scraper/items")
 async def list_scraped_items(
-    user_id: str = Depends(get_user_id),
+    user_id: Annotated[str, Depends(get_user_id)],
     sortBy: str = "score",
     pageSize: int = 50,
     sourceIds: Optional[str] = None,
@@ -1213,7 +1344,7 @@ async def list_scraped_items(
 async def feedback_scraped_item(
     item_id: str,
     body: dict,
-    user_id: str = Depends(get_user_id),
+    user_id: Annotated[str, Depends(get_user_id)],
 ):
     """Record like/dislike on a scraped item. signal: 'up' or 'down'."""
     from agents.db import get_scraped_items_container
@@ -1278,7 +1409,7 @@ async def feedback_scraped_item(
 @fastapi_app.post("/api/scraper/run/{source_id}")
 async def run_scraper_source(
     source_id: str,
-    _: str = Depends(_require_admin),
+    _: Annotated[str, Depends(_require_admin)],
 ):
     """Manually trigger a scrape for a single source. Requires admin access."""
     try:
@@ -1303,14 +1434,13 @@ class QuizResponse(BaseModel):
 
 
 @fastapi_app.get("/api/taste/quiz")
-async def get_taste_quiz(user_id: str = Depends(get_user_id)):
+async def get_taste_quiz(user_id: Annotated[str, Depends(get_user_id)]):
     """Get (or create) the active taste quiz session for the current user."""
     try:
+        module = import_module(_TASTE_MODULE_NAME)
         session = await asyncio.get_event_loop().run_in_executor(
             None,
-            lambda: __import__(
-                "agents.taste_calibration", fromlist=["get_or_create_quiz_session"]
-            ).get_or_create_quiz_session(user_id),
+            lambda: module.get_or_create_quiz_session(user_id),
         )
         for key in _COSMOS_INTERNAL_KEYS:
             session.pop(key, None)
@@ -1324,7 +1454,7 @@ async def get_taste_quiz(user_id: str = Depends(get_user_id)):
 async def record_quiz_response(
     session_id: str,
     body: QuizResponse,
-    user_id: str = Depends(get_user_id),
+    user_id: Annotated[str, Depends(get_user_id)],
 ):
     """Record a thumbs-up or thumbs-down response in the quiz session."""
     if body.signal not in ("up", "down"):
@@ -1351,7 +1481,7 @@ async def record_quiz_response(
 @fastapi_app.post("/api/taste/quiz/{session_id}/complete")
 async def complete_taste_quiz(
     session_id: str,
-    user_id: str = Depends(get_user_id),
+    user_id: Annotated[str, Depends(get_user_id)],
 ):
     """Finalise the quiz session and update the user's style profile."""
     try:

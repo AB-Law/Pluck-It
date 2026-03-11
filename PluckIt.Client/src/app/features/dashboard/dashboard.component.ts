@@ -190,20 +190,20 @@ import { DigestPanelComponent } from '../digest/digest-panel.component';
 export class DashboardComponent implements OnInit {
   @ViewChild('wardrobeRef') wardrobeRef!: WardrobeComponent;
 
-  protected readonly stylistOpen  = signal(false);
+  protected readonly stylistOpen = signal(false);
   protected readonly settingsOpen = signal(false);
-  protected readonly digestOpen   = signal(false);
+  protected readonly digestOpen = signal(false);
   protected readonly avatarMenuOpen = signal(false);
-  protected readonly searchQuery  = signal('');
-  protected readonly selectedIds  = signal<string[]>([]);
-  protected readonly dragOver     = signal(false);
+  protected readonly searchQuery = signal('');
+  protected readonly selectedIds = signal<string[]>([]);
+  protected readonly dragOver = signal(false);
 
   constructor(
     protected readonly auth: AuthService,
     private readonly profileService: UserProfileService,
     private readonly wardrobeService: WardrobeService,
     private readonly router: Router,
-  ) {}
+  ) { }
 
   logout(): void {
     this.avatarMenuOpen.set(false);
@@ -239,7 +239,7 @@ export class DashboardComponent implements OnInit {
     event.preventDefault();
     this.dragOver.set(false);
     const id = event.dataTransfer?.getData('text/plain')
-            ?? event.dataTransfer?.getData('application/pluckit-item');
+      ?? event.dataTransfer?.getData('application/pluckit-item');
     if (id) {
       const exists = this.selectedIds().includes(id);
       this.selectedIds.update(ids => ids.includes(id) ? ids : [...ids, id]);
@@ -252,13 +252,13 @@ export class DashboardComponent implements OnInit {
   private recordStylingActivity(itemId: string, source: string): void {
     const rand = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      : `${Date.now()}-${Array.from(crypto.getRandomValues(new Uint32Array(1)))[0].toString(16)}`;
     this.wardrobeService.recordStylingActivity({
       itemId,
       source,
       activityType: 'AddedToStyleBoard',
       clientEventId: `sty-${rand}`,
       occurredAt: new Date().toISOString(),
-    }).subscribe({ error: () => {} });
+    }).subscribe({ error: () => { } });
   }
 }

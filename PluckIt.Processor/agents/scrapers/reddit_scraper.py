@@ -37,6 +37,8 @@ logger = logging.getLogger(__name__)
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 _BASE_URL = "https://www.reddit.com"
+_HTML_AMP = "&amp;"
+_PLAIN_AMP = "&"
 _HEADERS = {
     "User-Agent": os.getenv(
         "REDDIT_USER_AGENT",
@@ -93,14 +95,14 @@ def _extract_gallery_images(post: dict) -> list[tuple[str, Optional[str]]]:
             continue
         # Direct source URL (i.redd.it, no token)
         src = item.get("s", {})
-        img_url = src.get("u", "").replace("&amp;", "&")
+        img_url = src.get("u", "").replace(_HTML_AMP, _PLAIN_AMP)
         if not img_url:
             continue
         # Best-quality resized preview (may carry token — transient only)
         previews = item.get("p", [])
         preview_url: Optional[str] = None
         if previews:
-            preview_url = previews[-1].get("u", "").replace("&amp;", "&") or None
+            preview_url = previews[-1].get("u", "").replace(_HTML_AMP, _PLAIN_AMP) or None
         results.append((img_url, preview_url))
     return results
 
@@ -204,95 +206,118 @@ class RedditScraper(BaseScraper):
         source_id: str,
     ) -> list[ScrapedItemRaw]:
         """Process a single raw Reddit post into one or more ScrapedItemRaw."""
+        if not self._is_post_valid(post, subreddit):
+            return []
+
+        metadata = self._extract_post_metadata(post, subreddit)
+        post_url = f"https://www.reddit.com{post.get('permalink', '')}"
+
+        if _is_reddit_gallery(post):
+            return self._handle_gallery_post(post, source_id, post_url, metadata)
+
+        if _is_direct_image(post.get("url", "")):
+            return self._handle_single_image_post(post, source_id, post_url, metadata)
+
+        return []
+
+    def _is_post_valid(self, post: dict, subreddit: str) -> bool:
+        """Perform basic validation on the post."""
         actual_sub = post.get("subreddit", "").lower()
         if actual_sub and actual_sub != subreddit.lower():
             logger.warning("Subreddit mismatch: expected %s, got %s", subreddit, actual_sub)
-            return []
+            return False
 
         if post.get("over_18", False):
-            return []
+            return False
 
-        post_url = f"https://www.reddit.com{post.get('permalink', '')}"
-        
-        if not post.get("permalink", "").lower().startswith(f"/r/{subreddit.lower()}/"):
-            logger.warning("Permalink mismatch for subreddit %s: %s", subreddit, post.get("permalink"))
-            return []
+        permalink = post.get("permalink", "")
+        if not permalink.lower().startswith(f"/r/{subreddit.lower()}/"):
+            logger.warning("Permalink mismatch for subreddit %s: %s", subreddit, permalink)
+            return False
 
-        title = (post.get("title") or "").strip()
-        description = (post.get("selftext") or "").strip()[:500]
-        tags = _extract_tags_from_post(post, subreddit)
-        score = post.get("score", 0)
+        return True
+
+    def _extract_post_metadata(self, post: dict, subreddit: str) -> dict:
+        """Extract common metadata from a Reddit post."""
         created_utc = post.get("created_utc")
         source_created_at: Optional[str] = None
         if isinstance(created_utc, (int, float)):
             source_created_at = datetime.fromtimestamp(created_utc, timezone.utc).isoformat()
 
-        buy_links = []
-        comment_text = ""
+        return {
+            "title": (post.get("title") or "").strip(),
+            "description": (post.get("selftext") or "").strip()[:500],
+            "tags": _extract_tags_from_post(post, subreddit),
+            "score": post.get("score", 0),
+            "source_created_at": source_created_at,
+        }
 
-        results: list[ScrapedItemRaw] = []
+    def _handle_gallery_post(
+        self, post: dict, source_id: str, post_url: str, meta: dict
+    ) -> list[ScrapedItemRaw]:
+        """Process a Reddit gallery post."""
+        gallery_pairs = _extract_gallery_images(post)
+        if not gallery_pairs:
+            return []
 
-        # ── Gallery posts ──────────────────────────────────────────────────
-        if _is_reddit_gallery(post):
-            gallery_pairs = _extract_gallery_images(post)
-            if gallery_pairs:
-                # Security: validate all gallery images are on trusted domains
-                valid_gallery: list[tuple[str, Optional[str]]] = []
-                for img, prev in gallery_pairs:
-                    if _is_trusted_reddit_domain(img):
-                        valid_gallery.append((img, prev))
-                
-                if valid_gallery:
-                    first_img, first_preview = valid_gallery[0]
-                    results.append(ScrapedItemRaw(
-                        source_id=source_id,
-                        source_type=self.source_type,
-                        title=title,
-                        description=description,
-                        image_url=first_img,
-                        product_url=post_url,
-                        tags=tags,
-                        buy_links=buy_links,
-                        preview_url=first_preview,
-                        gallery_images=[img for img, _ in valid_gallery],
-                        comment_text=comment_text[:1000],
-                        score_signal=score,
-                        source_created_at=source_created_at,
-                    ))
+        # Security: validate all gallery images are on trusted domains
+        valid_gallery: list[tuple[str, Optional[str]]] = [
+            (img, prev) for img, prev in gallery_pairs if _is_trusted_reddit_domain(img)
+        ]
 
-        # ── Single direct image ────────────────────────────────────────────
-        elif _is_direct_image(post.get("url", "")):
-            img_url = post["url"]
-            if not _is_trusted_reddit_domain(img_url):
-                return []
+        if not valid_gallery:
+            return []
 
-            # Preview URL for pHash (may carry token — transient only)
-            preview_url: Optional[str] = None
-            try:
-                preview = post["preview"]["images"][0]["source"]["url"]
-                preview_url = preview.replace("&amp;", "&")
-                if preview_url and not _is_trusted_reddit_domain(preview_url):
-                    preview_url = None
-            except (KeyError, IndexError, TypeError):
-                pass
+        first_img, first_preview = valid_gallery[0]
+        return [ScrapedItemRaw(
+            source_id=source_id,
+            source_type=self.source_type,
+            title=meta["title"],
+            description=meta["description"],
+            image_url=first_img,
+            product_url=post_url,
+            tags=meta["tags"],
+            buy_links=[],
+            preview_url=first_preview,
+            gallery_images=[img for img, _ in valid_gallery],
+            comment_text="",
+            score_signal=meta["score"],
+            source_created_at=meta["source_created_at"],
+        )]
 
-            results.append(ScrapedItemRaw(
-                source_id=source_id,
-                source_type=self.source_type,
-                title=title,
-                description=description,
-                image_url=img_url,   # stable i.redd.it URL
-                product_url=post_url,
-                tags=tags,
-                buy_links=buy_links,
-                preview_url=preview_url,     # transient, for pHash only
-                gallery_images=[],
-                comment_text=comment_text[:1000],
-                score_signal=score,
-                source_created_at=source_created_at,
-            ))
+    def _handle_single_image_post(
+        self, post: dict, source_id: str, post_url: str, meta: dict
+    ) -> list[ScrapedItemRaw]:
+        """Process a single-image Reddit post."""
+        img_url = post.get("url", "")
+        if not _is_trusted_reddit_domain(img_url):
+            return []
 
-        return results
+        # Preview URL for pHash (may carry token — transient only)
+        preview_url: Optional[str] = None
+        try:
+            preview = post["preview"]["images"][0]["source"]["url"]
+            preview_url = preview.replace("&amp;", "&")
+            if preview_url and not _is_trusted_reddit_domain(preview_url):
+                preview_url = None
+        except (KeyError, IndexError, TypeError):
+            pass
+
+        return [ScrapedItemRaw(
+            source_id=source_id,
+            source_type=self.source_type,
+            title=meta["title"],
+            description=meta["description"],
+            image_url=img_url,
+            product_url=post_url,
+            tags=meta["tags"],
+            buy_links=[],
+            preview_url=preview_url,
+            gallery_images=[],
+            comment_text="",
+            score_signal=meta["score"],
+            source_created_at=meta["source_created_at"],
+        )]
 
 
 def _is_trusted_reddit_domain(url: str) -> bool:

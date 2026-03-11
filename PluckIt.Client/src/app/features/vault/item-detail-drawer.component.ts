@@ -7,10 +7,10 @@ import { UserProfileService } from '../../core/services/user-profile.service';
 import { WearHistoryCalendarComponent } from './wear-history-calendar.component';
 
 const CARE_ICON_MAP: Record<string, { icon: string; label: string }> = {
-  dry_clean: { icon: 'dry_cleaning',         label: 'Dry Clean Only' },
-  wash:      { icon: 'local_laundry_service', label: 'Machine Wash'   },
-  iron:      { icon: 'iron',                 label: 'Low Heat Iron'  },
-  bleach:    { icon: 'water',                label: 'No Bleach'      },
+  dry_clean: { icon: 'dry_cleaning', label: 'Dry Clean Only' },
+  wash: { icon: 'local_laundry_service', label: 'Machine Wash' },
+  iron: { icon: 'iron', label: 'Low Heat Iron' },
+  bleach: { icon: 'water', label: 'No Bleach' },
 };
 
 @Component({
@@ -164,10 +164,10 @@ const CARE_ICON_MAP: Record<string, { icon: string; label: string }> = {
 export class ItemDetailDrawerComponent {
   item = input<ClothingItem | null>(null);
 
-  closed           = output<void>();
-  editRequested    = output<ClothingItem>();
+  closed = output<void>();
+  editRequested = output<ClothingItem>();
   shareToCollection = output<ClothingItem>();
-  wearLogged       = output<ClothingItem>();
+  wearLogged = output<ClothingItem>();
 
   protected logWearWorking = signal(false);
   protected wearHistoryLoading = signal(false);
@@ -175,7 +175,7 @@ export class ItemDetailDrawerComponent {
   protected wearHistorySummary = signal<WearHistorySummary | null>(null);
 
   private wardrobeService = inject(WardrobeService);
-  private profileService  = inject(UserProfileService);
+  private profileService = inject(UserProfileService);
 
   constructor() {
     effect((onCleanup) => {
@@ -221,15 +221,15 @@ export class ItemDetailDrawerComponent {
     return val != null ? this.fmt(val, itm.price?.originalCurrency ?? this.currency) : '—';
   });
 
-  careIcon(key: string): string  { return CARE_ICON_MAP[key]?.icon  ?? 'info'; }
-  careLabel(key: string): string { return CARE_ICON_MAP[key]?.label ?? key;    }
+  careIcon(key: string): string { return CARE_ICON_MAP[key]?.icon ?? 'info'; }
+  careLabel(key: string): string { return CARE_ICON_MAP[key]?.label ?? key; }
 
   logWear(itm: ClothingItem): void {
     if (this.logWearWorking()) return;
     this.logWearWorking.set(true);
     const rand = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      : `${Date.now()}-${Array.from(crypto.getRandomValues(new Uint32Array(1)))[0].toString(16)}`;
     this.wardrobeService.logWear(itm.id, {
       source: 'item_drawer',
       clientEventId: `wear-${rand}`,
