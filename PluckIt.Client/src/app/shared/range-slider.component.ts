@@ -2,7 +2,6 @@ import {
   Component,
   ElementRef,
   HostListener,
-  OnInit,
   ViewChild,
   input,
   model,
@@ -51,7 +50,7 @@ import { CommonModule } from '@angular/common';
     :host { display: block; }
   `],
 })
-export class RangeSliderComponent implements OnInit {
+export class RangeSliderComponent {
   min   = input<number>(0);
   max   = input<number>(100);
   step  = input<number>(1);
@@ -73,8 +72,6 @@ export class RangeSliderComponent implements OnInit {
     if (range <= 0) return 0;
     return ((this.value()[1] - this.min()) / range) * 100;
   }
-
-  ngOnInit(): void {}
 
   startDrag(e: MouseEvent, thumb: 'low' | 'high'): void {
     e.preventDefault();

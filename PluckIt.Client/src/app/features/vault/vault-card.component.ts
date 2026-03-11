@@ -83,14 +83,19 @@ export class VaultCardComponent {
   readonly cpwDisplay = computed(() => {
     const price = this.item().price?.amount;
     const wears = this.item().wearCount ?? 0;
-    if (!price || wears === 0) return 'N/A';
-    const cpw = price / wears;
-    return this.formatCurrency(cpw);
+    if (price && wears > 0) {
+      const cpw = price / wears;
+      return this.formatCurrency(cpw);
+    }
+    return 'N/A';
   });
 
   readonly valueDisplay = computed(() => {
     const val = this.item().estimatedMarketValue ?? this.item().price?.amount;
-    return val != null ? this.formatCurrency(val) : '—';
+    if (val === null || val === undefined) {
+      return '—';
+    }
+    return this.formatCurrency(val);
   });
 
   readonly aestheticTag = computed(() => {

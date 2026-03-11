@@ -274,23 +274,20 @@ def _dedup_primary_bucket(
         if not base_emb:
             continue
 
-        for candidate_idx in indices[position + 1 :]:
-            if candidate_idx in merged_into:
-                continue
-
-            candidate_emb = embeddings[candidate_idx]
-            if not candidate_emb:
-                continue
-
-            sim = _cosine_similarity(base_emb, candidate_emb)
-            if sim < _SIM_WITHIN_RUN:
+        candidate_indices = [
+            candidate_idx for candidate_idx in indices[position + 1 :]
+            if candidate_idx not in merged_into and embeddings[candidate_idx]
+        ]
+        for candidate_idx in candidate_indices:
+            similarity = _cosine_similarity(base_emb, embeddings[candidate_idx])
+            if similarity < _SIM_WITHIN_RUN:
                 continue
 
             merged_into[candidate_idx] = base_idx
             _append_unique_sources(moods[base_idx], moods[candidate_idx])
             logger.debug(
                 "Within-run merge: '%s' + '%s' (sim=%.3f)",
-                moods[base_idx]["name"], moods[candidate_idx]["name"], sim,
+                moods[base_idx]["name"], moods[candidate_idx]["name"], similarity,
             )
 
 

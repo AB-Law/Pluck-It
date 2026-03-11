@@ -6,9 +6,9 @@ import { VaultInsightsResponse } from '../models/vault-insights.model';
 
 @Injectable({ providedIn: 'root' })
 export class VaultInsightsService {
-  private base = environment.chatApiUrl;
+  private readonly base = environment.chatApiUrl;
 
-  constructor(private http: HttpClient) {}
+  constructor(private readonly http: HttpClient) {}
 
   getInsights(windowDays = 90, targetCpw = 100): Observable<VaultInsightsResponse> {
     const params = new HttpParams()

@@ -55,7 +55,7 @@ export class WearHistoryCalendarComponent {
   events = input<WearHistoryRecord[]>([]);
   summary = input<WearHistorySummary | null>(null);
 
-  private monthOffset = signal(0);
+  private readonly monthOffset = signal(0);
 
   readonly monthStart = computed(() => {
     const now = new Date();
@@ -91,8 +91,10 @@ export class WearHistoryCalendarComponent {
       cells.push({ date: d, key, inMonth: true, wearCount: this.dayCountMap().get(key) ?? 0 });
     }
     while (cells.length % 7 !== 0) {
-      const last = cells[cells.length - 1].date;
-      const d = new Date(Date.UTC(last.getUTCFullYear(), last.getUTCMonth(), last.getUTCDate() + 1));
+      const last = cells.at(-1);
+      if (!last) break;
+      const { date: lastDate } = last;
+      const d = new Date(Date.UTC(lastDate.getUTCFullYear(), lastDate.getUTCMonth(), lastDate.getUTCDate() + 1));
       cells.push({ date: d, key: this.toKey(d), inMonth: false, wearCount: 0 });
     }
     return cells;

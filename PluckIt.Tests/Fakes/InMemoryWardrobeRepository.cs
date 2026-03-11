@@ -35,60 +35,117 @@ public sealed class InMemoryWardrobeRepository : IWardrobeRepository
         WardrobeQuery query,
         CancellationToken cancellationToken = default)
     {
-        var q = _store.Where(i => i.UserId == userId);
+        var filtered = ApplyFilters(_store, userId, query);
+        var sorted = ApplySort(filtered, query.SortField, query.SortDir);
+        var (page, nextToken) = ApplyPaging(sorted, query.PageSize, query.ContinuationToken);
+        return Task.FromResult(new WardrobePagedResult(page, nextToken));
+    }
 
-        // ── Filters ──────────────────────────────────────────────────────────
+    private static IEnumerable<ClothingItem> ApplyFilters(IEnumerable<ClothingItem> source, string userId, WardrobeQuery query)
+    {
+        var q = source.Where(i => string.Equals(i.UserId, userId, StringComparison.OrdinalIgnoreCase));
+        q = ApplyStringFilter(q, query.Category, i => i.Category);
+        q = ApplyStringFilter(q, query.Brand, i => i.Brand);
+        q = query.Condition.HasValue ? q.Where(i => i.Condition == query.Condition.Value) : q;
+        q = ApplyCollectionContainsFilter(q, query.Tags, i => i.Tags);
+        q = ApplyAestheticTagFilter(q, query.AestheticTags);
+        q = ApplyPriceFilter(q, query.PriceMin, (i, min) => i.Price is not null && i.Price.Amount >= min);
+        q = ApplyPriceFilter(q, query.PriceMax, (i, max) => i.Price is not null && i.Price.Amount <= max);
+        q = ApplyRangeFilter(q, query.MinWears, (i, min) => i.WearCount >= min);
+        q = ApplyRangeFilter(q, query.MaxWears, (i, max) => i.WearCount <= max);
+        return q;
+    }
 
-        if (!string.IsNullOrEmpty(query.Category))
-            q = q.Where(i => string.Equals(i.Category, query.Category, StringComparison.OrdinalIgnoreCase));
+    private static IEnumerable<ClothingItem> ApplyStringFilter(
+        IEnumerable<ClothingItem> source,
+        string? filter,
+        Func<ClothingItem, string?> selector)
+    {
+        if (string.IsNullOrEmpty(filter))
+            return source;
 
-        if (!string.IsNullOrEmpty(query.Brand))
-            q = q.Where(i => string.Equals(i.Brand, query.Brand, StringComparison.OrdinalIgnoreCase));
+        return source.Where(i => string.Equals(selector(i), filter, StringComparison.OrdinalIgnoreCase));
+    }
 
-        if (query.Condition.HasValue)
-            q = q.Where(i => i.Condition == query.Condition.Value);
+    private static IEnumerable<ClothingItem> ApplyCollectionContainsFilter(
+        IEnumerable<ClothingItem> source,
+        IReadOnlyCollection<string>? filter,
+        Func<ClothingItem, IReadOnlyCollection<string>?> selector)
+    {
+        if (filter is null || filter.Count == 0)
+            return source;
 
-        if (query.Tags is { Count: > 0 })
-            q = q.Where(i => i.Tags.Any(t => query.Tags.Contains(t, StringComparer.OrdinalIgnoreCase)));
+        return source.Where(i => (selector(i) ?? Array.Empty<string>()).Any(t => filter.Contains(t, StringComparer.OrdinalIgnoreCase)));
+    }
 
-        if (query.AestheticTags is { Count: > 0 })
-            q = q.Where(i => i.AestheticTags != null &&
-                              i.AestheticTags.Any(t => query.AestheticTags.Contains(t, StringComparer.OrdinalIgnoreCase)));
+    private static IEnumerable<ClothingItem> ApplyAestheticTagFilter(
+        IEnumerable<ClothingItem> source,
+        IReadOnlyCollection<string>? filter)
+    {
+        if (filter is null || filter.Count == 0)
+            return source;
 
-        if (query.PriceMin.HasValue)
-            q = q.Where(i => i.Price != null && i.Price.Amount >= query.PriceMin.Value);
+        return source.Where(i =>
+            i.AestheticTags is not null &&
+            i.AestheticTags.Any(t => filter.Contains(t, StringComparer.OrdinalIgnoreCase)));
+    }
 
-        if (query.PriceMax.HasValue)
-            q = q.Where(i => i.Price != null && i.Price.Amount <= query.PriceMax.Value);
+    private static IEnumerable<ClothingItem> ApplyPriceFilter(
+        IEnumerable<ClothingItem> source,
+        decimal? filter,
+        Func<ClothingItem, decimal, bool> match)
+    {
+        if (filter is null)
+            return source;
 
-        if (query.MinWears.HasValue)
-            q = q.Where(i => i.WearCount >= query.MinWears.Value);
+        return source.Where(i => match(i, filter.Value));
+    }
 
-        if (query.MaxWears.HasValue)
-            q = q.Where(i => i.WearCount <= query.MaxWears.Value);
+    private static IEnumerable<ClothingItem> ApplyRangeFilter(
+        IEnumerable<ClothingItem> source,
+        int? filter,
+        Func<ClothingItem, int, bool> match)
+    {
+        if (filter is null)
+            return source;
 
-        // ── Sort ──────────────────────────────────────────────────────────────
+        return source.Where(i => match(i, filter.Value));
+    }
 
-        bool asc = string.Equals(query.SortDir, "asc", StringComparison.OrdinalIgnoreCase);
-        q = query.SortField switch
+    private static IEnumerable<ClothingItem> ApplySort(
+        IEnumerable<ClothingItem> source,
+        string? sortField,
+        string? sortDir)
+    {
+        var asc = string.Equals(sortDir, "asc", StringComparison.OrdinalIgnoreCase);
+        return sortField switch
         {
-            WardrobeSortField.WearCount   => asc ? q.OrderBy(i => i.WearCount)       : q.OrderByDescending(i => i.WearCount),
-            WardrobeSortField.PriceAmount => asc ? q.OrderBy(i => i.Price?.Amount)   : q.OrderByDescending(i => i.Price?.Amount),
-            _                             => asc ? q.OrderBy(i => i.DateAdded ?? DateTimeOffset.MinValue)
-                                                 : q.OrderByDescending(i => i.DateAdded ?? DateTimeOffset.MinValue),
+            WardrobeSortField.WearCount => asc
+                ? source.OrderBy(i => i.WearCount)
+                : source.OrderByDescending(i => i.WearCount),
+            WardrobeSortField.PriceAmount => asc
+                ? source.OrderBy(i => i.Price?.Amount)
+                : source.OrderByDescending(i => i.Price?.Amount),
+            _ => asc
+                ? source.OrderBy(i => i.DateAdded ?? DateTimeOffset.MinValue)
+                : source.OrderByDescending(i => i.DateAdded ?? DateTimeOffset.MinValue),
         };
+    }
 
-        // ── Continuation-token paging (opaque base64-encoded skip count) ──────
-
-        var pageSize = Math.Clamp(query.PageSize, 1, 100);
-        var skip     = DecodeToken(query.ContinuationToken);
-        var page     = q.Skip(skip).Take(pageSize).ToList();
+    private static (List<ClothingItem> page, string? nextToken) ApplyPaging(
+        IEnumerable<ClothingItem> source,
+        int pageSize,
+        string? continuationToken)
+    {
+        var effectivePageSize = Math.Clamp(pageSize, 1, 100);
+        var skip = DecodeToken(continuationToken);
+        var page = source.Skip(skip).Take(effectivePageSize).ToList();
         var nextSkip = skip + page.Count;
-        var nextToken = page.Count == pageSize && nextSkip < q.Count()
+        var nextToken = page.Count == effectivePageSize && nextSkip < source.Count()
             ? EncodeToken(nextSkip)
             : null;
 
-        return Task.FromResult(new WardrobePagedResult(page, nextToken));
+        return (page, nextToken);
     }
 
     public Task<ClothingItem?> GetByIdAsync(
@@ -155,7 +212,7 @@ public sealed class InMemoryWardrobeRepository : IWardrobeRepository
     // ── Draft operations (stubs — sufficient for unit tests) ─────────────────
 
     public Task<WardrobeDraftsResult> GetDraftsAsync(
-        string userId, int pageSize, string? continuationToken, CancellationToken cancellationToken = default)
+        string userId, int pageSize = 50, string? continuationToken = null, CancellationToken cancellationToken = default)
     {
         var drafts = _store
             .Where(i => string.Equals(i.UserId, userId, StringComparison.OrdinalIgnoreCase)
@@ -166,7 +223,7 @@ public sealed class InMemoryWardrobeRepository : IWardrobeRepository
 
     public Task<bool> SetDraftTerminalAsync(
         string itemId, string userId, DraftStatus terminalStatus, string? processedBlobUrl,
-        ClothingMetadata? metadata, string? errorMessage, DateTimeOffset now,
+        ClothingMetadata? metadata, string? errorMessage,
         CancellationToken cancellationToken = default)
     {
         _ = metadata; // not applied in the in-memory stub
@@ -177,7 +234,7 @@ public sealed class InMemoryWardrobeRepository : IWardrobeRepository
         if (item is null) return Task.FromResult(false);
         item.DraftStatus    = terminalStatus;
         item.DraftError     = errorMessage;
-        item.DraftUpdatedAt = now;
+        item.DraftUpdatedAt = DateTimeOffset.UtcNow;
         if (processedBlobUrl is not null) item.ImageUrl = processedBlobUrl;
         return Task.FromResult(true);
     }
@@ -200,7 +257,7 @@ public sealed class InMemoryWardrobeRepository : IWardrobeRepository
     }
 
     public Task<IReadOnlyList<ClothingItem>> GetByDraftStatusAsync(
-        DraftStatus status, DateTimeOffset olderThan, int maxItems, CancellationToken cancellationToken = default)
+        DraftStatus status, DateTimeOffset olderThan, int maxItems = 200, CancellationToken cancellationToken = default)
     {
         IReadOnlyList<ClothingItem> result = _store
             .Where(i => i.DraftStatus == status

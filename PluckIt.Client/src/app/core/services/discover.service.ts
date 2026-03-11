@@ -11,9 +11,9 @@ import {
 
 @Injectable({ providedIn: 'root' })
 export class DiscoverService {
-  private base = `${environment.chatApiUrl}/api`;
+  private readonly base = `${environment.chatApiUrl}/api`;
 
-  constructor(private http: HttpClient) { }
+  constructor(private readonly http: HttpClient) { }
 
   getFeed(query: DiscoverFeedQuery = {}): Observable<DiscoverFeedResponse> {
     let params = new HttpParams();
@@ -45,9 +45,13 @@ export class DiscoverService {
   }
 
   sendFeedback(itemId: string, signal: 'up' | 'down', galleryImageIndex?: number): Observable<{ scoreSignal: number }> {
+    const payload: { signal: 'up' | 'down'; galleryImageIndex?: number } = { signal };
+    if (galleryImageIndex !== null && galleryImageIndex !== undefined) {
+      payload.galleryImageIndex = galleryImageIndex;
+    }
     return this.http.post<{ scoreSignal: number }>(
       `${this.base}/scraper/items/${itemId}/feedback`,
-      galleryImageIndex != null ? { signal, galleryImageIndex } : { signal },
+      payload,
     );
   }
 

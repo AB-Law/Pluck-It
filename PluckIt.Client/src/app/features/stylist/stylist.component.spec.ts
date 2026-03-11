@@ -58,4 +58,45 @@ describe('StylistPanelComponent', () => {
     expect(component.thinking()).toBeFalsy();
     expect(component.messages().some(m => m.text.includes('trouble'))).toBeTruthy();
   });
+
+  it('should not send empty messages', () => {
+    component.inputText = '   ';
+    component.sendMessage();
+    expect(chatService.streamMessage).not.toHaveBeenCalled();
+  });
+
+  it('should render streaming content and tool status events', () => {
+    chatService.streamMessage.mockReturnValueOnce(
+      of(
+        { type: 'tool_use', name: 'search_wardrobe' },
+        { type: 'token', content: 'Hi there' },
+        { type: 'done' },
+      ),
+    );
+    component.inputText = 'What should I wear?';
+    component.sendMessage();
+
+    expect(chatService.streamMessage).toHaveBeenCalledWith(
+      'What should I wear?',
+      [],
+      undefined,
+    );
+    expect(component.currentTool()).toBeNull();
+    expect(component.messages().some(m => m.text.includes('Hi there'))).toBeTruthy();
+  });
+
+  it('should show saving state and clear it after memory save', () => {
+    component.memoryDraft = 'new memory';
+    expect(component.savingMemory()).toBe(false);
+    component.saveMemory();
+    expect(component.savingMemory()).toBe(false);
+    expect(chatService.updateMemory).toHaveBeenCalledWith('new memory');
+  });
+
+  it('should handle memory save failures', () => {
+    chatService.updateMemory.mockReturnValueOnce(throwError(() => new Error('bad')));
+    component.memoryDraft = 'another memory';
+    component.saveMemory();
+    expect(component.savingMemory()).toBe(false);
+  });
 });

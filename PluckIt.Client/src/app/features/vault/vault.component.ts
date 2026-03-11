@@ -260,11 +260,11 @@ export class VaultComponent implements OnInit {
   });
 
   constructor(
-    private wardrobeService: WardrobeService,
-    private vaultInsightsService: VaultInsightsService,
-    private profileService: UserProfileService,
-    private router: Router,
-    private route: ActivatedRoute,
+    private readonly wardrobeService: WardrobeService,
+    private readonly vaultInsightsService: VaultInsightsService,
+    private readonly profileService: UserProfileService,
+    private readonly router: Router,
+    private readonly route: ActivatedRoute,
   ) { }
 
   ngOnInit(): void {
@@ -333,6 +333,8 @@ export class VaultComponent implements OnInit {
   readonly cpwIntelMap = computed(() =>
     new Map((this.insights()?.cpwIntel ?? []).map(row => [row.itemId, row])));
 
+  private clientEventCounter = 0;
+
   // ── Actions ───────────────────────────────────────────────────────────────
 
   onFiltersChange(f: VaultFilters): void {
@@ -365,9 +367,7 @@ export class VaultComponent implements OnInit {
     this.allItems.update(list => list.map(i => i.id === item.id ? optimistic : i));
     if (this.selectedItem()?.id === item.id) this.selectedItem.set(optimistic);
 
-    const rand = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Array.from(crypto.getRandomValues(new Uint32Array(1)))[0].toString(16)}`;
+    const rand = this.nextClientEventId('wear');
     this.wardrobeService.logWear(item.id, {
       source: 'vault_card',
       clientEventId: `wear-${rand}`,
@@ -396,9 +396,7 @@ export class VaultComponent implements OnInit {
   }
 
   acceptSuggestion(s: WearSuggestionItem): void {
-    const rand = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const rand = this.nextClientEventId('wear');
     this.wardrobeService.logWear(s.itemId, {
       source: 'suggestion_prompt',
       clientEventId: `wear-${rand}`,
@@ -420,6 +418,18 @@ export class VaultComponent implements OnInit {
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
+
+  private nextClientEventId(prefix: string): string {
+    this.clientEventCounter += 1;
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return `${prefix}-${crypto.randomUUID()}-${this.clientEventCounter}`;
+    }
+    if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+      const random = Array.from(crypto.getRandomValues(new Uint32Array(1)))[0].toString(16);
+      return `${prefix}-${Date.now()}-${this.clientEventCounter}-${random}`;
+    }
+    return `${prefix}-${Date.now()}-${this.clientEventCounter}`;
+  }
 
   cpwBadgeFor(itemId: string): CpwIntelItem['badge'] {
     return this.cpwIntelMap().get(itemId)?.badge ?? 'unknown';
@@ -469,7 +479,7 @@ export class VaultComponent implements OnInit {
     const [priceMin, priceMax] = filters.priceRange;
     return {
       brand: filters.brand || undefined,
-      condition: filters.condition ? (filters.condition as ItemCondition) : undefined,
+      condition: filters.condition ? filters.condition : undefined,
       priceMin: priceMin > 0 ? priceMin : undefined,
       priceMax: priceMax < 999_999 ? priceMax : undefined,
       minWears: filters.minWears > 0 ? filters.minWears : undefined,
@@ -484,14 +494,14 @@ export class VaultComponent implements OnInit {
     const [priceMin, priceMax] = f.priceRange;
     this.router.navigate([], {
       queryParams: {
-        group: f.group !== 'all' ? f.group : null,
+        group: f.group === 'all' ? null : f.group,
         priceMin: priceMin > 0 ? priceMin : null,
         priceMax: priceMax < 999_999 ? priceMax : null,
         minWears: f.minWears > 0 ? f.minWears : null,
         brand: f.brand ? f.brand : null,
         condition: f.condition ? f.condition : null,
-        sortField: f.sortField !== 'dateAdded' ? f.sortField : null,
-        sortDir: f.sortDir !== 'desc' ? f.sortDir : null,
+        sortField: f.sortField === 'dateAdded' ? null : f.sortField,
+        sortDir: f.sortDir === 'desc' ? null : f.sortDir,
       },
       replaceUrl: true,
     });

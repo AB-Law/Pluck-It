@@ -174,8 +174,8 @@ export class ItemDetailDrawerComponent {
   protected wearHistoryEvents = signal<WearHistoryRecord[]>([]);
   protected wearHistorySummary = signal<WearHistorySummary | null>(null);
 
-  private wardrobeService = inject(WardrobeService);
-  private profileService = inject(UserProfileService);
+  private readonly wardrobeService = inject(WardrobeService);
+  private readonly profileService = inject(UserProfileService);
 
   constructor() {
     effect((onCleanup) => {
@@ -210,15 +210,20 @@ export class ItemDetailDrawerComponent {
     if (!itm) return '—';
     const price = itm.price?.amount;
     const wears = itm.wearCount;
-    if (!price || wears === 0) return 'N/A';
-    return this.fmt(price / wears, itm.price?.originalCurrency ?? this.currency);
+    if (price && wears > 0) {
+      return this.fmt(price / wears, itm.price?.originalCurrency ?? this.currency);
+    }
+    return 'N/A';
   });
 
   readonly valueDisplay = computed(() => {
     const itm = this.item();
     if (!itm) return '—';
     const val = itm.estimatedMarketValue ?? itm.price?.amount;
-    return val != null ? this.fmt(val, itm.price?.originalCurrency ?? this.currency) : '—';
+    if (val === null || val === undefined) {
+      return '—';
+    }
+    return this.fmt(val, itm.price?.originalCurrency ?? this.currency);
   });
 
   careIcon(key: string): string { return CARE_ICON_MAP[key]?.icon ?? 'info'; }

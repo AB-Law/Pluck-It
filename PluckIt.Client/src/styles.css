@@ -4,7 +4,7 @@
 
 /* @source paths are relative to THIS file (src/styles.css), so ./app/ → src/app/ */
 
-@theme {
+:root {
   --color-primary: #258df4;
   --color-background-dark: #000000;
   --color-card-dark: #1A1A1A;

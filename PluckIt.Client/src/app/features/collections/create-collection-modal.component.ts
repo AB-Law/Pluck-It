@@ -111,7 +111,7 @@ export class CreateCollectionModalComponent {
   protected saving = signal(false);
   protected error  = signal<string | null>(null);
 
-  private collectionService = inject(CollectionService);
+  private readonly collectionService = inject(CollectionService);
 
   save(): void {
     if (this.saving() || !this.name.trim()) return;

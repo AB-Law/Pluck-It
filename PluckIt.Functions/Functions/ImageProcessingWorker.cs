@@ -69,7 +69,7 @@ public class ImageProcessingWorker(
                 await repo.SetDraftTerminalAsync(
                     message.ItemId, message.UserId, DraftStatus.Failed,
                     null, null, "Cosmos read error during idempotency check.",
-                    DateTimeOffset.UtcNow, CancellationToken.None);
+                    CancellationToken.None);
             }
             catch (Exception writeEx)
             {
@@ -110,7 +110,7 @@ public class ImageProcessingWorker(
                 await repo.SetDraftTerminalAsync(
                     message.ItemId, message.UserId, DraftStatus.Failed,
                     null, null, "Raw image download failed.",
-                    DateTimeOffset.UtcNow, CancellationToken.None);
+                    CancellationToken.None);
             }
             catch (Exception writeEx)
             {
@@ -144,7 +144,7 @@ public class ImageProcessingWorker(
             {
                 await repo.SetDraftTerminalAsync(
                     message.ItemId, message.UserId, DraftStatus.Failed, null, null,
-                    "Internal pipeline error.", DateTimeOffset.UtcNow, CancellationToken.None);
+                    "Internal pipeline error.", CancellationToken.None);
             }
             catch (Exception writeEx)
             {
@@ -191,7 +191,7 @@ public class ImageProcessingWorker(
             logger.LogError(ex,
                 "ProcessImageJob: processor unreachable for item {ItemId}.", itemId);
             await repo.SetDraftTerminalAsync(itemId, userId, DraftStatus.Failed, null, null,
-                "Image processor is unavailable.", DateTimeOffset.UtcNow, CancellationToken.None);
+                "Image processor is unavailable.", CancellationToken.None);
             return;
         }
 
@@ -203,7 +203,7 @@ public class ImageProcessingWorker(
                 (int)processorResponse.StatusCode, itemId, body);
             await repo.SetDraftTerminalAsync(itemId, userId, DraftStatus.Failed, null, null,
                 $"Processor returned {(int)processorResponse.StatusCode}.",
-                DateTimeOffset.UtcNow, CancellationToken.None);
+                CancellationToken.None);
             return;
         }
 
@@ -219,7 +219,7 @@ public class ImageProcessingWorker(
                 "ProcessImageJob: failed to deserialize processor response for item {ItemId}.", itemId);
             await repo.SetDraftTerminalAsync(itemId, userId, DraftStatus.Failed, null, null,
                 "Processor response was not valid JSON.",
-                DateTimeOffset.UtcNow, CancellationToken.None);
+                CancellationToken.None);
             return;
         }
 
@@ -227,7 +227,7 @@ public class ImageProcessingWorker(
         {
             await repo.SetDraftTerminalAsync(itemId, userId, DraftStatus.Failed, null, null,
                 "Processor returned an unexpected response.",
-                DateTimeOffset.UtcNow, CancellationToken.None);
+                CancellationToken.None);
             return;
         }
 
@@ -256,7 +256,7 @@ public class ImageProcessingWorker(
         await repo.SetDraftTerminalAsync(
             itemId, userId, DraftStatus.Ready,
             processed.ImageUrl, metadata, null,
-            DateTimeOffset.UtcNow, CancellationToken.None);
+            CancellationToken.None);
 
         logger.LogInformation(
             "ProcessImageJob: item {ItemId} finalized as Ready with {MediaType}.",

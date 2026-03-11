@@ -150,15 +150,15 @@ export class DigestPanelComponent implements OnInit {
   readonly rationaleOpen = signal<boolean[]>([]);
   readonly feedbackSent  = signal<(string | null)[]>([]);
 
-  constructor(private digestService: DigestService) {}
+  constructor(private readonly digestService: DigestService) {}
 
   ngOnInit(): void {
     this.digestService.getLatest().subscribe({
       next: res => {
         this.digest.set(res.digest);
         const len = res.digest?.suggestions.length ?? 0;
-        this.rationaleOpen.set(Array(len).fill(false));
-        const blank: (string | null)[] = Array(len).fill(null);
+        this.rationaleOpen.set(new Array(len).fill(false));
+        const blank: (string | null)[] = new Array(len).fill(null);
         this.feedbackSent.set(blank);
         this.loading.set(false);
 

@@ -270,9 +270,9 @@ public class WardrobeRepository : IWardrobeRepository
     string? processedBlobUrl,
     ClothingMetadata? metadata,
     string? errorMessage,
-    DateTimeOffset now,
     CancellationToken cancellationToken = default)
   {
+    var now = DateTimeOffset.UtcNow;
     var ops = new List<PatchOperation>
     {
       PatchOperation.Set("/draftStatus", terminalStatus.ToString()),

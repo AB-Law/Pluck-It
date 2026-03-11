@@ -183,14 +183,16 @@ export class TasteQuizComponent implements OnInit {
 
   readonly progressPct = computed(() => {
     const s = this.session();
-    const count = Array.isArray(s?.items) ? s!.items.length : 0;
+    const items = s?.items;
+    const count = Array.isArray(items) ? items.length : 0;
     if (!count) return 0;
     return Math.round((this.currentIndex() / count) * 100);
   });
 
   readonly itemCount = computed(() => {
     const s = this.session();
-    return Array.isArray(s?.items) ? s!.items.length : 0;
+    const items = s?.items;
+    return Array.isArray(items) ? items.length : 0;
   });
 
   readonly cardAnimClass = computed(() => {
@@ -207,7 +209,7 @@ export class TasteQuizComponent implements OnInit {
     return `translateY(${y}px) rotate(${rot}deg)`;
   });
 
-  constructor(private quizService: TasteQuizService) {}
+  constructor(private readonly quizService: TasteQuizService) {}
 
   ngOnInit() {
     this.quizService.getOrCreateSession().subscribe({

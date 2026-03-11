@@ -19,9 +19,9 @@ export interface OutfitRecommendation {
 
 @Injectable({ providedIn: 'root' })
 export class StylistService {
-  private base = environment.apiUrl;
+  private readonly base = environment.apiUrl;
 
-  constructor(private http: HttpClient) {}
+  constructor(private readonly http: HttpClient) {}
 
   getRecommendations(request: StylistRequest): Observable<OutfitRecommendation[]> {
     return this.http.post<OutfitRecommendation[]>(

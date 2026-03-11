@@ -238,7 +238,7 @@ export class VaultSidebarComponent implements OnInit {
     if (init.priceRange) this.priceRange.set(init.priceRange);
     if (init.minWears)   this.minWears.set(init.minWears);
     if (init.brand)      this.brandFilter.set(init.brand);
-    if (init.condition)  this.activeCondition.set(init.condition as ItemCondition);
+    if (init.condition) this.activeCondition.set(init.condition);
     if (init.sortField)  this.sortField.set(init.sortField);
     if (init.sortDir)    this.sortDir.set(init.sortDir);
   }

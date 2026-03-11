@@ -712,7 +712,7 @@ public class WardrobeFunctions(
             await repo.SetDraftTerminalAsync(
                 item.Id, item.UserId, DraftStatus.Failed,
                 null, null, "Timed out during processing.",
-                now, CancellationToken.None);
+                CancellationToken.None);
         }
 
         // Pass 2: Failed drafts older than 7 days → delete doc + blobs

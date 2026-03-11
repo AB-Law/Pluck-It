@@ -12,6 +12,7 @@ This mirrors the behaviour of GoogleTokenValidator.cs in the .NET API.
 
 import os
 import logging
+import asyncio
 from typing import Optional
 
 from fastapi import Request, HTTPException, status
@@ -66,4 +67,4 @@ async def get_user_id(request: Request) -> str:
         )
 
     token = auth_header.removeprefix("Bearer ").strip()
-    return _verify_google_token(token)
+    return await asyncio.to_thread(_verify_google_token, token)

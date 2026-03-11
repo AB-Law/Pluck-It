@@ -1,5 +1,5 @@
 export interface BuyLink {
-  platform: 'taobao' | 'yupoo' | 'weidian' | 'weidan' | '1688' | string;
+  platform: 'taobao' | 'yupoo' | 'weidian' | 'weidan' | '1688';
   url: string;
   label?: string | null;
 }
@@ -7,7 +7,7 @@ export interface BuyLink {
 export interface ScrapedItem {
   id: string;
   sourceId: string;
-  sourceType: 'reddit' | 'brand' | string;
+  sourceType: 'reddit' | 'brand';
   title: string;
   description: string;
   imageUrl: string;
