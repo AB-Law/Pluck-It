@@ -34,14 +34,35 @@ Endpoints:
 
 import asyncio
 import base64
+import hashlib
 import io
 import json
 import logging
 import os
+import random
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from importlib import import_module
 from typing import Any, Optional, Annotated
+
+
+def _get_int_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        logger = logging.getLogger(__name__)
+        logger.warning("Invalid value for %s, using default %s", name, default)
+        return default
+
+
+def _get_float_env(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        logger = logging.getLogger(__name__)
+        logger.warning("Invalid value for %s, using default %s", name, default)
+        return default
 
 # Point rembg at the bundled model directory so it never downloads at runtime.
 os.environ.setdefault(
@@ -79,6 +100,28 @@ _ERR_NO_IMAGE_PROVIDED = "No image provided."
 _ERR_MOOD_NOT_FOUND = "Mood not found."
 
 background_tasks = set()
+
+_TASTE_JOB_QUEUE: asyncio.Queue[dict[str, Any]] | None = None
+# In-memory dedupe guards are process-local only (lost on cold start/restart).
+# Duplicates may still happen across instances/restarts, so this mechanism
+# assumes downstream side-effect handlers (for example, _update_user_profile)
+# are idempotent or upsert-safe. If stronger guarantees are needed, replace
+# _TASTE_JOB_IN_FLIGHT/_TASTE_JOB_COMPLETED with a persistent dedupe store
+# such as Redis or Cosmos DB.
+_TASTE_JOB_IN_FLIGHT: dict[str, float] = {}
+_TASTE_JOB_COMPLETED: dict[str, float] = {}
+_TASTE_JOB_PERSISTED: list[dict[str, Any]] = []
+_TASTE_WORKER_TASK: asyncio.Task[Any] | None = None
+
+_TASTE_JOB_DEDUPE_TTL_SECONDS = _get_int_env("TASTE_JOB_DEDUPE_TTL_SECONDS", 180)
+_TASTE_JOB_COMPLETED_TTL_SECONDS = _get_int_env("TASTE_JOB_COMPLETED_TTL_SECONDS", 3600)
+_TASTE_JOB_MAX_RETRIES = 3
+_TASTE_JOB_BASE_BACKOFF_SECONDS = _get_float_env("TASTE_JOB_BASE_BACKOFF_SECONDS", 0.75)
+_TASTE_JOB_MAX_BACKOFF_SECONDS = _get_float_env("TASTE_JOB_MAX_BACKOFF_SECONDS", 6.0)
+_TASTE_JOB_JITTER_SECONDS = _get_float_env("TASTE_JOB_JITTER_SECONDS", 0.2)
+_TASTE_JOB_PROFILE_UPDATE_MAX_RETRIES = 2
+
+_TASTE_JOB_QUEUE_MAX_SIZE = _get_int_env("TASTE_JOB_QUEUE_MAX_SIZE", 1024)
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +167,7 @@ async def _global_exception_handler(request: Request, exc: Exception) -> JSONRes
 async def _startup_log() -> None:
     env = os.getenv("AZURE_FUNCTIONS_ENVIRONMENT", "Production")
     logger.info("PluckIt Processor started — environment=%s", env)
+    _ensure_taste_worker_running()
 
 
 # ── Azure Functions ASGI app (handles HTTP via FastAPI + non-HTTP triggers) ──
@@ -132,6 +176,221 @@ app = func.AsgiFunctionApp(app=fastapi_app, http_auth_level=func.AuthLevel.ANONY
 
 
 # ── Helper utilities ─────────────────────────────────────────────────────────
+
+def _get_taste_job_queue() -> asyncio.Queue[dict[str, Any]]:
+    global _TASTE_JOB_QUEUE
+    if _TASTE_JOB_QUEUE is None:
+        _TASTE_JOB_QUEUE = asyncio.Queue(maxsize=_TASTE_JOB_QUEUE_MAX_SIZE)
+    return _TASTE_JOB_QUEUE
+
+
+def _taste_job_id(user_id: str, item_id: str, image_url: str, gallery_image_index: int | None) -> str:
+    return hashlib.sha256(
+        f"{user_id}:{item_id}:{image_url}:{gallery_image_index if gallery_image_index is not None else '-'}".encode("utf-8")
+    ).hexdigest()
+
+
+def _purge_taste_job_guards(now: float) -> None:
+    for key, exp in _TASTE_JOB_IN_FLIGHT.copy().items():
+        if exp <= now:
+            _TASTE_JOB_IN_FLIGHT.pop(key, None)
+    for key, exp in _TASTE_JOB_COMPLETED.copy().items():
+        if exp <= now:
+            _TASTE_JOB_COMPLETED.pop(key, None)
+
+
+def _is_taste_job_duplicate(job_id: str, now: float) -> bool:
+    _purge_taste_job_guards(now)
+    if _TASTE_JOB_IN_FLIGHT.get(job_id, 0.0) > now:
+        return True
+    if _TASTE_JOB_COMPLETED.get(job_id, 0.0) > now:
+        return True
+    _TASTE_JOB_IN_FLIGHT[job_id] = now + _TASTE_JOB_DEDUPE_TTL_SECONDS
+    return False
+
+
+def _mark_taste_job_completed(job_id: str, now: float) -> None:
+    _TASTE_JOB_IN_FLIGHT.pop(job_id, None)
+    _TASTE_JOB_COMPLETED[job_id] = now + _TASTE_JOB_COMPLETED_TTL_SECONDS
+
+
+def _persist_taste_job(job: dict[str, Any]) -> None:
+    # Hook for durable persistence (eg: Cosmos/Redis queue table) when shutdown
+    # or cancellation occurs before a job can be processed.
+    _TASTE_JOB_PERSISTED.append(job)
+    # Current implementation keeps jobs in-memory for in-process recovery.
+    # Replace with durable storage for guaranteed cross-process replay.
+    logger.warning(
+        "Persisting pending taste-profile job for recovery: %s (item %s, user %s)",
+        job.get("job_id"),
+        job.get("item_id"),
+        job.get("user_id"),
+    )
+
+
+def _drain_taste_job_queue_for_shutdown(queue: asyncio.Queue[dict[str, Any]]) -> None:
+    while True:
+        try:
+            job = queue.get_nowait()
+        except asyncio.QueueEmpty:
+            break
+        try:
+            _persist_taste_job(job)
+        finally:
+            queue.task_done()
+
+
+def _ensure_taste_worker_running() -> None:
+    global _TASTE_WORKER_TASK
+    if _TASTE_WORKER_TASK is not None and not _TASTE_WORKER_TASK.done():
+        return
+
+    _TASTE_WORKER_TASK = asyncio.create_task(_taste_job_worker())
+    background_tasks.add(_TASTE_WORKER_TASK)
+    _TASTE_WORKER_TASK.add_done_callback(background_tasks.discard)
+
+
+def _maybe_enqueue_taste_job(
+    user_id: str,
+    item_id: str,
+    image_url: str,
+    gallery_image_index: int | None,
+    signal: str,
+) -> bool:
+    if signal != "up":
+        return False
+    if not image_url:
+        return False
+
+    job_id = _taste_job_id(user_id, item_id, image_url, gallery_image_index)
+    now = time.monotonic()
+    if _is_taste_job_duplicate(job_id, now):
+        logger.debug("Skipping duplicate taste job %s for user %s item %s", job_id, user_id, item_id)
+        return False
+
+    _ensure_taste_worker_running()
+    try:
+        _get_taste_job_queue().put_nowait(
+            {
+                "job_id": job_id,
+                "user_id": user_id,
+                "item_id": item_id,
+                "image_url": image_url,
+                "gallery_image_index": gallery_image_index,
+            }
+        )
+    except asyncio.QueueFull:
+        _TASTE_JOB_IN_FLIGHT.pop(job_id, None)
+        logger.warning(
+            "Taste-profile job queue full, dropping queue request for job %s (item %s, user %s)",
+            job_id,
+            item_id,
+            user_id,
+        )
+        raise
+    logger.info("Queued taste-profile job %s for item %s (user %s)", job_id, item_id, user_id)
+    return True
+
+
+async def _run_in_executor_with_retry(
+    operation,
+    *,
+    operation_name: str,
+    max_attempts: int,
+    base_delay_seconds: float,
+) -> Any:
+    last_exception: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return await asyncio.get_running_loop().run_in_executor(None, operation)
+        except Exception as exc:  # noqa: BLE001
+            last_exception = exc
+            if attempt >= max_attempts:
+                break
+            delay = min(_TASTE_JOB_MAX_BACKOFF_SECONDS, base_delay_seconds * (2 ** (attempt - 1)))
+            delay += random.uniform(0.0, _TASTE_JOB_JITTER_SECONDS)
+            logger.warning(
+                "Retryable failure in %s (%d/%d): %s. Retrying in %.2fs",
+                operation_name,
+                attempt,
+                max_attempts,
+                exc,
+                delay,
+            )
+            await asyncio.sleep(delay)
+
+    raise RuntimeError(f"{operation_name} failed after {max_attempts} attempts: {last_exception}") from last_exception
+
+
+async def _run_taste_profile_job(job: dict[str, Any]) -> None:
+    image_url = job["image_url"]
+    item_id = job["item_id"]
+    user_id = job["user_id"]
+    job_id = job["job_id"]
+
+    from agents.image_taste_analyzer import analyze_image, build_taste_inferred
+    from agents.taste_calibration import _update_user_profile
+
+    analysis = await _run_in_executor_with_retry(
+        lambda: analyze_image(image_url),
+        operation_name=f"analyze_image:{item_id}:{job_id}",
+        max_attempts=_TASTE_JOB_MAX_RETRIES,
+        base_delay_seconds=_TASTE_JOB_BASE_BACKOFF_SECONDS,
+    )
+    inferred = build_taste_inferred(analysis)
+    if not inferred["styleKeywords"] and not inferred["brands"]:
+        logger.info("Vision analysis yielded no taste for %s (job %s)", item_id, job_id)
+        return
+
+    await _run_in_executor_with_retry(
+        lambda: _update_user_profile(user_id, inferred),
+        operation_name=f"update_user_profile:{item_id}:{job_id}",
+        max_attempts=_TASTE_JOB_PROFILE_UPDATE_MAX_RETRIES,
+        base_delay_seconds=_TASTE_JOB_BASE_BACKOFF_SECONDS * 2,
+    )
+    logger.info(
+        "Taste profile updated from vision for user %s, item %s: %s",
+        user_id,
+        item_id,
+        inferred["styleKeywords"][:4],
+    )
+
+
+async def _taste_job_worker() -> None:
+    logger.info("Starting taste-profile feedback worker.")
+    queue = _get_taste_job_queue()
+    try:
+        while True:
+            try:
+                job = await queue.get()
+            except asyncio.CancelledError:
+                logger.info("Taste-profile feedback worker cancelled; draining outstanding jobs.")
+                _drain_taste_job_queue_for_shutdown(queue)
+                raise
+
+            job_id = job.get("job_id", "")
+            try:
+                await _run_taste_profile_job(job)
+            except asyncio.CancelledError:
+                logger.warning(
+                    "Taste-profile job cancelled before completion; persisting for retry: %s",
+                    job_id,
+                )
+                _persist_taste_job(job)
+                queue.task_done()
+                _drain_taste_job_queue_for_shutdown(queue)
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Taste-profile job failed: %s", exc)
+                queue.task_done()
+            else:
+                if job_id:
+                    _mark_taste_job_completed(job_id, now=time.monotonic())
+                queue.task_done()
+    except asyncio.CancelledError:
+        logger.info("Taste-profile feedback worker stopped.")
+        raise
+
 
 def _get_env(name: str, default: Optional[str] = None) -> str:
     value = os.getenv(name, default)
@@ -1486,8 +1745,8 @@ async def feedback_scraped_item(
         item["scoreSignal"] = item.get("scoreSignal", 0) + delta
         await container.upsert_item(item)
 
-        # On like/dislike: run vision analysis on the image to extract real visual
-        # style descriptors (colors, silhouette, garments) — not just post-text tags.
+        # On like: enqueue vision analysis on the image to extract real visual
+        # style descriptors (colors, silhouette, garments) in the background.
         # When a gallery index is provided, analyse that specific image.
         gallery_images = item.get("galleryImages", [])
         if (
@@ -1499,28 +1758,19 @@ async def feedback_scraped_item(
         else:
             image_url = item.get("imageUrl", "")
         if image_url and signal == "up":
-            # Run vision analysis synchronously in a thread pool so we can await it
-            # and guarantee it completes before the connection closes.
-            # (asyncio.create_task fire-and-forget is unreliable in ASGI on Functions.)
             try:
-                from agents.image_taste_analyzer import analyze_image, build_taste_inferred
-                from agents.taste_calibration import _update_user_profile
-                logger.info("Starting vision taste analysis for item %s (url: %s)", item_id, image_url[:60])
-                analysis = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: analyze_image(image_url)
-                )
-                logger.info("Vision analysis result for %s: %s", item_id, analysis)
-                inferred = build_taste_inferred(analysis)
-                if inferred["styleKeywords"] or inferred["brands"]:
-                    await asyncio.get_event_loop().run_in_executor(
-                        None, lambda: _update_user_profile(user_id, inferred)
-                    )
-                    logger.info(
-                        "Taste updated for %s via vision: %s",
-                        user_id, inferred["styleKeywords"][:4],
-                    )
+                if _maybe_enqueue_taste_job(
+                    user_id=user_id,
+                    item_id=item_id,
+                    image_url=image_url,
+                    gallery_image_index=gallery_image_index,
+                    signal=signal,
+                ):
+                    logger.debug("Queued vision taste extraction job for %s", item_id)
+                else:
+                    logger.debug("Skipped duplicate vision job for %s", item_id)
             except Exception as _vision_exc:  # noqa: BLE001
-                logger.warning("Vision taste update failed for %s: %s", item_id, _vision_exc)
+                logger.warning("Vision taste enqueue failed for %s: %s", item_id, _vision_exc)
 
         return {"itemId": item_id, "signal": signal, "scoreSignal": item["scoreSignal"]}
     except Exception as exc:
