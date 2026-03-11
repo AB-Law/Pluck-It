@@ -12,6 +12,9 @@ namespace PluckIt.Functions.Auth;
 public sealed class GoogleTokenValidator
 {
     private readonly string _clientId;
+    private readonly Uri _jwksUri;
+    private readonly string _googleIssuerHost;
+    private readonly string _googleIssuerWithScheme;
     private readonly IHttpClientFactory _httpClientFactory;
 
     private JsonWebKeySet? _cachedKeySet;
@@ -23,6 +26,15 @@ public sealed class GoogleTokenValidator
         _clientId = configuration["GoogleAuth:ClientId"]
             ?? throw new InvalidOperationException(
                 "Required configuration key 'GoogleAuth__ClientId' is not set.");
+        var jwksUrl = configuration["GoogleAuth:JwksUrl"] ?? configuration["GoogleAuth:JwksUri"];
+        if (!Uri.TryCreate(jwksUrl, UriKind.Absolute, out var jwksUri))
+            throw new InvalidOperationException(
+                "Required configuration key 'GoogleAuth:JwksUrl' (or 'GoogleAuth:JwksUri') is not set or invalid.");
+        _jwksUri = jwksUri;
+        _googleIssuerHost = configuration["GoogleAuth:IssuerHost"] ??
+            configuration["GoogleAuth:Issuer"] ??
+            "accounts.google.com";
+        _googleIssuerWithScheme = BuildIssuerWithScheme(_googleIssuerHost);
         _httpClientFactory = httpClientFactory;
     }
 
@@ -40,7 +52,7 @@ public sealed class GoogleTokenValidator
 
             var result = await handler.ValidateTokenAsync(idToken, new TokenValidationParameters
             {
-                ValidIssuers = ["accounts.google.com", "https://accounts.google.com"],
+                ValidIssuers = [_googleIssuerHost, _googleIssuerWithScheme],
                 ValidAudience = _clientId,
                 IssuerSigningKeys = keySet.Keys,
                 ValidateLifetime = true,
@@ -58,6 +70,9 @@ public sealed class GoogleTokenValidator
         }
     }
 
+    private static string BuildIssuerWithScheme(string issuerHost)
+        => new UriBuilder(Uri.UriSchemeHttps, issuerHost).Uri.ToString().TrimEnd('/');
+
     // ── JWKS caching ─────────────────────────────────────────────────────────
 
     private async Task<JsonWebKeySet> GetSigningKeysAsync()
@@ -74,7 +89,7 @@ public sealed class GoogleTokenValidator
                 return _cachedKeySet;
 
             var client = _httpClientFactory.CreateClient();
-            var json = await client.GetStringAsync("https://www.googleapis.com/oauth2/v3/certs");
+            var json = await client.GetStringAsync(_jwksUri);
             _cachedKeySet = new JsonWebKeySet(json);
 
             // Google rotates keys infrequently; 6 hours is a safe cache TTL

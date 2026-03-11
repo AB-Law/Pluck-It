@@ -165,28 +165,28 @@ public sealed class InMemoryWardrobeRepository : IWardrobeRepository
     }
 
     public Task<bool> SetDraftTerminalAsync(
-        string id, string userId, DraftStatus status, string? processedBlobUrl,
-        ClothingMetadata? metadata, string? errorMessage, DateTimeOffset updatedAt,
+        string itemId, string userId, DraftStatus terminalStatus, string? processedBlobUrl,
+        ClothingMetadata? metadata, string? errorMessage, DateTimeOffset now,
         CancellationToken cancellationToken = default)
     {
         _ = metadata; // not applied in the in-memory stub
         var item = _store.FirstOrDefault(i =>
-            string.Equals(i.Id, id, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(i.Id, itemId, StringComparison.OrdinalIgnoreCase) &&
             string.Equals(i.UserId, userId, StringComparison.OrdinalIgnoreCase) &&
             i.DraftStatus == DraftStatus.Processing);
         if (item is null) return Task.FromResult(false);
-        item.DraftStatus    = status;
+        item.DraftStatus    = terminalStatus;
         item.DraftError     = errorMessage;
-        item.DraftUpdatedAt = updatedAt;
+        item.DraftUpdatedAt = now;
         if (processedBlobUrl is not null) item.ImageUrl = processedBlobUrl;
         return Task.FromResult(true);
     }
 
     public Task<ClothingItem?> AcceptDraftAsync(
-        string id, string userId, DateTimeOffset dateAdded, CancellationToken cancellationToken = default)
+        string itemId, string userId, DateTimeOffset finalizedAt, CancellationToken cancellationToken = default)
     {
         var item = _store.FirstOrDefault(i =>
-            string.Equals(i.Id, id, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(i.Id, itemId, StringComparison.OrdinalIgnoreCase) &&
             string.Equals(i.UserId, userId, StringComparison.OrdinalIgnoreCase) &&
             i.DraftStatus == DraftStatus.Ready);
         if (item is null) return Task.FromResult<ClothingItem?>(null);
@@ -195,7 +195,7 @@ public sealed class InMemoryWardrobeRepository : IWardrobeRepository
         item.RawImageBlobUrl= null;
         item.DraftCreatedAt = null;
         item.DraftUpdatedAt = null;
-        item.DateAdded      = dateAdded;
+        item.DateAdded      = finalizedAt;
         return Task.FromResult<ClothingItem?>(item);
     }
 

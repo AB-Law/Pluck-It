@@ -253,23 +253,10 @@ public class ImageProcessingWorker(
         }
 
         // ── Write terminal Ready state ─────────────────────────────────────────
-        // Wrapped in try-catch: a transient Cosmos write failure here must NOT
-        // cause an unhandled exception that retries the queue message.
-        try
-        {
-            await repo.SetDraftTerminalAsync(
-                itemId, userId, DraftStatus.Ready,
-                processed.ImageUrl, metadata, null,
-                DateTimeOffset.UtcNow, CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            // Re-throw so the outer Run() catch can set the item to Failed and
-            // acknowledge the message (no unnecessary retry).
-            logger.LogError(ex,
-                "ProcessImageJob: Cosmos write failed on Ready for item {ItemId}.", itemId);
-            throw;
-        }
+        await repo.SetDraftTerminalAsync(
+            itemId, userId, DraftStatus.Ready,
+            processed.ImageUrl, metadata, null,
+            DateTimeOffset.UtcNow, CancellationToken.None);
 
         logger.LogInformation(
             "ProcessImageJob: item {ItemId} finalized as Ready with {MediaType}.",

@@ -1,6 +1,6 @@
 {
     "sonarlint.connectedMode.project": {
-        "connectionId": "SonarQubeLocal",
+        "connectionId": "Pluck",
         "projectKey": "PluckIt"
     }
 }

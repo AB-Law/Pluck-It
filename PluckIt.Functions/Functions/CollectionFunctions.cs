@@ -23,8 +23,6 @@ public class CollectionFunctions(
     IConfiguration config,
     ILogger<CollectionFunctions> logger)
 {
-    // suppress "unused parameter" — logger reserved for future structured logging
-    private readonly ILogger<CollectionFunctions> _logger = logger;
     // ── GET /api/collections ─────────────────────────────────────────────────
     // Returns owned collections + joined collections merged.
 
@@ -165,6 +163,7 @@ public class CollectionFunctions(
         var (authed, userId) = await TryGetUserIdAsync(req);
         if (!authed) return req.CreateResponse(HttpStatusCode.Unauthorized);
 
+        
         await repo.DeleteAsync(id, userId!, ct);
         return req.CreateResponse(HttpStatusCode.NoContent);
     }

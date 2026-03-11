@@ -20,7 +20,8 @@ public static class TestConfiguration
         var dict = new Dictionary<string, string?>
         {
             ["Local:DevUserId"]    = userId,
-            ["GoogleAuth:ClientId"] = "test-google-client-id"
+            ["GoogleAuth:ClientId"] = "test-google-client-id",
+            ["GoogleAuth:JwksUrl"] = "https://www.googleapis.com/oauth2/v3/certs"
         };
         if (extra is not null)
             foreach (var (k, v) in extra)
@@ -36,7 +37,8 @@ public static class TestConfiguration
         => new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["GoogleAuth:ClientId"] = "test-google-client-id"
+                ["GoogleAuth:ClientId"] = "test-google-client-id",
+                ["GoogleAuth:JwksUrl"] = "https://www.googleapis.com/oauth2/v3/certs"
             })
             .Build();
 }
