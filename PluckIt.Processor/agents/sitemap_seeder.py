@@ -70,6 +70,86 @@ def _local_name(tag: str) -> str:
     return tag.split("}")[-1] if "}" in tag else tag
 
 
+def _is_within_cutoff(lastmod_text: Optional[str], cutoff: datetime) -> bool:
+    """
+    Return True when no parsable lastmod is present or when the parsed date
+    is at or after the cutoff window.
+    """
+    if not lastmod_text:
+        return True
+    try:
+        parsed = datetime.fromisoformat(lastmod_text[:10]).replace(tzinfo=timezone.utc)
+    except ValueError:
+        return True
+    return parsed >= cutoff
+
+
+def _append_sitemap_entry(collected: list[dict], source_name: str, url: str, title: str, published: str) -> None:
+    if not title or len(title) < 5:
+        return
+    collected.append({
+        "title":     title,
+        "summary":   "",
+        "url":       url,
+        "published": published,
+        "source":    source_name,
+    })
+
+
+def _parse_sitemap_index(source_name: str, root: ET.Element, cutoff: datetime, collected: list[dict]) -> None:
+    for sitemap_el in root.iter(f"{{{_NS_SM}}}sitemap"):
+        if len(collected) >= _MAX_ARTICLES_PER_SOURCE:
+            break
+
+        loc_el = sitemap_el.find(f"{{{_NS_SM}}}loc")
+        if loc_el is None or not loc_el.text:
+            continue
+
+        lastmod_el = sitemap_el.find(f"{{{_NS_SM}}}lastmod")
+        if not _is_within_cutoff(lastmod_el.text if lastmod_el is not None else None, cutoff):
+            continue
+
+        child = _fetch_xml(loc_el.text.strip())
+        if child is None:
+            continue
+        _parse_sitemap(source_name, child, cutoff, collected)
+
+
+def _extract_urlset_entry(url_el: ET.Element, cutoff: datetime) -> Optional[tuple[str, str, str]]:
+    loc_el = url_el.find(f"{{{_NS_SM}}}loc")
+    if loc_el is None or not loc_el.text:
+        return None
+    url = loc_el.text.strip()
+
+    published = ""
+    lastmod_el = url_el.find(f"{{{_NS_SM}}}lastmod")
+    if lastmod_el is not None and lastmod_el.text:
+        published = lastmod_el.text.strip()
+        if not _is_within_cutoff(published, cutoff):
+            return None
+
+    news_title_el = url_el.find(f"{{{_NS_NEWS}}}news/{{{_NS_NEWS}}}title")
+    if news_title_el is not None and news_title_el.text:
+        title = news_title_el.text.strip()
+    else:
+        title = _slug_to_title(url)
+
+    return title, published, url
+
+
+def _parse_urlset(source_name: str, root: ET.Element, cutoff: datetime, collected: list[dict]) -> None:
+    for url_el in root.iter(f"{{{_NS_SM}}}url"):
+        if len(collected) >= _MAX_ARTICLES_PER_SOURCE:
+            break
+
+        extracted = _extract_urlset_entry(url_el, cutoff)
+        if extracted is None:
+            continue
+
+        title, published, url = extracted
+        _append_sitemap_entry(collected, source_name, url, title, published)
+
+
 # ── Sitemap parsing ───────────────────────────────────────────────────────────
 
 def _parse_sitemap(
@@ -84,68 +164,10 @@ def _parse_sitemap(
     Respects _MAX_ARTICLES_PER_SOURCE; stops early if limit reached.
     """
     tag = _local_name(root.tag)
-
     if tag == "sitemapindex":
-        # Sitemap index — recurse into child sitemaps that fall within our window
-        for sitemap_el in root.iter(f"{{{_NS_SM}}}sitemap"):
-            if len(collected) >= _MAX_ARTICLES_PER_SOURCE:
-                break
-            loc_el     = sitemap_el.find(f"{{{_NS_SM}}}loc")
-            lastmod_el = sitemap_el.find(f"{{{_NS_SM}}}lastmod")
-            if loc_el is None or not loc_el.text:
-                continue
-            # Skip sitemaps whose lastmod is before the cutoff (fast-path)
-            if lastmod_el is not None and lastmod_el.text:
-                try:
-                    mod = datetime.fromisoformat(lastmod_el.text[:10]).replace(tzinfo=timezone.utc)
-                    if mod < cutoff:
-                        continue
-                except ValueError:
-                    pass
-            child = _fetch_xml(loc_el.text.strip())
-            if child is not None:
-                _parse_sitemap(source_name, child, cutoff, collected)
-
+        _parse_sitemap_index(source_name, root, cutoff, collected)
     elif tag == "urlset":
-        for url_el in root.iter(f"{{{_NS_SM}}}url"):
-            if len(collected) >= _MAX_ARTICLES_PER_SOURCE:
-                break
-            loc_el = url_el.find(f"{{{_NS_SM}}}loc")
-            if loc_el is None or not loc_el.text:
-                continue
-            url = loc_el.text.strip()
-
-            # Date filter
-            lastmod_el = url_el.find(f"{{{_NS_SM}}}lastmod")
-            published  = ""
-            if lastmod_el is not None and lastmod_el.text:
-                published = lastmod_el.text.strip()
-                try:
-                    pub = datetime.fromisoformat(published[:10]).replace(tzinfo=timezone.utc)
-                    if pub < cutoff:
-                        continue
-                except ValueError:
-                    pass
-
-            # Prefer <news:title> when the publication uses Google News sitemaps
-            news_title_el = url_el.find(
-                f"{{{_NS_NEWS}}}news/{{{_NS_NEWS}}}title"
-            )
-            if news_title_el is not None and news_title_el.text:
-                title = news_title_el.text.strip()
-            else:
-                title = _slug_to_title(url)
-
-            if not title or len(title) < 5:
-                continue
-
-            collected.append({
-                "title":     title,
-                "summary":   "",   # sitemaps don't carry article body; title is sufficient
-                "url":       url,
-                "published": published,
-                "source":    source_name,
-            })
+        _parse_urlset(source_name, root, cutoff, collected)
 
 
 def scrape_sitemaps(months_back: int = 3) -> list[dict]:

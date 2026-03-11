@@ -250,6 +250,50 @@ def _extract_all_parallel(snippets: list[dict], llm: AzureChatOpenAI) -> list[di
 
 # ── Within-run deduplication ──────────────────────────────────────────────────
 
+def _append_unique_sources(target: dict, source: dict) -> None:
+    seen_urls = {entry.get("url") for entry in target.get("resolvedSources", []) if entry.get("url")}
+    for source_entry in source.get("resolvedSources", []):
+        url = source_entry.get("url")
+        if not url or url in seen_urls:
+            continue
+        target.setdefault("resolvedSources", []).append(source_entry)
+        seen_urls.add(url)
+
+
+def _dedup_primary_bucket(
+    indices: list[int],
+    moods: list[dict],
+    embeddings: list[list[float]],
+    merged_into: dict[int, int],
+) -> None:
+    for position, base_idx in enumerate(indices):
+        if base_idx in merged_into:
+            continue
+
+        base_emb = embeddings[base_idx]
+        if not base_emb:
+            continue
+
+        for candidate_idx in indices[position + 1 :]:
+            if candidate_idx in merged_into:
+                continue
+
+            candidate_emb = embeddings[candidate_idx]
+            if not candidate_emb:
+                continue
+
+            sim = _cosine_similarity(base_emb, candidate_emb)
+            if sim < _SIM_WITHIN_RUN:
+                continue
+
+            merged_into[candidate_idx] = base_idx
+            _append_unique_sources(moods[base_idx], moods[candidate_idx])
+            logger.debug(
+                "Within-run merge: '%s' + '%s' (sim=%.3f)",
+                moods[base_idx]["name"], moods[candidate_idx]["name"], sim,
+            )
+
+
 def _dedup_within_run(
     moods: list[dict],
     embedder: AzureOpenAIEmbeddings,
@@ -264,28 +308,14 @@ def _dedup_within_run(
         return moods, [[] for _ in moods]
 
     merged_into: dict[int, int] = {}
-    for i in range(len(moods)):
-        if i in merged_into:
+    indices_by_primary: dict[Optional[str], list[int]] = {}
+    for idx, mood in enumerate(moods):
+        indices_by_primary.setdefault(mood.get("primaryMood"), []).append(idx)
+
+    for indices in indices_by_primary.values():
+        if len(indices) < 2:
             continue
-        for j in range(i + 1, len(moods)):
-            if j in merged_into:
-                continue
-            if moods[i].get("primaryMood") != moods[j].get("primaryMood"):
-                continue
-            if not embeddings[i] or not embeddings[j]:
-                continue
-            sim = _cosine_similarity(embeddings[i], embeddings[j])
-            if sim >= _SIM_WITHIN_RUN:
-                merged_into[j] = i
-                seen = {s["url"] for s in moods[i].get("resolvedSources", [])}
-                for src in moods[j].get("resolvedSources", []):
-                    if src.get("url") not in seen:
-                        moods[i].setdefault("resolvedSources", []).append(src)
-                        seen.add(src["url"])
-                logger.debug(
-                    "Within-run merge: '%s' + '%s' (sim=%.3f)",
-                    moods[i]["name"], moods[j]["name"], sim,
-                )
+        _dedup_primary_bucket(indices, moods, embeddings, merged_into)
 
     kept    = [(i, moods[i], embeddings[i]) for i in range(len(moods)) if i not in merged_into]
     deduped = [m for _, m, _ in kept]

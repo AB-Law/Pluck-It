@@ -44,22 +44,25 @@ except Exception:
 
     class _DummyAsgiFunctionApp:
         def __init__(self, *args, **kwargs):
-            pass
+            # Intentionally a no-op initializer: tests only require a constructible
+            # ASGI app object for decorator compatibility.
+            self._args = args
+            self._kwargs = kwargs
+
+        def _make_decorator(self, trigger_name: str):
+            def _decorator(fn):
+                setattr(fn, "_azure_trigger_type", trigger_name)
+                return fn
+            return _decorator
 
         def function_name(self, *args, **kwargs):
-            def _decorator(fn):
-                return fn
-            return _decorator
+            return self._make_decorator("function_name")
 
         def blob_trigger(self, *args, **kwargs):
-            def _decorator(fn):
-                return fn
-            return _decorator
+            return self._make_decorator("blob_trigger")
 
         def timer_trigger(self, *args, **kwargs):
-            def _decorator(fn):
-                return fn
-            return _decorator
+            return self._make_decorator("timer_trigger")
 
     class _AuthLevel:
         ANONYMOUS = "anonymous"
@@ -218,8 +221,8 @@ def mock_digest_feedback_container():
     container = AsyncMock()
 
     async def _empty_query(**kwargs):
-        return
-        yield  # make it an async generator
+            for _ in []:
+                yield _
 
     container.query_items = _empty_query
     container.upsert_item = AsyncMock(return_value={})

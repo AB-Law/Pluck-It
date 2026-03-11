@@ -23,7 +23,7 @@ public sealed class StylistFunctionsTests
         Tags     = ["casual"]
     };
 
-    private StylistFunctions CreateSut(
+    private static StylistFunctions CreateSut(
         InMemoryWardrobeRepository? repo    = null,
         FakeStylistService?         stylist = null)
     {

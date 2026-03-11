@@ -53,10 +53,10 @@ public sealed class ClothingPriceConverter : JsonConverter<ClothingPrice>
                 if (property.Value.ValueKind != JsonValueKind.Null)
                     originalCurrency = property.Value.GetString();
             }
-            else if (string.Equals(property.Name, "purchaseDate", StringComparison.OrdinalIgnoreCase))
+            else if (string.Equals(property.Name, "purchaseDate", StringComparison.OrdinalIgnoreCase) &&
+                     property.Value.ValueKind != JsonValueKind.Null)
             {
-                if (property.Value.ValueKind != JsonValueKind.Null)
-                    purchaseDate = property.Value.GetString();
+                purchaseDate = property.Value.GetString();
             }
         }
 

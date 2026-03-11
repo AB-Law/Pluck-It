@@ -157,8 +157,6 @@ def _run_source(source_doc: dict) -> int:
     source_type = source_doc["sourceType"]
     config = dict(source_doc.get("config", {}))
     config["source_id"] = source_id
-    is_global = source_doc.get("isGlobal", True)
-    user_id = _USER_ID_GLOBAL if is_global else source_doc.get("createdBy", _USER_ID_GLOBAL)
 
     scraper_cls = _SCRAPER_REGISTRY.get(source_type)
     if scraper_cls is None:

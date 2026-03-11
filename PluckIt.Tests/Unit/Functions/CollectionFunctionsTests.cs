@@ -34,7 +34,7 @@ public sealed class CollectionFunctionsTests
         CreatedAt     = DateTimeOffset.UtcNow
     };
 
-    private CollectionFunctions CreateSut(InMemoryCollectionRepository? repo = null, string userId = OwnerId)
+    private static CollectionFunctions CreateSut(InMemoryCollectionRepository? repo = null, string userId = OwnerId)
     {
         var cfg = TestConfiguration.WithDevUser(userId);
         return new CollectionFunctions(

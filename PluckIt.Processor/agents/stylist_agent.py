@@ -238,6 +238,56 @@ async def _resolve_follow_up_annotation(user_message: str, recent_messages: list
     return None
 
 
+async def _build_context_prefix(user_id: str, selected_item_ids: Optional[list[str]]) -> str:
+    if not selected_item_ids:
+        return ""
+
+    try:
+        container = get_wardrobe_container()
+        fetched = []
+        for item_id in selected_item_ids:
+            try:
+                doc = await container.read_item(item=item_id, partition_key=user_id)
+                fetched.append(_compact(doc))
+            except Exception:
+                pass
+        if not fetched:
+            return ""
+        items_json = json.dumps(fetched, ensure_ascii=False)
+        return (
+            f"The user has dragged these specific wardrobe items onto the style board "
+            f"and wants to build an outfit around them:\n{items_json}\n\n"
+            f"Please use these as anchor pieces and suggest a complete outfit.\n\n"
+        )
+    except Exception as exc:
+        logger.warning("Failed to pre-fetch selected items %s: %s", selected_item_ids, exc)
+        return ""
+
+
+def _event_to_sse(event: dict) -> Optional[str]:
+    kind = event["event"]
+
+    if kind == "on_chat_model_stream":
+        if event.get("metadata", {}).get("langgraph_node") != "agent":
+            return None
+        chunk = event["data"].get("chunk")
+        if not chunk or not chunk.content:
+            return None
+        return f"data: {json.dumps({'type': 'token', 'content': chunk.content})}\\n\\n"
+
+    if kind == "on_tool_start":
+        tool_name = event.get("name", "tool")
+        return f"data: {json.dumps({'type': 'tool_use', 'name': tool_name})}\\n\\n"
+
+    if kind == "on_tool_end":
+        tool_name = event.get("name", "tool")
+        output = event["data"].get("output", "")
+        summary = str(output)[:120] + ("…" if len(str(output)) > 120 else "")
+        return f"data: {json.dumps({'type': 'tool_result', 'name': tool_name, 'summary': summary})}\\n\\n"
+
+    return None
+
+
 # Lazy singleton — built on first request so import succeeds without env vars
 @lru_cache(maxsize=1)
 def _get_agent_graph():
@@ -262,31 +312,8 @@ async def stream_stylist_response(
       - {"type": "tool_result", "name": "...", "summary": "..."}  — tool returned
       - {"type": "done"}                            — stream complete
     """
-    system_msg = _build_system_prompt(memory_summary)
-
-    # If specific items were selected (drag-to-board), pre-fetch from Cosmos
-    # and embed their details directly so the LLM doesn't need to look up by ID.
-    context_prefix = ""
-    if selected_item_ids:
-        try:
-            container = get_wardrobe_container()
-            fetched = []
-            for item_id in selected_item_ids:
-                try:
-                    doc = await container.read_item(item=item_id, partition_key=user_id)
-                    fetched.append(_compact(doc))
-                except Exception:
-                    pass  # item not found or access error — skip gracefully
-            if fetched:
-                items_json = json.dumps(fetched, ensure_ascii=False)
-                context_prefix = (
-                    f"The user has dragged these specific wardrobe items onto the style board "
-                    f"and wants to build an outfit around them:\n{items_json}\n\n"
-                    f"Please use these as anchor pieces and suggest a complete outfit.\n\n"
-                )
-        except Exception as exc:
-            logger.warning("Failed to pre-fetch selected items %s: %s", selected_item_ids, exc)
-
+    system_msg       = _build_system_prompt(memory_summary)
+    context_prefix   = await _build_context_prefix(user_id, selected_item_ids)
     # Annotate short follow-up confirmations so the agent knows which tool to reach for.
     annotation = await _resolve_follow_up_annotation(user_message, recent_messages)
     augmented_message = f"{annotation}\n{user_message}" if annotation else user_message
@@ -309,27 +336,9 @@ async def stream_stylist_response(
             config=config,
             version="v2",
         ):
-            kind = event["event"]
-
-            if kind == "on_chat_model_stream":
-                # Only stream tokens from the top-level agent LLM node, not from
-                # nested LLM calls inside tools (e.g. _expand_query).
-                if event.get("metadata", {}).get("langgraph_node") != "agent":
-                    continue
-                chunk = event["data"].get("chunk")
-                if chunk and chunk.content:
-                    yield f"data: {json.dumps({'type': 'token', 'content': chunk.content})}\n\n"
-
-            elif kind == "on_tool_start":
-                tool_name = event.get("name", "tool")
-                yield f"data: {json.dumps({'type': 'tool_use', 'name': tool_name})}\n\n"
-
-            elif kind == "on_tool_end":
-                tool_name = event.get("name", "tool")
-                output = event["data"].get("output", "")
-                # Only send a short summary of tool output, not the full payload
-                summary = str(output)[:120] + ("…" if len(str(output)) > 120 else "")
-                yield f"data: {json.dumps({'type': 'tool_result', 'name': tool_name, 'summary': summary})}\n\n"
+            event_sse = _event_to_sse(event)
+            if event_sse is not None:
+                yield event_sse
 
     except Exception as exc:
         logger.exception("Agent stream error for user %s: %s", user_id, exc)

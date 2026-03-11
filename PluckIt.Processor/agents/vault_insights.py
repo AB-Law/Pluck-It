@@ -93,31 +93,39 @@ def _normalize_color_name(raw: Optional[str]) -> Optional[str]:
     return None
 
 
+def _extract_color_from_colour_entry(entry: dict) -> Optional[str]:
+    from_name = _normalize_color_name(entry.get("name"))
+    if from_name:
+        return from_name
+
+    hexv = str(entry.get("hex") or "").lower().strip()
+    if hexv in {"#000000", "#111111", "#1a1a1a"}:
+        return "black"
+    if hexv in {"#ffffff", "#f5f5f5", "#fafafa"}:
+        return "white"
+    if hexv in {"#808080", "#a9a9a9", "#c0c0c0"}:
+        return "grey"
+    return None
+
+
+def _find_first_color(entries: list, extractor) -> Optional[str]:
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        color = extractor(entry)
+        if color:
+            return color
+    return None
+
+
 def _item_primary_color(item: dict) -> Optional[str]:
     colours = item.get("colours") or []
     tags = item.get("tags") or []
 
-    for c in colours:
-        if isinstance(c, dict):
-            from_name = _normalize_color_name(c.get("name"))
-            if from_name:
-                return from_name
-
-            hexv = str(c.get("hex") or "").lower().strip()
-            # Lightweight named buckets for common dark/light neutrals.
-            if hexv in {"#000000", "#111111", "#1a1a1a"}:
-                return "black"
-            if hexv in {"#ffffff", "#f5f5f5", "#fafafa"}:
-                return "white"
-            if hexv in {"#808080", "#a9a9a9", "#c0c0c0"}:
-                return "grey"
-
-    for t in tags:
-        from_tag = _normalize_color_name(t)
-        if from_tag:
-            return from_tag
-
-    return None
+    color = _find_first_color(colours, _extract_color_from_colour_entry)
+    if color:
+        return color
+    return _find_first_color(tags, _normalize_color_name)
 
 
 def _months_since(date_added: Optional[str], now: datetime) -> int:

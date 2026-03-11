@@ -149,7 +149,7 @@ def generate_selector_config(url: str, brand_name: str) -> dict:
 
     try:
         config = _parse_llm_json(raw)
-    except (json.JSONDecodeError, ValueError) as exc:
+    except json.JSONDecodeError as exc:
         raise RuntimeError(
             f"Could not parse LLM response as JSON for {brand_name}: {exc}\nRaw: {raw[:300]}"
         ) from exc
