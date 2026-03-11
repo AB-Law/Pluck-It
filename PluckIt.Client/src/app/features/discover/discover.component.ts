@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 import { DiscoverService } from '../../core/services/discover.service';
-import { ScrapedItem, ScraperSource } from '../../core/models/scraped-item.model';
+import { ScrapedItem, ScraperSource, DiscoverFeedQuery } from '../../core/models/scraped-item.model';
 import { DiscoverCardComponent } from './discover-card.component';
 import { SourceSidebarComponent } from './source-sidebar.component';
 
@@ -336,7 +336,7 @@ export class DiscoverComponent implements OnInit {
     );
   });
 
-  constructor(private discoverService: DiscoverService) {}
+  constructor(private discoverService: DiscoverService) { }
 
   ngOnInit() {
     this.loadSources();
@@ -349,17 +349,24 @@ export class DiscoverComponent implements OnInit {
     });
   }
 
-  private loadFeed(append = false) {
-    if (!append) this.loading.set(true);
-    else this.loadingMore.set(true);
+  protected loadFeed(append = false) {
+    if (!append) {
+      this.loading.set(true);
+      this.nextToken.set(null);
+    } else {
+      this.loadingMore.set(true);
+    }
 
-    this.discoverService.getFeed({
+    const sourceId = this.activeSourceId();
+    const query: DiscoverFeedQuery = {
       sortBy: this.sortBy(),
       timeRange: this.timeRange(),
-      sourceIds: this.activeSourceId() ? [this.activeSourceId()!] : undefined,
+      sourceIds: sourceId ? [sourceId] : undefined,
       continuationToken: append ? this.nextToken() : null,
       pageSize: 50,
-    }).subscribe({
+    };
+
+    this.discoverService.getFeed(query).subscribe({
       next: res => {
         if (append) {
           this.allItems.update(items => [...items, ...res.items]);
@@ -369,12 +376,74 @@ export class DiscoverComponent implements OnInit {
         this.nextToken.set(res.nextContinuationToken ?? null);
         this.loading.set(false);
         this.loadingMore.set(false);
+
+        // Start hybrid scraping logic
+        this.checkForClientScrape();
       },
       error: () => {
         this.loading.set(false);
         this.loadingMore.set(false);
       },
     });
+  }
+
+  private checkForClientScrape(): void {
+    const sourceId = this.activeSourceId();
+    if (!sourceId) return;
+
+    const source = this.sources().find(s => s.id === sourceId);
+    if (source?.sourceType === 'reddit' && source.needsClientIngest) {
+      const subreddit = source.config['subreddit'] as string;
+      if (!subreddit) return;
+
+      // Local throttling: 2 minutes between scrapes from this browser
+      const lastScrapedKey = `last_scraped_${sourceId}`;
+      const lastScrapedStr = localStorage.getItem(lastScrapedKey);
+      if (lastScrapedStr) {
+        const lastScraped = parseInt(lastScrapedStr, 10);
+        if (Date.now() - lastScraped < 120000) {
+          console.log(`Throttled: Scraped r/${subreddit} recently.`);
+          return;
+        }
+      }
+
+      console.log(`Source ${sourceId} needs fresh data. Attempting lease...`);
+      this.discoverService.acquireLease(sourceId).subscribe({
+        next: (lease) => {
+          console.log('Lease acquired. Fetching from Reddit...');
+          this.fetchAndIngestReddit(sourceId, subreddit);
+        },
+        error: (err) => {
+          if (err.status === 409) {
+            console.log('Another user is already scraping this source.');
+          } else {
+            console.error('Lease acquisition failed:', err);
+          }
+        }
+      });
+    }
+  }
+
+  private fetchAndIngestReddit(sourceId: string, subreddit: string): void {
+    const url = `https://www.reddit.com/r/${subreddit}/hot.json?limit=50`;
+    fetch(url)
+      .then(res => res.json())
+      .then(data => {
+        const posts = data?.data?.children?.map((c: any) => c.data) || [];
+        if (posts.length === 0) return;
+
+        this.discoverService.ingestReddit(sourceId, posts).subscribe({
+          next: (res) => {
+            console.log(`Successfully ingested ${res.count} items from r/${subreddit}`);
+            localStorage.setItem(`last_scraped_${sourceId}`, Date.now().toString());
+            if (res.count > 0) {
+              this.loadFeed(false);
+            }
+          },
+          error: (err) => console.error('Ingestion failed:', err)
+        });
+      })
+      .catch(err => console.error('Reddit fetch failed:', err));
   }
 
   setSortBy(sort: 'score' | 'recent') {

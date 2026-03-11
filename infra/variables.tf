@@ -78,3 +78,9 @@ variable "segmentation_shared_token" {
   sensitive   = true
   default     = ""
 }
+
+variable "admin_user_ids" {
+  description = "Comma-separated list of Google User IDs with administrative privileges."
+  type        = string
+  default     = ""
+}

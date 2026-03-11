@@ -566,6 +566,17 @@ resource "azurerm_cosmosdb_sql_container" "taste_calibration" {
   }
 }
 
+# UserBans: persistent list of users banned from contributing to the scraper.
+# Partitioned by /id (userId).
+resource "azurerm_cosmosdb_sql_container" "user_bans" {
+  name                  = "UserBans"
+  resource_group_name   = azurerm_resource_group.rg_pluckit_archive.name
+  account_name          = azurerm_cosmosdb_account.pluckit.name
+  database_name         = azurerm_cosmosdb_sql_database.pluckit.name
+  partition_key_paths   = ["/id"]
+  partition_key_version = 1
+}
+
 # ── Logging: Log Analytics Workspace + Application Insights ─────────────────
 # Free tier: 500 MB/day on Log Analytics; first 5 GB/month free on App Insights.
 
@@ -772,6 +783,7 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
     "COSMOS_DB_SCRAPED_ITEMS_CONTAINER"             = azurerm_cosmosdb_sql_container.scraped_items.name
     "COSMOS_DB_USER_SOURCE_SUBSCRIPTIONS_CONTAINER" = azurerm_cosmosdb_sql_container.user_source_subscriptions.name
     "COSMOS_DB_TASTE_CALIBRATION_CONTAINER"         = azurerm_cosmosdb_sql_container.taste_calibration.name
+    "COSMOS_DB_USER_BANS_CONTAINER"                 = azurerm_cosmosdb_sql_container.user_bans.name
     # Azure OpenAI — primary model for chat/agents
     "AZURE_OPENAI_ENDPOINT"   = var.ai_gpt4o_endpoint
     "AZURE_OPENAI_API_KEY"    = var.ai_api_key
@@ -780,6 +792,7 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
     "AZURE_OPENAI_EMBEDDING_DEPLOYMENT" = "text-embedding-3-small"
     # Google OAuth client ID — used to validate bearer tokens from Angular
     "GOOGLE_CLIENT_ID"          = var.google_oauth_client_id
+    "ADMIN_USER_IDS"            = var.admin_user_ids
     "CORS_ALLOWED_ORIGINS"      = join(",", var.cors_allowed_origins)
     "FEATURE_VAULT_INSIGHTS"    = "true"
     "SEGMENTATION_ENDPOINT_URL" = var.segmentation_endpoint_url

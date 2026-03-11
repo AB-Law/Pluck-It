@@ -156,3 +156,11 @@ def get_taste_calibration_container():
 
 def get_taste_calibration_container_sync():
     return _sync_container("COSMOS_DB_TASTE_CALIBRATION_CONTAINER", "TasteCalibration")
+
+
+def get_user_bans_container():
+    return _async_container("COSMOS_DB_USER_BANS_CONTAINER", "UserBans")
+
+
+def get_user_bans_container_sync():
+    return _sync_container("COSMOS_DB_USER_BANS_CONTAINER", "UserBans")

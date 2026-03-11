@@ -171,6 +171,23 @@ def _run_source(source_doc: dict) -> int:
         logger.info("Source %s: no items scraped", source_id)
         return 0
 
+    return ingest_items(raw_items, source_doc, submitter_id="server")
+
+
+def ingest_items(
+    raw_items: list[ScrapedItemRaw],
+    source_doc: dict,
+    submitter_id: str,
+    verified: bool = True,
+) -> int:
+    """
+    Process raw items through the ingest pipeline: pHash, Dedup, Embedding, and Upsert.
+    Returns the number of new items upserted.
+    """
+    source_id = source_doc["id"]
+    is_global = source_doc.get("isGlobal", True)
+    user_id = _USER_ID_GLOBAL if is_global else source_doc.get("createdBy", _USER_ID_GLOBAL)
+
     logger.info("Source %s: %d raw items before dedup", source_id, len(raw_items))
 
     # ── Deduplication setup ───────────────────────────────────────────────────
@@ -215,6 +232,11 @@ def _run_source(source_doc: dict) -> int:
     for raw, embedding in zip(new_items, embeddings):
         phash = phash_map.get(_item_id(raw))
         doc = _build_document(raw, phash, embedding, user_id)
+        
+        # Add metadata for auditing
+        doc["submitterId"] = submitter_id
+        doc["verified"] = verified
+        
         try:
             items_container.upsert_item(doc)
             upserted += 1
