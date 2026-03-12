@@ -143,7 +143,7 @@ After successful deployment:
 The workflows are configured to:
 - **Backend**: Deploy to `pluckit-prod-api` Azure Web App
 - **Frontend**: Build with production API URL: `https://pluckit-prod-api.azurewebsites.net`
-- **Triggers**: Only deploy on push to `main` branch (PRs will build but not deploy)
+- **Frontend PR behavior**: PRs deploy to Azure Static Web Apps preview environments; merge to `main` deploys production.
 
 ---
 
@@ -158,6 +158,8 @@ The workflows are configured to:
 - Verify `AZURE_STATIC_WEB_APPS_API_TOKEN` secret is correct
 - Ensure Static Web App exists or use blob storage alternative
 - Check build output path matches deployment settings
+- On PRs, preview URLs are posted on the PR as a comment from the Azure Static Web Apps Action.
+- Preview environments are public to anyone with the link; avoid posting private data there.
 
 ### API not accessible after deployment
 - Check App Service logs in Azure Portal
