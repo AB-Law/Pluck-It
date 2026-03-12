@@ -146,14 +146,20 @@ def _normalize_otel_headers(raw_headers: Optional[str]) -> dict[str, str] | None
     return parsed or None
 
 
-def _configure_open_telemetry() -> None:
-    global _otel_configured
-    if _otel_configured:
+_otel_providers_initialized = False
+
+
+def _init_otel_providers() -> None:
+    """Set up TracerProvider and MeterProvider. Called at import time, before Azure Functions
+    can override the global providers."""
+    global _otel_providers_initialized
+    if _otel_providers_initialized:
         return
 
     endpoint = os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
     if not endpoint:
-        logger.warning("OpenTelemetry trace endpoint missing: set OTEL_EXPORTER_OTLP_TRACES_ENDPOINT or OTEL_EXPORTER_OTLP_ENDPOINT.")
+        logger.info("OTEL endpoint = %s", endpoint)
+        logger.warning("OpenTelemetry skipped: no OTLP endpoint configured")
         return
 
     headers = _normalize_otel_headers(os.getenv("OTEL_EXPORTER_OTLP_HEADERS"))
@@ -163,31 +169,22 @@ def _configure_open_telemetry() -> None:
         from opentelemetry import metrics, trace
         from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-        from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
         from opentelemetry.sdk.metrics import MeterProvider
         from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
         from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
     except Exception as exc:
-        logger.warning("OpenTelemetry libraries are not available in this environment: %s", exc)
+        logger.warning("OpenTelemetry libraries are not available: %s", exc)
         return
 
     try:
-        resource = Resource.create(
-            {
-                "service.name": service_name,
-                "service.namespace": "pluckit",
-            }
-        )
+        resource = Resource.create({"service.name": service_name, "service.namespace": "pluckit"})
 
-        # Traces
-        trace.set_tracer_provider(TracerProvider(resource=resource))
-        tracer_provider = trace.get_tracer_provider()
+        tracer_provider = TracerProvider(resource=resource)
         tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, headers=headers)))
+        trace.set_tracer_provider(tracer_provider)
 
-        # Metrics
         metrics_endpoint = os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
         if metrics_endpoint:
             metric_reader = PeriodicExportingMetricReader(
@@ -195,31 +192,48 @@ def _configure_open_telemetry() -> None:
                 export_interval_millis=60_000,
             )
             metrics.set_meter_provider(MeterProvider(resource=resource, metric_readers=[metric_reader]))
-            logger.info("OpenTelemetry metrics initialized endpoint=%s", metrics_endpoint)
-        else:
-            logger.warning("OpenTelemetry metrics endpoint missing: set OTEL_EXPORTER_OTLP_METRICS_ENDPOINT.")
 
-        HTTPXClientInstrumentor().instrument()
-        FastAPIInstrumentor.instrument_app(
-            fastapi_app,
-            tracer_provider=trace.get_tracer_provider(),
-        )
-        _otel_configured = True
-        logger.info("OpenTelemetry initialized for service=%s endpoint=%s", service_name, endpoint)
+        _otel_providers_initialized = True
+        logger.warning("OpenTelemetry providers initialized service=%s endpoint=%s", service_name, endpoint)
     except Exception as exc:
-        logger.warning("OpenTelemetry initialization failed: %s", exc)
+        logger.warning("OpenTelemetry provider initialization failed: %s", exc)
 
 
-# In some Azure Functions hosting modes, the FastAPI startup event may be skipped.
-# Initialize telemetry eagerly at import time as a fallback.
+def _configure_open_telemetry() -> None:
+    """Instrument FastAPI and HTTPX. Requires fastapi_app to exist."""
+    global _otel_configured
+    if _otel_configured:
+        return
+    if not _otel_providers_initialized:
+        return
+
+    try:
+        from opentelemetry import trace
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+    except Exception as exc:
+        logger.warning("OpenTelemetry instrumentation libraries not available: %s", exc)
+        return
+
+    try:
+        HTTPXClientInstrumentor().instrument()
+        FastAPIInstrumentor.instrument_app(fastapi_app, tracer_provider=trace.get_tracer_provider())
+        _otel_configured = True
+        logger.info("OpenTelemetry instrumentation configured")
+    except Exception as exc:
+        logger.warning("OpenTelemetry instrumentation failed: %s", exc)
+
+
+# Initialize providers at import time — before Azure Functions can set its own global providers.
 try:
-    _configure_open_telemetry()
+    _init_otel_providers()
 except Exception as exc:
     logger.warning("OpenTelemetry eager initialization failed: %s", exc)
 
 # ── FastAPI application ──────────────────────────────────────────────────────
 
 fastapi_app = FastAPI(title="PluckIt Processor", docs_url=None, redoc_url=None)
+_configure_open_telemetry()
 
 _ALLOWED_ORIGINS = [o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()]
 if "*" in _ALLOWED_ORIGINS:
@@ -257,6 +271,7 @@ async def _global_exception_handler(request: Request, exc: Exception) -> JSONRes
 
 @fastapi_app.on_event("startup")
 async def _startup_log() -> None:
+    _init_otel_providers()
     _configure_open_telemetry()
     env = os.getenv("AZURE_FUNCTIONS_ENVIRONMENT", "Production")
     logger.info("PluckIt Processor started — environment=%s", env)
