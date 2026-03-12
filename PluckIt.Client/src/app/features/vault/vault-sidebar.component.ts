@@ -49,7 +49,29 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink, RangeSliderComponent],
   template: `
-    <aside class="w-64 flex-shrink-0 flex-col border-r border-border-chrome bg-black p-6 hidden md:flex overflow-y-auto">
+    <aside
+      class="w-64 flex-shrink-0 flex-col border-r border-border-chrome bg-black p-6 overflow-y-auto"
+      [class.fixed]="mobileMode()"
+      [class.inset-0]="mobileMode()"
+      [class.z-50]="mobileMode()"
+      [class.right-0]="mobileMode()"
+      [class.bg-black]="mobileMode()"
+      [class.w-full]="mobileMode()"
+    >
+      @if (mobileMode()) {
+        <div class="mb-4 flex items-center justify-between">
+          <h3 class="text-sm font-bold uppercase tracking-wider text-slate-500">Filters</h3>
+          <button
+            type="button"
+            class="h-10 w-10 flex items-center justify-center rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] touch-target"
+            title="Close filters"
+            aria-label="Close filters"
+            (click)="closed.emit()"
+          >
+            <span class="material-symbols-outlined" style="font-size:20px">close</span>
+          </button>
+        </div>
+      }
 
       <!-- Smart Groups -->
       <div class="mb-8">
@@ -57,7 +79,7 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
         <nav class="space-y-1">
           @for (g of groups; track g.id) {
             <button
-              class="w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
+              class="touch-target w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
               [class]="g.id === activeGroup() ? 'bg-primary/10 text-primary' : 'text-slate-400 hover:bg-card-dark hover:text-slate-100'"
               (click)="selectGroup(g.id)"
             >
@@ -65,9 +87,9 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
               {{ g.label }}
             </button>
           }
-          <a
-            routerLink="/collections"
-            class="w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-400 hover:bg-card-dark hover:text-slate-100 transition-colors"
+            <a
+              routerLink="/collections"
+              class="touch-target w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-400 hover:bg-card-dark hover:text-slate-100 transition-colors"
           >
             <span class="material-symbols-outlined text-lg">folder_special</span>
             Collections
@@ -124,9 +146,10 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
                 class="absolute top-1/2 h-3 w-3 rounded-full border-2 border-primary bg-black cursor-pointer"
                 [style.left.%]="wearPct()"
                 style="transform: translate(-50%, -50%)"
-                (mousedown)="startWearDrag($event)"
-                (document:mousemove)="onWearDrag($event)"
-                (document:mouseup)="stopWearDrag()"
+              class="touch-target cursor-pointer"
+              (pointerdown)="startWearDrag($event)"
+              (document:pointermove)="onWearDrag($event)"
+              (document:pointerup)="stopWearDrag()"
               ></div>
             </div>
           </div>
@@ -146,7 +169,7 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
             (ngModelChange)="onBrandChange($event)"
           />
           @if (brandFilter()) {
-            <button class="pr-3 text-slate-500 hover:text-white" (click)="onBrandChange('')">
+            <button class="touch-target pr-3 text-slate-500 hover:text-white" (click)="onBrandChange('')">
               <span class="material-symbols-outlined" style="font-size:14px">close</span>
             </button>
           }
@@ -159,7 +182,7 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
         <div class="flex flex-wrap gap-2">
           @for (c of conditions; track c.value) {
             <button
-              class="px-3 py-1 rounded-full text-xs font-medium border transition-colors"
+              class="touch-target px-3 py-1 rounded-full text-xs font-medium border transition-colors"
               [class]="activeCondition() === c.value
                 ? 'bg-primary/15 border-primary/50 text-primary'
                 : 'bg-card-dark border-[#333] text-slate-400 hover:border-slate-500 hover:text-white'"
@@ -174,7 +197,7 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
       <!-- Clear All -->
       @if (hasActiveFilters()) {
         <button
-          class="w-full text-xs font-bold uppercase tracking-widest py-2 rounded-lg border border-[#333] text-slate-500 hover:text-white hover:border-slate-500 transition-colors"
+          class="touch-target w-full text-xs font-bold uppercase tracking-widest py-2 rounded-lg border border-[#333] text-slate-500 hover:text-white hover:border-slate-500 transition-colors"
           (click)="clearAll()"
         >
           Clear All Filters
@@ -189,6 +212,10 @@ export class VaultSidebarComponent implements OnInit {
   currency       = input<string>('USD');
   /** Seed initial filter state (e.g. restored from URL on parent init). */
   initialFilters = input<Partial<VaultFilters>>({});
+  mobileMode = input<boolean>(false);
+
+  /** Emitted only when the sidebar is rendered in mobile mode and user closes it. */
+  closed = output<void>();
 
   filtersChange  = output<VaultFilters>();
 
@@ -280,10 +307,14 @@ export class VaultSidebarComponent implements OnInit {
     this.emit();
   }
 
-  startWearDrag(e: MouseEvent): void { e.preventDefault(); this.wearDragging = true; }
+  startWearDrag(e: PointerEvent): void {
+    e.preventDefault();
+    this.wearDragging = true;
+    (e.currentTarget as HTMLElement | null)?.setPointerCapture?.(e.pointerId);
+  }
   stopWearDrag(): void { this.wearDragging = false; }
 
-  onWearDrag(e: MouseEvent): void {
+  onWearDrag(e: PointerEvent): void {
     if (!this.wearDragging) return;
     const thumb = document.elementFromPoint(e.clientX, e.clientY);
     const track = (thumb?.closest('.relative') as HTMLElement | null);

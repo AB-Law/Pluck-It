@@ -49,4 +49,27 @@ html, body {
   background-color: #000;
   color: #E0E0E0;
   font-family: Inter, sans-serif;
+  overscroll-behavior: none;
+  overflow-x: hidden;
+}
+
+body {
+  min-height: 100dvh;
+}
+
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.safe-area-shell {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.mobile-overlay-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(2px);
 }

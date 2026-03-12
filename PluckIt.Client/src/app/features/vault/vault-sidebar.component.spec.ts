@@ -1,6 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { VaultSidebarComponent } from './vault-sidebar.component';
-import { VaultFilters } from './vault-sidebar.component';
+import { VaultSidebarComponent, VaultFilters } from './vault-sidebar.component';
 import { ActivatedRoute } from '@angular/router';
 import { of } from 'rxjs';
 
@@ -119,12 +118,12 @@ describe('VaultSidebarComponent', () => {
     } as DOMRect);
     const thumb = { closest: vi.fn().mockReturnValue(track) } as unknown as Element;
     const spy = vi.spyOn(document, 'elementFromPoint').mockReturnValue(thumb);
-    component.startWearDrag(new MouseEvent('mousedown', { clientX: 0 }) );
+    component.startWearDrag(new PointerEvent('pointerdown', { clientX: 0, clientY: 0 }) );
     spy.mockReturnValue(track);
-    component.onWearDrag(new MouseEvent('mousemove', { clientX: 200, clientY: 0 }) );
+    component.onWearDrag(new PointerEvent('pointermove', { clientX: 200, clientY: 0 }) );
     expect(component.minWears()).toBe(200);
     component.stopWearDrag();
-    component.onWearDrag(new MouseEvent('mousemove', { clientX: 20, clientY: 0 }) );
+    component.onWearDrag(new PointerEvent('pointermove', { clientX: 20, clientY: 0 }) );
     expect(component.minWears()).toBe(200);
   });
 

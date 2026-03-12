@@ -8,6 +8,7 @@ import { Observable, of } from 'rxjs';
 import { signal } from '@angular/core';
 import { Collection } from '../../core/models/collection.model';
 import { ClothingItem } from '../../core/models/clothing-item.model';
+import { MobileNavState } from '../../shared/layout/mobile-nav.state';
 
 describe('CollectionsComponent', () => {
   let component: CollectionsComponent;
@@ -29,6 +30,7 @@ describe('CollectionsComponent', () => {
   };
   let wardrobeService: { getAll: ReturnType<typeof vi.fn> };
   let route: { snapshot: { queryParamMap: ReturnType<typeof convertToParamMap> }; queryParamMap: any };
+let mobileNavState: MobileNavState;
 
   const COLLECTION: Collection = {
     id: 'c-1',
@@ -97,12 +99,14 @@ describe('CollectionsComponent', () => {
     }).compileComponents();
     fixture = TestBed.createComponent(CollectionsComponent);
     component = fixture.componentInstance;
+    mobileNavState = TestBed.inject(MobileNavState);
     fixture.detectChanges();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
+    mobileNavState.closePanel();
   });
 
   it('should create', () => {
@@ -277,5 +281,46 @@ describe('CollectionsComponent', () => {
     (component as any).showCreateModal.set(true);
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('app-create-collection-modal')).toBeTruthy();
+  });
+
+  it('routes settings open to shell profile panel on mobile and local panel on desktop', () => {
+    Object.defineProperty(globalThis.window, 'innerWidth', { value: 390, configurable: true });
+    (component as any).onWindowResize();
+    mobileNavState.closePanel();
+    (component as any).openSettings();
+    expect(mobileNavState.activePanel()).toBe('profile');
+    expect((component as any).settingsOpen()).toBe(false);
+
+    mobileNavState.closePanel();
+    Object.defineProperty(globalThis.window, 'innerWidth', { value: 1200, configurable: true });
+    (component as any).onWindowResize();
+    (component as any).openSettings();
+    expect((component as any).settingsOpen()).toBe(true);
+    expect(mobileNavState.activePanel()).toBe('none');
+  });
+
+  it('restores main focus target after settings panel close', async () => {
+    const focusSpy = vi.spyOn(
+      fixture.nativeElement.querySelector('[aria-label="Collection details"]') as HTMLElement,
+      'focus',
+    );
+
+    (component as any).settingsOpen.set(true);
+    (component as any).closeSettingsPanel();
+
+    await Promise.resolve();
+    expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true });
+  });
+
+  it('clears stale mobile panel before opening settings', () => {
+    Object.defineProperty(globalThis.window, 'innerWidth', { value: 390, configurable: true });
+    (component as any).onWindowResize();
+    mobileNavState.openDigest();
+    const closeSpy = vi.spyOn(mobileNavState, 'closePanel');
+
+    (component as any).openSettings();
+
+    expect(closeSpy).toHaveBeenCalled();
+    expect(mobileNavState.activePanel()).toBe('profile');
   });
 });

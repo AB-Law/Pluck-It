@@ -1,4 +1,4 @@
-import { Component, OnInit, signal, computed } from '@angular/core';
+import { Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild, computed, effect, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { DiscoverService } from '../../core/services/discover.service';
 import { ScrapedItem, ScraperSource, DiscoverFeedQuery } from '../../core/models/scraped-item.model';
@@ -6,13 +6,14 @@ import { DiscoverCardComponent } from './discover-card.component';
 import { SourceSidebarComponent } from './source-sidebar.component';
 import { AppHeaderComponent } from '../../shared/app-header.component';
 import { ProfilePanelComponent } from '../profile/profile-panel.component';
+import { MobileNavState } from '../../shared/layout/mobile-nav.state';
 
 @Component({
   selector: 'app-discover',
   standalone: true,
   imports: [CommonModule, AppHeaderComponent, ProfilePanelComponent, DiscoverCardComponent, SourceSidebarComponent],
   template: `
-    <div class="relative flex h-screen flex-col overflow-hidden bg-black text-slate-100">
+    <div class="relative flex h-[100dvh] flex-col overflow-hidden bg-black text-slate-100 pb-16 md:pb-0">
 
       <!-- Top bar -->
       <app-shared-header
@@ -22,20 +23,31 @@ import { ProfilePanelComponent } from '../profile/profile-panel.component';
         searchPlaceholder="Search styles, tags…"
         (searchValueChange)="searchQuery.set($event)"
         (notificationsRequested)="noop()"
-        (settingsRequested)="settingsOpen.set(true)"
+        (settingsRequested)="openSettings()"
       />
 
-      <header class="flex items-center gap-4 border-b border-border-chrome px-6 py-3 flex-shrink-0">
+      <header class="flex flex-wrap items-center gap-3 border-b border-border-chrome px-4 sm:px-6 py-3 flex-shrink-0">
         <div class="flex items-center gap-2">
           <span class="material-symbols-outlined text-primary">explore</span>
           <h1 class="text-sm font-bold tracking-wide">Discover</h1>
         </div>
 
+        @if (!isDesktopLayout()) {
+          <button
+            class="touch-target h-10 w-10 rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] flex items-center justify-center"
+            aria-label="Open sources"
+            (click)="openSources()"
+            title="Show sources"
+          >
+            <span class="material-symbols-outlined" style="font-size:20px">menu</span>
+          </button>
+        }
+
         <!-- Sort -->
         <div class="flex items-center gap-2 ml-auto">
           <span class="text-xs text-slate-500">Sort:</span>
           <button
-            class="rounded-lg border px-3 py-1.5 text-xs transition-colors"
+            class="touch-target rounded-lg border px-3 py-1.5 text-xs transition-colors"
             [class]="sortBy() === 'score'
               ? 'border-primary/40 bg-primary/10 text-primary'
               : 'border-border-chrome text-slate-400 hover:text-slate-100'"
@@ -44,7 +56,7 @@ import { ProfilePanelComponent } from '../profile/profile-panel.component';
             Top
           </button>
           <button
-            class="rounded-lg border px-3 py-1.5 text-xs transition-colors"
+            class="touch-target rounded-lg border px-3 py-1.5 text-xs transition-colors"
             [class]="sortBy() === 'recent'
               ? 'border-primary/40 bg-primary/10 text-primary'
               : 'border-border-chrome text-slate-400 hover:text-slate-100'"
@@ -54,12 +66,26 @@ import { ProfilePanelComponent } from '../profile/profile-panel.component';
           </button>
         </div>
 
+        @if (showSources()) {
+          <div class="mobile-overlay-shell md:hidden" (click)="closeSources()"></div>
+          <app-source-sidebar
+            class="fixed inset-0 z-50"
+            [mobileMode]="true"
+            [sources]="sources()"
+            [activeSourceId]="activeSourceId()"
+            (sourceSelected)="onMobileSourceSelected($event)"
+            (unsubscribe)="onUnsubscribe($event)"
+            (suggestBrand)="onSuggestBrand($event)"
+            (closed)="closeSources()"
+          />
+        }
+
         <!-- Time range -->
         <div class="flex items-center gap-1.5">
           <span class="text-xs text-slate-500">Range:</span>
           @for (opt of timeRangeOptions; track opt.value) {
             <button
-              class="rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors"
+              class="touch-target rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors"
               [class]="timeRange() === opt.value
                 ? 'border-primary/40 bg-primary/10 text-primary'
                 : 'border-border-chrome text-slate-400 hover:text-slate-100'"
@@ -73,10 +99,11 @@ import { ProfilePanelComponent } from '../profile/profile-panel.component';
       </header>
 
       <!-- Body: sidebar + grid -->
-      <div class="flex flex-1 overflow-hidden">
+      <div class="flex flex-1 min-h-0 overflow-hidden">
 
         <!-- Source sidebar -->
         <app-source-sidebar
+          class="hidden md:flex"
           [sources]="sources()"
           [activeSourceId]="activeSourceId()"
           (sourceSelected)="onSourceSelected($event)"
@@ -85,7 +112,12 @@ import { ProfilePanelComponent } from '../profile/profile-panel.component';
         />
 
         <!-- Main feed -->
-        <main class="flex-1 overflow-y-auto px-6 py-6">
+        <main
+          #mainScrollArea
+          class="min-h-0 flex-1 overflow-y-auto touch-pan-y px-4 py-4 md:px-6 md:py-6 outline-none"
+          tabindex="-1"
+          aria-label="Discover feed"
+        >
 
           @if (loading()) {
             <!-- Skeleton loader -->
@@ -300,11 +332,15 @@ import { ProfilePanelComponent } from '../profile/profile-panel.component';
     </div>
 
     @if (settingsOpen()) {
-      <app-profile-panel (closed)="settingsOpen.set(false)" />
+      <app-profile-panel (closed)="closeSettingsPanel()" />
     }
   `,
 })
-export class DiscoverComponent implements OnInit {
+export class DiscoverComponent implements OnInit, OnDestroy {
+  @ViewChild('mainScrollArea')
+  private readonly mainScrollArea?: ElementRef<HTMLElement>;
+  protected readonly showSources = signal(false);
+  protected readonly desktopLayout = signal(false);
   protected allItems = signal<ScrapedItem[]>([]);
   protected sources = signal<ScraperSource[]>([]);
   protected loading = signal(true);
@@ -319,6 +355,7 @@ export class DiscoverComponent implements OnInit {
   protected searchQuery = signal('');
   protected settingsOpen = signal(false);
   private readonly preloadedImageUrls = new Set<string>();
+  private readonly mobileNavState = inject(MobileNavState);
 
   readonly skeletons = Array.from({ length: 15 }, (_, i) => i);
   readonly timeRangeOptions = [
@@ -338,13 +375,83 @@ export class DiscoverComponent implements OnInit {
     );
   });
 
-  constructor(private readonly discoverService: DiscoverService) { }
+  constructor(private readonly discoverService: DiscoverService) {
+    effect(() => {
+      if (this.mobileNavState.activePanel() === 'none') {
+        this.restoreMainFocusTarget();
+      }
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.mobileNavState.closePanel();
+  }
 
   protected noop(): void {}
+
+  @HostListener('window:resize')
+  protected onWindowResize(): void {
+    this.updateLayoutMode();
+  }
+
+  /**
+   * Indicates whether the viewport is currently in desktop layout mode.
+   */
+  protected isDesktopLayout(): boolean {
+    return this.desktopLayout();
+  }
+
+  /**
+   * Opens the mobile sources overlay.
+   */
+  protected openSources(): void {
+    this.showSources.set(true);
+  }
+
+  /**
+   * Closes the mobile sources overlay.
+   */
+  protected closeSources(): void {
+    this.showSources.set(false);
+  }
+
+  protected openSettings(): void {
+    this.mobileNavState.closePanel();
+    if (!this.isDesktopLayout()) {
+      this.mobileNavState.openProfile();
+      return;
+    }
+
+    this.settingsOpen.set(true);
+  }
+
+  protected closeSettingsPanel(): void {
+    this.settingsOpen.set(false);
+    this.mobileNavState.closePanel();
+    this.restoreMainFocusTarget();
+  }
+
+  private restoreMainFocusTarget(): void {
+    queueMicrotask(() => {
+      this.mainScrollArea?.nativeElement?.focus({ preventScroll: true });
+    });
+  }
+
+  /**
+   * Recomputes responsive mode for source-list presentation.
+   */
+  private updateLayoutMode(): void {
+    if (globalThis.window === undefined) return;
+    this.desktopLayout.set(globalThis.window.innerWidth >= 768);
+    if (this.desktopLayout()) {
+      this.showSources.set(false);
+    }
+  }
 
   ngOnInit() {
     this.loadSources();
     this.loadFeed();
+    this.updateLayoutMode();
   }
 
   private loadSources() {
@@ -463,6 +570,14 @@ export class DiscoverComponent implements OnInit {
   onSourceSelected(sourceId: string | null) {
     this.activeSourceId.set(sourceId);
     this.loadFeed();
+  }
+
+  /**
+   * Handles source selection from the mobile side sheet and closes the overlay.
+   */
+  protected onMobileSourceSelected(sourceId: string | null): void {
+    this.onSourceSelected(sourceId);
+    this.closeSources();
   }
 
   onUnsubscribe(sourceId: string) {

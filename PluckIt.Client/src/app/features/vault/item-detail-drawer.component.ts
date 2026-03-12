@@ -23,6 +23,10 @@ const CARE_ICON_MAP: Record<string, { icon: string; label: string }> = {
       class="w-80 flex-shrink-0 flex-col border-l border-border-chrome bg-black overflow-y-auto transition-transform duration-300 ease-in-out"
       [class.hidden]="!item()"
       [class.flex]="!!item()"
+      [class.fixed]="mobileMode()"
+      [class.inset-0]="mobileMode()"
+      [class.z-50]="mobileMode()"
+      [class.w-full]="mobileMode()"
     >
       @if (item(); as itm) {
         <div class="p-6">
@@ -30,7 +34,7 @@ const CARE_ICON_MAP: Record<string, { icon: string; label: string }> = {
           <!-- Header -->
           <div class="mb-6 flex items-center justify-between">
             <h3 class="text-lg font-bold text-slate-100">Item Details</h3>
-            <button class="text-slate-500 hover:text-white transition-colors" (click)="closed.emit()">
+            <button class="h-10 w-10 flex items-center justify-center rounded-lg text-slate-500 hover:text-white hover:bg-card-dark transition-colors touch-target" (click)="closed.emit()">
               <span class="material-symbols-outlined">close</span>
             </button>
           </div>
@@ -129,7 +133,7 @@ const CARE_ICON_MAP: Record<string, { icon: string; label: string }> = {
 
               <!-- Log Wear -->
               <button
-                class="w-full flex items-center justify-center gap-2 rounded-lg border border-primary/40 py-2.5 text-sm font-bold text-primary hover:bg-primary/10 transition-colors"
+                class="touch-target w-full flex items-center justify-center gap-2 rounded-lg border border-primary/40 py-2.5 text-sm font-bold text-primary hover:bg-primary/10 transition-colors"
                 [disabled]="logWearWorking()"
                 (click)="logWear(itm)"
                 aria-label="Log Wear"
@@ -140,7 +144,7 @@ const CARE_ICON_MAP: Record<string, { icon: string; label: string }> = {
 
               <!-- Share to Collection -->
               <button
-                class="w-full rounded-lg bg-primary py-3 text-sm font-bold text-white hover:bg-blue-500 transition-colors"
+                class="touch-target w-full rounded-lg bg-primary py-3 text-sm font-bold text-white hover:bg-blue-500 transition-colors"
                 (click)="shareToCollection.emit(itm)"
               >
                 Share to Collection
@@ -148,7 +152,7 @@ const CARE_ICON_MAP: Record<string, { icon: string; label: string }> = {
 
               <!-- Edit Metadata -->
               <button
-                class="w-full rounded-lg border border-border-chrome py-3 text-sm font-bold text-slate-300 hover:bg-card-dark transition-colors"
+                class="touch-target w-full rounded-lg border border-border-chrome py-3 text-sm font-bold text-slate-300 hover:bg-card-dark transition-colors"
                 (click)="editRequested.emit(itm)"
               >
                 Edit Metadata
@@ -163,6 +167,7 @@ const CARE_ICON_MAP: Record<string, { icon: string; label: string }> = {
 })
 export class ItemDetailDrawerComponent {
   item = input<ClothingItem | null>(null);
+  mobileMode = input<boolean>(false);
 
   closed = output<void>();
   editRequested = output<ClothingItem>();

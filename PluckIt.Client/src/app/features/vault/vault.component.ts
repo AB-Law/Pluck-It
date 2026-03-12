@@ -1,4 +1,4 @@
-import { Component, OnInit, computed, signal } from '@angular/core';
+import { Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild, computed, effect, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
 import { WardrobeService } from '../../core/services/wardrobe.service';
@@ -22,6 +22,7 @@ import { matchesItem } from '../../core/utils/search.utils';
 import { VaultInsightsService } from '../../core/services/vault-insights.service';
 import { VaultInsightsPanelComponent } from './vault-insights-panel.component';
 import { CpwIntelItem, CpwIntelPanelItem, VaultInsightsPanelData, VaultInsightsResponse } from '../../core/models/vault-insights.model';
+import { MobileNavState } from '../../shared/layout/mobile-nav.state';
 
 @Component({
   selector: 'app-vault',
@@ -39,7 +40,7 @@ import { CpwIntelItem, CpwIntelPanelItem, VaultInsightsPanelData, VaultInsightsR
     AddToCollectionModalComponent,
   ],
   template: `
-    <div class="relative flex h-screen flex-col overflow-hidden bg-black text-slate-100 font-display">
+    <div class="relative flex h-[100dvh] flex-col overflow-hidden bg-black text-slate-100 pb-16 md:pb-0 font-display">
 
       <app-shared-header
         section="vault"
@@ -49,26 +50,46 @@ import { CpwIntelItem, CpwIntelPanelItem, VaultInsightsPanelData, VaultInsightsR
         (searchValueChange)="searchQuery.set($event)"
         [showBackShortcut]="true"
         backShortcutLabel="Back to Wardrobe"
+        [showFilterShortcut]="true"
+        (filtersRequested)="openMobileFilters()"
         (notificationsRequested)="noop()"
-        (settingsRequested)="settingsOpen.set(true)"
+        (settingsRequested)="openSettings()"
       />
 
       <!-- ─── Body (3-col layout) ──────────────────────────────────── -->
-      <div class="flex flex-1 overflow-hidden">
-
+      <div class="flex flex-1 min-h-0 overflow-hidden">
         <!-- Left Sidebar (smart groups + range matrix) -->
         <app-vault-sidebar
+          class="hidden md:flex"
           [maxPrice]="maxItemPrice()"
           [currency]="currency()"
           [initialFilters]="activeFilters()"
           (filtersChange)="onFiltersChange($event)"
         />
 
+        @if (showMobileFilters()) {
+          <div class="mobile-overlay-shell md:hidden" (click)="closeFilters()"></div>
+          <app-vault-sidebar
+            class="fixed inset-0 z-50"
+            [mobileMode]="true"
+            [maxPrice]="maxItemPrice()"
+            [currency]="currency()"
+            [initialFilters]="activeFilters()"
+            (filtersChange)="onMobileFiltersChange($event)"
+            (closed)="closeFilters()"
+          />
+        }
+
         <!-- Main content -->
-        <main class="flex-1 overflow-y-auto bg-black p-6">
+        <main
+          #mainScrollArea
+          class="min-h-0 flex-1 overflow-y-auto touch-pan-y bg-black p-4 md:p-6 outline-none"
+          tabindex="-1"
+          aria-label="Vault content"
+        >
 
           <!-- Stats row -->
-          <div class="mb-8 flex flex-wrap gap-4">
+          <div class="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             <app-stat-card
               label="Total Archive Items"
               [value]="totalItems().toLocaleString()"
@@ -141,7 +162,7 @@ import { CpwIntelItem, CpwIntelPanelItem, VaultInsightsPanelData, VaultInsightsR
           }
 
           <!-- Grid -->
-          <div class="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             @for (item of filteredItems(); track item.id) {
               <app-vault-card
                 [item]="item"
@@ -157,9 +178,9 @@ import { CpwIntelItem, CpwIntelPanelItem, VaultInsightsPanelData, VaultInsightsR
 
           <!-- Load More -->
           @if (hasMore()) {
-            <div class="mt-8 flex justify-center">
+          <div class="mt-8 flex justify-center">
               <button
-                class="px-6 py-2.5 rounded-lg border border-[#333] text-sm font-medium text-slate-300 hover:text-white hover:border-slate-500 transition-colors font-mono disabled:opacity-50"
+              class="touch-target px-6 py-2.5 rounded-lg border border-[#333] text-sm font-medium text-slate-300 hover:text-white hover:border-slate-500 transition-colors font-mono disabled:opacity-50"
                 [disabled]="loadingMore()"
                 (click)="loadMore()"
               >
@@ -178,7 +199,11 @@ import { CpwIntelItem, CpwIntelPanelItem, VaultInsightsPanelData, VaultInsightsR
         </main>
 
         <!-- Right drawer -->
+        @if (selectedItem() && mobileMode()) {
+          <div class="mobile-overlay-shell md:hidden" (click)="selectedItem.set(null)"></div>
+        }
         <app-item-detail-drawer
+          [mobileMode]="mobileMode()"
           [item]="selectedItem()"
           (closed)="selectedItem.set(null)"
           (editRequested)="openEditModal($event)"
@@ -208,19 +233,23 @@ import { CpwIntelItem, CpwIntelPanelItem, VaultInsightsPanelData, VaultInsightsR
       }
 
       @if (settingsOpen()) {
-        <app-profile-panel (closed)="settingsOpen.set(false)" />
+        <app-profile-panel (closed)="closeSettingsPanel()" />
       }
 
     </div>
   `,
 })
-export class VaultComponent implements OnInit {
+export class VaultComponent implements OnInit, OnDestroy {
+  @ViewChild('mainScrollArea')
+  private readonly mainScrollArea?: ElementRef<HTMLElement>;
 
   protected allItems = signal<ClothingItem[]>([]);
   protected readonly settingsOpen = signal(false);
   protected selectedItem = signal<ClothingItem | null>(null);
   protected editingItem = signal<ClothingItem | null>(null);
   protected sharingItem = signal<ClothingItem | null>(null);
+  protected readonly mobileFiltersOpen = signal(false);
+  protected readonly mobileMode = signal(false);
   protected loading = signal(true);
   protected loadingMore = signal(false);
   protected hasMore = signal(false);
@@ -246,7 +275,18 @@ export class VaultComponent implements OnInit {
     private readonly profileService: UserProfileService,
     private readonly router: Router,
     private readonly route: ActivatedRoute,
-  ) { }
+    protected readonly mobileNavState: MobileNavState,
+  ) {
+    effect(() => {
+      if (this.mobileNavState.activePanel() === 'none') {
+        this.restoreMainFocusTarget();
+      }
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.mobileNavState.closePanel();
+  }
 
   ngOnInit(): void {
     this.profileService.load().subscribe();
@@ -268,9 +308,54 @@ export class VaultComponent implements OnInit {
     this.loadItems(restored);
     this.loadWearSuggestions();
     this.loadInsights();
+    this.updateViewportMode();
+  }
+
+  @HostListener('window:resize')
+  protected onWindowResize(): void {
+    this.updateViewportMode();
+  }
+
+  private updateViewportMode(): void {
+    if (globalThis.window === undefined) {
+      return;
+    }
+    this.mobileMode.set(globalThis.window.innerWidth < 768);
   }
 
   protected noop(): void {}
+
+  protected readonly showMobileFilters = this.mobileFiltersOpen.asReadonly();
+
+  protected openMobileFilters(): void {
+    this.mobileFiltersOpen.set(true);
+  }
+
+  protected closeFilters(): void {
+    this.mobileFiltersOpen.set(false);
+  }
+
+  protected openSettings(): void {
+    this.mobileNavState.closePanel();
+    if (this.mobileMode()) {
+      this.mobileNavState.openProfile();
+      return;
+    }
+
+    this.settingsOpen.set(true);
+  }
+
+  protected closeSettingsPanel(): void {
+    this.settingsOpen.set(false);
+    this.mobileNavState.closePanel();
+    this.restoreMainFocusTarget();
+  }
+
+  private restoreMainFocusTarget(): void {
+    queueMicrotask(() => {
+      this.mainScrollArea?.nativeElement?.focus({ preventScroll: true });
+    });
+  }
 
   // ── Computed stats ──────────────────────────────────────────────────────
 
@@ -339,6 +424,11 @@ export class VaultComponent implements OnInit {
     this.activeFilters.set(f);
     this.syncUrl(f);
     this.loadItems(f);
+  }
+
+  protected onMobileFiltersChange(f: VaultFilters): void {
+    this.onFiltersChange(f);
+    this.closeFilters();
   }
 
   loadMore(): void {

@@ -8,6 +8,7 @@ import { of, throwError } from 'rxjs';
 import { ItemCondition } from '../../core/models/clothing-item.model';
 import { SmartGroup, VaultFilters } from './vault-sidebar.component';
 import { CollectionService } from '../../core/services/collection.service';
+import { MobileNavState } from '../../shared/layout/mobile-nav.state';
 
 describe('VaultComponent', () => {
   let component: VaultComponent;
@@ -37,6 +38,7 @@ describe('VaultComponent', () => {
     addItem: ReturnType<typeof vi.fn>;
   };
   let route: { snapshot: { queryParamMap: ReturnType<typeof convertToParamMap> }; queryParamMap: any };
+  let mobileNavState: MobileNavState;
   const ITEM = {
     id: 'i-1',
     imageUrl: '/img/1.jpg',
@@ -128,7 +130,12 @@ describe('VaultComponent', () => {
     }).compileComponents();
     fixture = TestBed.createComponent(VaultComponent);
     component = fixture.componentInstance;
+    mobileNavState = TestBed.inject(MobileNavState);
     fixture.detectChanges();
+  });
+
+  afterEach(() => {
+    mobileNavState.closePanel();
   });
 
   it('should create', () => {
@@ -603,5 +610,46 @@ describe('VaultComponent', () => {
     wardrobeService.getAll = vi.fn().mockReturnValue(throwError(() => new Error('paged fail')));
     component.loadMore();
     expect((component as any).loadingMore()).toBe(false);
+  });
+
+  it('routes settings open to shell profile panel on mobile and local panel on desktop', () => {
+    Object.defineProperty(globalThis.window, 'innerWidth', { value: 390, configurable: true });
+    (component as any).onWindowResize();
+    mobileNavState.closePanel();
+    (component as any).openSettings();
+    expect(mobileNavState.activePanel()).toBe('profile');
+    expect((component as any).settingsOpen()).toBe(false);
+
+    mobileNavState.closePanel();
+    Object.defineProperty(globalThis.window, 'innerWidth', { value: 1280, configurable: true });
+    (component as any).onWindowResize();
+    (component as any).openSettings();
+    expect((component as any).settingsOpen()).toBe(true);
+    expect(mobileNavState.activePanel()).toBe('none');
+  });
+
+  it('restores main focus target after settings panel close', async () => {
+    const focusSpy = vi.spyOn(
+      fixture.nativeElement.querySelector('[aria-label="Vault content"]') as HTMLElement,
+      'focus',
+    );
+
+    (component as any).settingsOpen.set(true);
+    (component as any).closeSettingsPanel();
+
+    await Promise.resolve();
+    expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true });
+  });
+
+  it('clears stale mobile panel before opening settings', () => {
+    Object.defineProperty(globalThis.window, 'innerWidth', { value: 390, configurable: true });
+    (component as any).onWindowResize();
+    mobileNavState.openDigest();
+    const closeSpy = vi.spyOn(mobileNavState, 'closePanel');
+
+    (component as any).openSettings();
+
+    expect(closeSpy).toHaveBeenCalled();
+    expect(mobileNavState.activePanel()).toBe('profile');
   });
 });

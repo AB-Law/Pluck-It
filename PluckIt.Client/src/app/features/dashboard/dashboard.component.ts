@@ -1,5 +1,5 @@
-import { Component, OnInit, signal, ViewChild } from '@angular/core';
-import { Router } from '@angular/router';
+import { Component, DestroyRef, ElementRef, HostListener, OnDestroy, OnInit, effect, signal, ViewChild, inject } from '@angular/core';
+import { ActivatedRoute, Router } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 import { UserProfileService } from '../../core/services/user-profile.service';
 import { WardrobeService } from '../../core/services/wardrobe.service';
@@ -8,13 +8,15 @@ import { StylistPanelComponent } from '../stylist/stylist.component';
 import { ProfilePanelComponent } from '../profile/profile-panel.component';
 import { DigestPanelComponent } from '../digest/digest-panel.component';
 import { AppHeaderComponent } from '../../shared/app-header.component';
+import { MobileNavState } from '../../shared/layout/mobile-nav.state';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
   imports: [WardrobeComponent, StylistPanelComponent, ProfilePanelComponent, DigestPanelComponent, AppHeaderComponent],
   template: `
-    <div class="flex flex-col h-screen bg-background-dark text-chrome overflow-hidden font-display">
+    <div class="flex flex-col h-[100dvh] bg-background-dark text-chrome overflow-hidden pb-16 md:pb-0 font-display">
 
       <app-shared-header
         section="dashboard"
@@ -25,31 +27,43 @@ import { AppHeaderComponent } from '../../shared/app-header.component';
         [showUpload]="true"
         (uploadRequested)="onUploadRequested()"
         [showDigest]="true"
-        (digestRequested)="digestOpen.set(true)"
+        (digestRequested)="openDigest()"
         (notificationsRequested)="noop()"
-        (settingsRequested)="settingsOpen.set(true)"
+        (settingsRequested)="openSettings()"
+        [showStylistShortcut]="true"
+        (stylistRequested)="openStylist()"
       />
 
       <!-- ─── Body ─────────────────────────────────────────────────── -->
       <div class="flex flex-1 min-h-0">
 
         <!-- Wardrobe main area -->
-        <app-wardrobe
-          #wardrobeRef
-          class="flex-1 min-w-0 overflow-y-auto custom-scrollbar"
-          [searchQuery]="searchQuery()"
-          [selectedIds]="selectedIds()"
-          (itemToggled)="toggleItemSelection($event)"
-        />
+        <main
+          #mainScrollArea
+          class="flex-1 min-w-0 min-h-0 overflow-y-auto touch-pan-y custom-scrollbar outline-none"
+          tabindex="-1"
+          aria-label="Wardrobe items"
+        >
+          <app-wardrobe
+            #wardrobeRef
+            [searchQuery]="searchQuery()"
+            [selectedIds]="selectedIds()"
+            (itemToggled)="toggleItemSelection($event)"
+          />
+        </main>
 
         <!-- Stylist sidebar — always visible lg+, overlay on mobile -->
         <div
           class="hidden lg:flex w-96 shrink-0 border-l border-border-subtle flex-col relative"
           [class.!flex]="stylistOpen()"
           [class.fixed]="stylistOpen()"
-          [class.inset-y-0]="stylistOpen()"
-          [class.right-0]="stylistOpen()"
-          [class.z-50]="stylistOpen()"
+          [class.inset-y-0]="stylistOpen() && !isMobile()"
+          [class.right-0]="stylistOpen() && !isMobile()"
+          [class.left-0]="stylistOpen() && isMobile()"
+          [class.top-0]="stylistOpen() && isMobile()"
+          [class.bottom-14]="stylistOpen() && isMobile()"
+          [class.z-50]="stylistOpen() && !isMobile()"
+          [class.z-30]="stylistOpen() && isMobile()"
           [class.w-full]="stylistOpen()"
           [class.sm:w-96]="stylistOpen()"
           [class.ring-2]="dragOver()"
@@ -76,27 +90,21 @@ import { AppHeaderComponent } from '../../shared/app-header.component';
         </div>
       </div>
 
-      <!-- Mobile FAB -->
-      <button
-        class="lg:hidden fixed bottom-6 right-6 z-40 h-14 w-14 rounded-full bg-primary text-white shadow-lg shadow-primary/30 flex items-center justify-center"
-        (click)="stylistOpen.set(!stylistOpen())"
-      >
-        <span class="material-symbols-outlined">smart_toy</span>
-      </button>
-
       <!-- Profile / Settings panel -->
       @if (settingsOpen()) {
-        <app-profile-panel (closed)="settingsOpen.set(false)" />
+        <app-profile-panel (closed)="closeSettingsPanel()" />
       }
 
       <!-- Weekly Digest panel -->
       @if (digestOpen()) {
-        <app-digest-panel (closed)="digestOpen.set(false)" />
+        <app-digest-panel (closed)="closeDigestPanel()" />
       }
     </div>
   `,
 })
-export class DashboardComponent implements OnInit {
+export class DashboardComponent implements OnInit, OnDestroy {
+  @ViewChild('mainScrollArea')
+  private readonly mainScrollArea?: ElementRef<HTMLElement>;
   @ViewChild('wardrobeRef') wardrobeRef!: WardrobeComponent;
 
   protected readonly stylistOpen = signal(false);
@@ -105,13 +113,27 @@ export class DashboardComponent implements OnInit {
   protected readonly searchQuery = signal('');
   protected readonly selectedIds = signal<string[]>([]);
   protected readonly dragOver = signal(false);
+  protected readonly isMobile = signal(false);
+  protected readonly mobileNavState = inject(MobileNavState);
+  private readonly destroyRef = inject(DestroyRef);
 
   constructor(
     protected readonly auth: AuthService,
     private readonly profileService: UserProfileService,
     private readonly wardrobeService: WardrobeService,
     private readonly router: Router,
-  ) { }
+    private readonly route: ActivatedRoute,
+  ) {
+    effect(() => {
+      if (this.mobileNavState.activePanel() === 'none') {
+        this.restoreMainFocusTarget();
+      }
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.mobileNavState.closePanel();
+  }
 
   logout(): void {
     this.auth.logout();
@@ -121,12 +143,92 @@ export class DashboardComponent implements OnInit {
   ngOnInit(): void {
     // Pre-load the user profile so the review modal currency/size system is available immediately
     this.profileService.load().subscribe();
+    this.updateViewportMode();
+
+    this.route.queryParamMap
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(params => this.applyMobilePanelCommand(params.get('mobilePanel')));
+  }
+
+  @HostListener('window:resize')
+  protected onWindowResize(): void {
+    this.updateViewportMode();
+  }
+
+  private updateViewportMode(): void {
+    if (globalThis.window === undefined) {
+      return;
+    }
+    this.isMobile.set(globalThis.window.innerWidth < 768);
   }
 
   protected noop(): void {}
 
   onUploadRequested(): void {
     this.wardrobeRef?.triggerUpload();
+  }
+
+  protected openDigest(): void {
+    this.mobileNavState.closePanel();
+    if (this.isMobile()) {
+      this.mobileNavState.openDigest();
+      return;
+    }
+    this.digestOpen.set(true);
+  }
+
+  protected openSettings(): void {
+    this.mobileNavState.closePanel();
+    if (this.isMobile()) {
+      this.mobileNavState.openProfile();
+      return;
+    }
+
+    this.settingsOpen.set(true);
+  }
+
+  protected closeDigestPanel(): void {
+    this.digestOpen.set(false);
+    this.mobileNavState.closePanel();
+    this.restoreMainFocusTarget();
+  }
+
+  protected closeSettingsPanel(): void {
+    this.settingsOpen.set(false);
+    this.mobileNavState.closePanel();
+    this.restoreMainFocusTarget();
+  }
+
+  private restoreMainFocusTarget(): void {
+    queueMicrotask(() => {
+      this.mainScrollArea?.nativeElement?.focus({ preventScroll: true });
+    });
+  }
+
+  protected openStylist(): void {
+    this.stylistOpen.set(true);
+  }
+
+  private applyMobilePanelCommand(panel: string | null): void {
+    if (panel === 'stylist') {
+      this.openStylist();
+      this.clearMobilePanelQuery();
+      return;
+    }
+
+    if (panel === 'wardrobe') {
+      this.stylistOpen.set(false);
+      this.clearMobilePanelQuery();
+    }
+  }
+
+  private clearMobilePanelQuery(): void {
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { mobilePanel: null },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
   }
 
   toggleItemSelection(id: string): void {

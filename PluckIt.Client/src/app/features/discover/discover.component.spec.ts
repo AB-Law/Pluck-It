@@ -5,6 +5,7 @@ import { ScrapedItem } from '../../core/models/scraped-item.model';
 import { Observable, of, throwError } from 'rxjs';
 import { By } from '@angular/platform-browser';
 import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
+import { MobileNavState } from '../../shared/layout/mobile-nav.state';
 
 describe('DiscoverComponent', () => {
   let component: DiscoverComponent;
@@ -24,6 +25,7 @@ describe('DiscoverComponent', () => {
     serializeUrl: ReturnType<typeof vi.fn>;
     isActive: ReturnType<typeof vi.fn>;
   };
+let mobileNavState: MobileNavState;
   const route = {
     snapshot: { queryParamMap: convertToParamMap({}) },
     queryParamMap: of(convertToParamMap({})),
@@ -87,10 +89,12 @@ describe('DiscoverComponent', () => {
     }).compileComponents();
     fixture = TestBed.createComponent(DiscoverComponent);
     component = fixture.componentInstance;
+    mobileNavState = TestBed.inject(MobileNavState);
     fixture.detectChanges();
   });
 
   afterEach(() => {
+    mobileNavState.closePanel();
     vi.restoreAllMocks();
   });
 
@@ -591,4 +595,65 @@ describe('DiscoverComponent', () => {
     consoleWarnSpy.mockRestore();
   });
 
+  it('opens and closes mobile source overlay', () => {
+    (component as any).openSources();
+    expect((component as any).showSources()).toBe(true);
+    (component as any).closeSources();
+    expect((component as any).showSources()).toBe(false);
+  });
+
+  it('automatically closes mobile source overlay on desktop breakpoint', () => {
+    Object.defineProperty(globalThis.window, 'innerWidth', { value: 500, configurable: true });
+    (component as any).onWindowResize();
+    expect((component as any).desktopLayout()).toBe(false);
+
+    (component as any).openSources();
+    expect((component as any).showSources()).toBe(true);
+
+    Object.defineProperty(globalThis.window, 'innerWidth', { value: 900, configurable: true });
+    (component as any).onWindowResize();
+    expect((component as any).isDesktopLayout()).toBe(true);
+    expect((component as any).showSources()).toBe(false);
+  });
+
+  it('routes settings open to shell profile panel on mobile and local panel on desktop', () => {
+    Object.defineProperty(globalThis.window, 'innerWidth', { value: 390, configurable: true });
+    (component as any).onWindowResize();
+    mobileNavState.closePanel();
+    (component as any).openSettings();
+    expect(mobileNavState.activePanel()).toBe('profile');
+    expect((component as any).settingsOpen()).toBe(false);
+
+    mobileNavState.closePanel();
+    Object.defineProperty(globalThis.window, 'innerWidth', { value: 1024, configurable: true });
+    (component as any).onWindowResize();
+    (component as any).openSettings();
+    expect((component as any).settingsOpen()).toBe(true);
+    expect(mobileNavState.activePanel()).toBe('none');
+  });
+
+  it('restores main focus target after settings panel close', async () => {
+    const focusSpy = vi.spyOn(
+      fixture.nativeElement.querySelector('[aria-label="Discover feed"]') as HTMLElement,
+      'focus',
+    );
+
+    (component as any).settingsOpen.set(true);
+    (component as any).closeSettingsPanel();
+
+    await Promise.resolve();
+    expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true });
+  });
+
+  it('clears stale mobile panel before opening settings', () => {
+    Object.defineProperty(globalThis.window, 'innerWidth', { value: 390, configurable: true });
+    (component as any).onWindowResize();
+    mobileNavState.openDigest();
+    const closeSpy = vi.spyOn(mobileNavState, 'closePanel');
+
+    (component as any).openSettings();
+
+    expect(closeSpy).toHaveBeenCalled();
+    expect(mobileNavState.activePanel()).toBe('profile');
+  });
 });
