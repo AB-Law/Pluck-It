@@ -68,6 +68,23 @@ const TOOL_LABELS: Record<string, string> = {
         </div>
       </div>
 
+      @if (debugEnabled()) {
+        <div class="border-b border-yellow-600/40 bg-[#0f172a] px-4 py-2 text-[11px] text-slate-300 font-mono">
+          <div class="flex flex-wrap gap-x-4 gap-y-1">
+            <span>traceId: {{ debugTraceId() ?? 'n/a' }}</span>
+            <span>runId: {{ debugRunId() ?? 'n/a' }}</span>
+            <span>model: {{ debugModel() ?? 'n/a' }}</span>
+            <span>tokens: {{ debugTokenCount() ?? 'n/a' }}</span>
+            <span>tool: {{ debugToolName() ?? 'idle' }}</span>
+            <span>latency: {{ debugToolLatencyMs() ?? 'n/a' }}ms</span>
+            <span>events: {{ debugEvents().length }}</span>
+          </div>
+          <div class="mt-2 max-h-24 overflow-auto">
+            <pre class="text-[10px] leading-snug text-[#8ca1b1] whitespace-pre-wrap">{{ debugEvents().join('\n') }}</pre>
+          </div>
+        </div>
+      }
+
       <!-- Memory panel (slide-down) -->
       @if (memoryOpen()) {
         <div class="border-b border-border-subtle bg-[#0d1117] px-4 py-3 shrink-0">
@@ -197,6 +214,14 @@ export class StylistPanelComponent implements OnInit, OnDestroy {
   readonly currentTool    = signal<string | null>(null);
   readonly memoryOpen     = signal(false);
   readonly savingMemory   = signal(false);
+  readonly debugEnabled  = signal(false);
+  readonly debugEvents   = signal<string[]>([]);
+  readonly debugTraceId  = signal<string | null>(null);
+  readonly debugRunId    = signal<string | null>(null);
+  readonly debugModel    = signal<string | null>(null);
+  readonly debugTokenCount = signal<number | null>(null);
+  readonly debugToolName = signal<string | null>(null);
+  readonly debugToolLatencyMs = signal<number | null>(null);
   /** True once the streaming bubble has been created (first token received). */
   readonly streamingActive = computed(() => this.messages().some(m => m.streaming));
 
@@ -215,6 +240,7 @@ export class StylistPanelComponent implements OnInit, OnDestroy {
   constructor(private readonly chat: ChatService) {}
 
   ngOnInit(): void {
+    this.debugEnabled.set(this.isDebugModeEnabled());
     this.messages.set([{
       role: 'assistant',
       text: "Hi! I'm your AI Stylist. Tell me what you're going for — an occasion, a vibe, or specific pieces — and I'll build looks from your wardrobe.",
@@ -230,6 +256,38 @@ export class StylistPanelComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.streamSub?.unsubscribe();
+  }
+
+  private isDebugModeEnabled(): boolean {
+    if (globalThis.window === undefined) return false;
+    const params = new URLSearchParams(globalThis.window.location.search);
+    return params.get('debug') === '1' || params.get('debug') === 'true';
+  }
+
+  private recordTraceEvent(event: ChatEvent): void {
+    if (!this.debugEnabled()) return;
+    if (event.traceId) {
+      this.debugTraceId.set(event.traceId);
+    }
+    if (event.runId) {
+      this.debugRunId.set(event.runId);
+    }
+    if (event.model) {
+      this.debugModel.set(event.model);
+    }
+    if (event.tokenCount !== undefined) {
+      this.debugTokenCount.set(event.tokenCount);
+    }
+    if (event.type === 'tool_use' || event.type === 'tool_result') {
+      this.debugToolName.set(event.name);
+    }
+    if (event.toolLatencyMs !== undefined) {
+      this.debugToolLatencyMs.set(event.toolLatencyMs);
+    }
+    this.debugEvents.update(events => {
+      const next = [...events, JSON.stringify(event)];
+      return next.length > 80 ? next.slice(-80) : next;
+    });
   }
 
   sendMessage(): void {
@@ -257,6 +315,7 @@ export class StylistPanelComponent implements OnInit, OnDestroy {
   }
 
   private handleEvent(event: ChatEvent, userText: string): void {
+    this.recordTraceEvent(event);
     switch (event.type) {
       case 'token':
         // Create the streaming bubble on the very first token (not before)

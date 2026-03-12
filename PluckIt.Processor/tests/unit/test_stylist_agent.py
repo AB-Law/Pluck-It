@@ -3,11 +3,100 @@ Unit tests for agents/stylist_agent.py.
 """
 
 import json
+import os
+import sys
+import types
+import uuid
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from agents.stylist_agent import _event_to_sse, stream_stylist_response
+from agents.stylist_agent import (
+    _event_to_sse,
+    _normalize_langfuse_trace_id,
+    _build_langfuse_callbacks,
+    _flush_langfuse_callbacks,
+    stream_stylist_response,
+)
+
+
+def test_normalize_langfuse_trace_id_accepts_uuid_and_returns_hex() -> None:
+    assert _normalize_langfuse_trace_id("b46d215b-9eba-4eb2-9595-915884fda7e8") == uuid.UUID("b46d215b-9eba-4eb2-9595-915884fda7e8").hex
+
+
+def test_build_langfuse_callbacks_is_noop_when_keys_missing() -> None:
+    with patch.dict(os.environ, {"LANGFUSE_PUBLIC_KEY": "", "LANGFUSE_SECRET_KEY": "", "LANGFUSE_HOST": ""}):
+        assert _build_langfuse_callbacks("trace-id") == []
+
+
+def test_build_langfuse_callbacks_builds_when_signature_matches() -> None:
+    calls = {}
+
+    class FakeLangfuse:
+        def __init__(self, *, public_key: str, secret_key: str, base_url: str | None = None) -> None:
+            calls["langfuse_init"] = (public_key, secret_key, base_url)
+            self.tracing_enabled = True
+
+        def flush(self) -> None:
+            calls["client_flush_called"] = True
+
+    class FakeCallback:
+        def __init__(
+            self,
+            *,
+            public_key: str,
+            secret_key: str,
+            host: str | None = None,
+            session_id: str | None = None,
+            user_id: str | None = None,
+            metadata: dict[str, str] | None = None,
+            trace_context: dict[str, str] | None = None,
+        ) -> None:
+            calls["callback_init"] = {
+                "public_key": public_key,
+                "secret_key": secret_key,
+                "host": host,
+                "session_id": session_id,
+                "user_id": user_id,
+                "metadata": metadata,
+                "trace_context": trace_context,
+            }
+            self._langfuse_client = FakeLangfuse(public_key=public_key, secret_key=secret_key, base_url=host)
+
+        def flush(self) -> None:
+            calls["callback_flush_called"] = True
+
+    @contextmanager
+    def fake_propagate_attributes(**_kwargs):
+        yield
+
+    fake_langfuse_module = types.ModuleType("langfuse")
+    fake_langfuse_module.Langfuse = FakeLangfuse
+    fake_langfuse_module.propagate_attributes = fake_propagate_attributes
+
+    fake_langfuse_langchain_module = types.ModuleType("langfuse.langchain")
+    fake_langfuse_langchain_module.CallbackHandler = FakeCallback
+
+    with (
+        patch.dict(sys.modules, {"langfuse": fake_langfuse_module, "langfuse.langchain": fake_langfuse_langchain_module}),
+        patch.dict(os.environ, {"LANGFUSE_PUBLIC_KEY": "pk-test", "LANGFUSE_SECRET_KEY": "sk-test", "LANGFUSE_HOST": "https://us.cloud.langfuse.com"}),
+    ):
+        callbacks = _build_langfuse_callbacks(
+            "b46d215b-9eba-4eb2-9595-915884fda7e8",
+            user_id="test-user",
+        )
+
+    assert len(callbacks) == 1
+    assert calls["callback_init"]["public_key"] == "pk-test"
+    assert calls["callback_init"]["secret_key"] == "sk-test"
+    assert calls["callback_init"]["host"] == "https://us.cloud.langfuse.com"
+    assert calls["callback_init"]["user_id"] == "test-user"
+    assert calls["callback_init"]["session_id"] == uuid.UUID("b46d215b-9eba-4eb2-9595-915884fda7e8").hex
+    assert calls["callback_init"]["metadata"] == {"trace_id": uuid.UUID("b46d215b-9eba-4eb2-9595-915884fda7e8").hex}
+    assert calls["callback_init"]["trace_context"] == {"trace_id": uuid.UUID("b46d215b-9eba-4eb2-9595-915884fda7e8").hex}
+    _flush_langfuse_callbacks(callbacks)
+    assert calls["client_flush_called"] is True
 
 
 def _parse_sse(event_line: str) -> dict:
@@ -136,6 +225,40 @@ async def test_stream_stylist_response_fast_followup_discovery_routes_to_scraped
     assert captured["payload"]["query"] != "denim blazers"
     assert "denim blazers" in captured["payload"]["query"]
     assert "casual" in captured["payload"]["query"]
+    assert events[-1]["type"] == "done"
+
+
+@pytest.mark.unit
+async def test_stream_stylist_response_fast_followup_passes_langfuse_callbacks_to_tools() -> None:
+    captured = {}
+    fake_callback = object()
+
+    def _fake_ainvoke(payload, config=None):
+        captured["config"] = config
+        return "wardrobe search result"
+
+    search_tool_stub = type("ToolStub", (), {"ainvoke": AsyncMock(side_effect=_fake_ainvoke)})
+    with (
+        patch("agents.stylist_agent._get_agent_graph") as mock_graph,
+        patch("agents.stylist_agent._build_langfuse_callbacks", return_value=[fake_callback]),
+        patch("agents.stylist_agent.search_wardrobe", new=search_tool_stub),
+    ):
+        events = []
+        async for event_line in stream_stylist_response(
+            user_id="user-1",
+            user_message="yes",
+            recent_messages=[{"role": "assistant", "content": "Want me to search your wardrobe for denim blazers?"}],
+            memory_summary="",
+        ):
+            events.append(_parse_sse(event_line))
+
+    assert mock_graph.call_count == 0
+    assert captured["config"]["callbacks"] == [fake_callback]
+    assert captured["config"]["configurable"]["user_id"] == "user-1"
+    assert events[0]["type"] == "tool_use"
+    assert events[0]["name"] == "search_wardrobe"
+    assert events[1]["type"] == "tool_result"
+    assert events[1]["name"] == "search_wardrobe"
     assert events[-1]["type"] == "done"
 
 

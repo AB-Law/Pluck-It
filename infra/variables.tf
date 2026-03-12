@@ -104,3 +104,23 @@ variable "grafana_cloud_processor_service_name" {
   type        = string
   default     = "pluckit-prod-processor-func"
 }
+
+variable "langfuse_public_key" {
+  description = "Langfuse public key for tracing and observability."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "langfuse_secret_key" {
+  description = "Langfuse secret key for tracing and observability."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "langfuse_host" {
+  description = "Langfuse host for API ingestion."
+  type        = string
+  default     = "https://us.cloud.langfuse.com"
+}

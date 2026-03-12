@@ -85,6 +85,10 @@ describe('StylistPanelComponent', () => {
     expect(component.messages().some(m => m.text.includes('Hi there'))).toBeTruthy();
   });
 
+  it('does not enable debug mode without query flag', () => {
+    expect(component['debugEnabled']()).toBe(false);
+  });
+
   it('should show saving state and clear it after memory save', () => {
     component.memoryDraft = 'new memory';
     expect(component.savingMemory()).toBe(false);
@@ -100,11 +104,41 @@ describe('StylistPanelComponent', () => {
     expect(component.savingMemory()).toBe(false);
   });
 
+  it('shows debug diagnostics when debug=1 query param is present', () => {
+    const previousUrl = globalThis.location.href;
+    globalThis.history.pushState({}, '', '/?debug=1');
+    const debugFixture = TestBed.createComponent(StylistPanelComponent);
+    const debugComponent = debugFixture.componentInstance as unknown as StylistPanelComponent;
+    debugFixture.detectChanges();
+
+    chatService.streamMessage.mockReturnValueOnce(
+      of(
+        { type: 'token', content: 'Hi there', traceId: 'trace-1', runId: 'run-1', model: 'gpt-4', tokenCount: 7 },
+        { type: 'tool_use', name: 'search_wardrobe', traceId: 'trace-1', runId: 'run-1' },
+        { type: 'tool_result', name: 'search_wardrobe', summary: 'found', traceId: 'trace-1', runId: 'run-1', toolLatencyMs: 42 },
+        { type: 'done', traceId: 'trace-1', runId: 'run-1' },
+      ),
+    );
+    debugComponent.inputText = 'Need an outfit';
+    debugComponent.sendMessage();
+    debugFixture.detectChanges();
+    expect((debugComponent as any).debugEnabled()).toBe(true);
+
+    expect(debugFixture.nativeElement.textContent).toContain('traceId: trace-1');
+    expect(debugFixture.nativeElement.textContent).toContain('runId: run-1');
+    expect((debugComponent as any).debugModel()).toBe('gpt-4');
+    expect((debugComponent as any).debugToolLatencyMs()).toBe(42);
+    expect((debugComponent as any).debugTokenCount()).toBe(7);
+    globalThis.history.replaceState({}, '', previousUrl);
+  });
+
   it('opens and closes the memory panel', () => {
     const root = fixture.nativeElement as HTMLElement;
-    const openBtn = root.querySelector('button[title="View conversation memory"]') as HTMLButtonElement | null;
-    expect(openBtn).toBeTruthy();
-    openBtn?.click();
+    const openBtn = root.querySelector<HTMLButtonElement>('button[title="View conversation memory"]');
+    if (openBtn === null) {
+      throw new Error('View conversation memory button should exist');
+    }
+    openBtn.click();
     fixture.detectChanges();
 
     expect(component.memoryOpen()).toBe(true);
@@ -121,8 +155,11 @@ describe('StylistPanelComponent', () => {
     component.closed.subscribe(closeSpy);
 
     const root = fixture.nativeElement as HTMLElement;
-    const panelClose = root.querySelector('[aria-label="Close panel"]') as HTMLButtonElement | null;
-    panelClose?.click();
+    const panelClose = root.querySelector<HTMLButtonElement>('[aria-label="Close panel"]');
+    if (panelClose === null) {
+      throw new Error('Panel close button should exist');
+    }
+    panelClose.click();
     expect(closeSpy).toHaveBeenCalledTimes(1);
 
     component.selectedItemIds.set(['item-a']);

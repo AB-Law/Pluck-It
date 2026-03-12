@@ -29,14 +29,22 @@ export interface ConversationMemory {
   updatedAt: string | null;
 }
 
+interface ChatTraceFields {
+  traceId?: string;
+  runId?: string;
+  model?: string;
+  toolLatencyMs?: number;
+  tokenCount?: number;
+}
+
 // Union type for all SSE event shapes
 export type ChatEvent =
-  | { type: 'token'; content: string }
-  | { type: 'tool_use'; name: string }
-  | { type: 'tool_result'; name: string; summary: string }
-  | { type: 'memory_update'; updated: boolean }
-  | { type: 'error'; content: string }
-  | { type: 'done' };
+  | ({ type: 'token'; content: string } & ChatTraceFields)
+  | ({ type: 'tool_use'; name: string } & ChatTraceFields)
+  | ({ type: 'tool_result'; name: string; summary: string } & ChatTraceFields)
+  | ({ type: 'memory_update'; updated: boolean } & ChatTraceFields)
+  | ({ type: 'error'; content: string } & ChatTraceFields)
+  | ({ type: 'done' } & ChatTraceFields);
 
 @Injectable({ providedIn: 'root' })
 export class ChatService {
@@ -58,7 +66,8 @@ export class ChatService {
   ): Observable<ChatEvent> {
     return new Observable<ChatEvent>(observer => {
       const headers = this.buildHeaders(true);
-      const body = this.buildBody(message, history, selectedIds);
+      const traceId = this.createTraceId();
+      const body = this.buildBody(message, history, selectedIds, traceId);
 
       let cancelled = false;
 
@@ -72,7 +81,12 @@ export class ChatService {
             observer.complete();
             return;
           }
-          await this.readSseStream(response.body.getReader(), observer, () => cancelled);
+          await this.readSseStream(
+            response.body.getReader(),
+            observer,
+            () => cancelled,
+            traceId,
+          );
         })
         .catch(err => observer.error(err));
 
@@ -89,11 +103,17 @@ export class ChatService {
     return headers;
   }
 
-  private buildBody(message: string, history: ChatMessage[], selectedIds?: string[]): string {
+  private buildBody(
+    message: string,
+    history: ChatMessage[],
+    selectedIds: string[] | undefined,
+    traceId: string,
+  ): string {
     return JSON.stringify({
       message,
       recentMessages: history,
       selectedItemIds: selectedIds ?? null,
+      traceId,
     });
   }
 
@@ -117,6 +137,7 @@ export class ChatService {
     reader: ReadableStreamDefaultReader<Uint8Array>,
     observer: Subscriber<ChatEvent>,
     isCancelled: () => boolean,
+    traceId: string,
   ): Promise<void> {
     const decoder = new TextDecoder();
     let buffer = '';
@@ -127,7 +148,7 @@ export class ChatService {
       if (!value) continue;
 
       buffer += decoder.decode(value, { stream: true });
-      const parsed = this.consumeSseBuffer(buffer, observer);
+      const parsed = this.consumeSseBuffer(buffer, observer, traceId);
       if (parsed.done) {
         observer.complete();
         return;
@@ -140,16 +161,27 @@ export class ChatService {
   private consumeSseBuffer(
     inputBuffer: string,
     observer: Subscriber<ChatEvent>,
+    traceId: string,
   ): { done: boolean; nextBuffer: string } {
     const parts = inputBuffer.split('\n\n');
     let nextBuffer = parts.pop() ?? '';
     for (const part of parts) {
       const event = this.parseSseLine(part);
       if (!event) continue;
+      if (!event.traceId) {
+        event.traceId = traceId;
+      }
       observer.next(event);
       if (event.type === 'done') return { done: true, nextBuffer };
     }
     return { done: false, nextBuffer };
+  }
+
+  private createTraceId(): string {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    return `trace-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   }
 
   /** Retrieve the user's conversation memory summary. */

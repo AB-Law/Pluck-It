@@ -249,8 +249,12 @@ Add these to `PluckIt.Functions/local.settings.json` and `PluckIt.Processor/loca
 - `GOOGLE_CLIENT_ID` / `GoogleAuth__ClientId` — Google OAuth client ID
 - `GOOGLE_AUTH_JWKS_URL` (optional) / `GoogleAuth__JwksUrl` — Google JWKS endpoint
 - `SEGMENTATION_ENDPOINT_URL`, `SEGMENTATION_SHARED_TOKEN` — Modal segmentation
+- `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` — Langfuse tracing credentials
+- `LANGFUSE_HOST` (optional) — Langfuse API host (defaults to `https://us.cloud.langfuse.com`)  
+  You can also use `LANGFUSE_BASE_URL` in place of `LANGFUSE_HOST`.
 
 For Codespaces, add the same names as **Codespaces secrets** (not Actions secrets — they are separate namespaces).
+For CI, set `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and optional `LANGFUSE_HOST` in GitHub Action secrets so `terraform-infra.yml` can pass them into `terraform.auto.tfvars`.
 
 ---
 

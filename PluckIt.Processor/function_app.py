@@ -1020,6 +1020,21 @@ class ChatRequest(BaseModel):
     message: str
     recentMessages: list[dict] = []
     selectedItemIds: Optional[list[str]] = None
+    traceId: Optional[str] = None
+
+
+def _inject_trace_id(sse_line: str, trace_id: Optional[str]) -> str:
+    if not trace_id:
+        return sse_line
+    if not sse_line.startswith("data: "):
+        return sse_line
+
+    try:
+        payload = json.loads(sse_line.removeprefix("data: ").strip())
+        payload["traceId"] = trace_id
+        return f"data: {json.dumps(payload)}\n\n"
+    except Exception:
+        return sse_line
 
 
 @fastapi_app.post("/api/chat", responses={
@@ -1034,7 +1049,11 @@ class ChatRequest(BaseModel):
     401: {"description": "Authentication failed."},
     500: {"description": "Agent logic error or streaming failure."}
 })
-async def chat(body: ChatRequest, user_id: Annotated[str, Depends(get_user_id)]):
+async def chat(
+    body: ChatRequest,
+    request: Request,
+    user_id: Annotated[str, Depends(get_user_id)],
+):
     """
     Stream the stylist agent's response as Server-Sent Events.
 
@@ -1045,6 +1064,7 @@ async def chat(body: ChatRequest, user_id: Annotated[str, Depends(get_user_id)])
       {"type": "memory_update", "updated": bool}
       {"type": "done"}
     """
+    trace_id = body.traceId or request.headers.get("X-Trace-Id")
     memory = await load_memory(user_id)
 
     async def event_stream():
@@ -1056,7 +1076,9 @@ async def chat(body: ChatRequest, user_id: Annotated[str, Depends(get_user_id)])
             recent_messages=body.recentMessages,
             memory_summary=memory.summary,
             selected_item_ids=body.selectedItemIds,
+            trace_id=trace_id,
         ):
+            sse_line = _inject_trace_id(sse_line, trace_id)
             if '"type": "token"' in sse_line:
                 try:
                     data = json.loads(sse_line.removeprefix("data: ").strip())
@@ -1074,7 +1096,10 @@ async def chat(body: ChatRequest, user_id: Annotated[str, Depends(get_user_id)])
                 {"role": "assistant", "content": assistant_reply},
             ]
             new_summary = await maybe_summarize(user_id, updated_messages, memory.summary)
-            yield f"data: {json.dumps({'type': 'memory_update', 'updated': new_summary is not None})}\n\n"
+            yield _inject_trace_id(
+                f"data: {json.dumps({'type': 'memory_update', 'updated': new_summary is not None})}\n\n",
+                trace_id,
+            )
 
     return StreamingResponse(
         event_stream(),

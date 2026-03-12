@@ -815,6 +815,9 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
     "ADMIN_USER_IDS"            = var.admin_user_ids
     "CORS_ALLOWED_ORIGINS"      = join(",", var.cors_allowed_origins)
     "FEATURE_VAULT_INSIGHTS"    = "true"
+    "LANGFUSE_PUBLIC_KEY"       = var.langfuse_public_key
+    "LANGFUSE_SECRET_KEY"       = var.langfuse_secret_key
+    "LANGFUSE_HOST"             = var.langfuse_host
     "SEGMENTATION_ENDPOINT_URL" = var.segmentation_endpoint_url
     "SEGMENTATION_SHARED_TOKEN" = var.segmentation_shared_token
   }
