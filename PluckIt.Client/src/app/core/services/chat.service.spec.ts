@@ -33,15 +33,21 @@ describe('ChatService', () => {
   };
 
   it('streams SSE token events and completes on done', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
-      ok: true,
-      status: 200,
-      body: streamFromLines([
-        'data: {"type":"token","content":"hello"}\n\n',
-        'data: {"type":"tool_use","name":"style_agent"}\n\n',
-        'data: {"type":"done"}\n\n',
-      ]),
-    } as Response);
+    let traceIdFromPayload: string | undefined;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      if (typeof init?.body === 'string') {
+        traceIdFromPayload = JSON.parse(init.body).traceId;
+      }
+      return {
+        ok: true,
+        status: 200,
+        body: streamFromLines([
+          'data: {"type":"token","content":"hello"}\n\n',
+          'data: {"type":"tool_use","name":"style_agent"}\n\n',
+          'data: {"type":"done"}\n\n',
+        ]),
+      } as Response;
+    });
 
     const events: ChatEvent[] = [];
     await new Promise<void>((resolve, reject) => {
@@ -52,11 +58,43 @@ describe('ChatService', () => {
       });
     });
 
-    expect(events).toEqual([
-      { type: 'token', content: 'hello' },
-      { type: 'tool_use', name: 'style_agent' },
-      { type: 'done' },
-    ]);
+    expect(events).toHaveLength(3);
+    expect(events[0]).toMatchObject({ type: 'token', content: 'hello' });
+    expect(events[1]).toMatchObject({ type: 'tool_use', name: 'style_agent' });
+    expect(events[2]).toMatchObject({ type: 'done' });
+    expect(traceIdFromPayload).toBeTruthy();
+    expect(events[0].traceId).toBe(traceIdFromPayload);
+    expect(events[1].traceId).toBe(traceIdFromPayload);
+    expect(events[2].traceId).toBe(traceIdFromPayload);
+  });
+
+  it('adds traceId client-side when server omits it', async () => {
+    let traceIdFromPayload: string | undefined;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      if (typeof init?.body === 'string') {
+        traceIdFromPayload = JSON.parse(init.body).traceId;
+      }
+      return {
+        ok: true,
+        status: 200,
+        body: streamFromLines([
+          'data: {"type":"token","content":"hello","runId":"run-1"}\n\n',
+          'data: {"type":"done","runId":"run-1"}\n\n',
+        ]),
+      } as Response;
+    });
+
+    const events: ChatEvent[] = [];
+    await new Promise<void>((resolve, reject) => {
+      service.streamMessage('show me style', [], ['item-1']).subscribe({
+        next: (evt) => events.push(evt),
+        error: err => reject(err),
+        complete: () => resolve(),
+      });
+    });
+
+    expect(events).toHaveLength(2);
+    expect(events.every(evt => evt.traceId && evt.traceId === traceIdFromPayload)).toBe(true);
   });
 
   it('errors when stream endpoint returns non-ok', async () => {

@@ -85,6 +85,9 @@ Required variables (set in `terraform.tfvars`):
 - `swa_app_location` - Frontend app folder (default: PluckIt.Client)
 - `swa_output_location` - Build output folder (default: dist/PluckIt.Client)
 - `swa_api_location` - API folder (optional, default: "")
+- `langfuse_public_key` - Langfuse public key
+- `langfuse_secret_key` - Langfuse secret key
+- `langfuse_host` - Langfuse host URL (optional, defaults to `https://us.cloud.langfuse.com`)
 
 ## Next Steps
 

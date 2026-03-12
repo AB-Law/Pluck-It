@@ -22,6 +22,8 @@ opentelemetry-instrumentation-httpx
 langgraph
 langchain-openai
 langchain-core
+# Langfuse tracing for LLM calls and tool executions
+langfuse
 aiohttp
 # HTTP client for Open-Meteo weather API (no API key needed)
 httpx

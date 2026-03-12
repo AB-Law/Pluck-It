@@ -10,9 +10,10 @@ Unit tests for FastAPI routes in function_app.py:
   - POST /api/digest/feedback
 """
 import asyncio
+from types import SimpleNamespace
 from contextlib import suppress
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 
 from fastapi import HTTPException
 import pytest
@@ -33,6 +34,89 @@ async def test_health_endpoint(async_client):
     assert response.json()["status"] == "ok"
 
 
+# ── Chat endpoint ─────────────────────────────────────────────────────────────
+
+
+@pytest.mark.unit
+async def test_post_chat_body_trace_id_is_forwarded_to_stylist_agent(async_client):
+    async def fake_chat_stream() -> AsyncIterator[str]:
+        yield "data: {\"type\":\"token\",\"content\":\"hello\"}\n\n"
+        yield "data: {\"type\":\"done\"}\n\n"
+
+    with (
+        patch("function_app.load_memory", new=AsyncMock(return_value=SimpleNamespace(summary=""))),
+        patch("function_app.stream_stylist_response") as mock_stream_stylist_response,
+        patch("function_app.maybe_summarize", new=AsyncMock(return_value=None)),
+    ):
+        mock_stream_stylist_response.return_value = fake_chat_stream()
+        response = await async_client.post(
+            "/api/chat",
+            json={
+                "message": "hello",
+                "recentMessages": [],
+                "selectedItemIds": None,
+                "traceId": "trace-body-1",
+            },
+        )
+
+    assert response.status_code == 200
+    body = (await response.aread()).decode()
+    assert '"traceId": "trace-body-1"' in body
+    call_kwargs = mock_stream_stylist_response.call_args.kwargs
+    assert call_kwargs["trace_id"] == "trace-body-1"
+
+
+@pytest.mark.unit
+async def test_post_chat_uses_x_trace_header_when_body_missing(async_client):
+    async def fake_chat_stream() -> AsyncIterator[str]:
+        yield "data: {\"type\":\"token\",\"content\":\"hello\"}\n\n"
+        yield "data: {\"type\":\"done\"}\n\n"
+
+    with (
+        patch("function_app.load_memory", new=AsyncMock(return_value=SimpleNamespace(summary=""))),
+        patch("function_app.stream_stylist_response") as mock_stream_stylist_response,
+        patch("function_app.maybe_summarize", new=AsyncMock(return_value=None)),
+    ):
+        mock_stream_stylist_response.return_value = fake_chat_stream()
+        response = await async_client.post(
+            "/api/chat",
+            headers={"X-Trace-Id": "trace-header-1"},
+            json={"message": "hello", "recentMessages": [], "selectedItemIds": None},
+        )
+
+    assert response.status_code == 200
+    body = (await response.aread()).decode()
+    assert '"traceId": "trace-header-1"' in body
+    call_kwargs = mock_stream_stylist_response.call_args.kwargs
+    assert call_kwargs["trace_id"] == "trace-header-1"
+
+
+@pytest.mark.unit
+async def test_post_chat_includes_trace_id_in_memory_update_event(async_client):
+    async def fake_chat_stream() -> AsyncIterator[str]:
+        yield "data: {\"type\":\"token\",\"content\":\"hello\"}\n\n"
+        yield "data: {\"type\":\"done\"}\n\n"
+
+    with (
+        patch("function_app.load_memory", new=AsyncMock(return_value=SimpleNamespace(summary=""))),
+        patch("function_app.stream_stylist_response") as mock_stream_stylist_response,
+        patch("function_app.maybe_summarize", new=AsyncMock(return_value="summary now")),
+    ):
+        mock_stream_stylist_response.return_value = fake_chat_stream()
+        response = await async_client.post(
+            "/api/chat",
+            json={
+                "message": "hello",
+                "recentMessages": [],
+                "selectedItemIds": None,
+                "traceId": "trace-memory-1",
+            },
+        )
+
+    assert response.status_code == 200
+    body = (await response.aread()).decode()
+    assert '"type": "memory_update"' in body
+    assert '"traceId": "trace-memory-1"' in body
 # ── Memory endpoints ─────────────────────────────────────────────────────────
 
 @pytest.mark.unit

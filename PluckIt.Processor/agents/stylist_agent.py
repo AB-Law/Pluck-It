@@ -16,9 +16,12 @@ import json
 import logging
 import os
 import re
+import uuid
+from contextlib import contextmanager
 from datetime import date
+from inspect import signature, Parameter
 from functools import lru_cache
-from typing import AsyncIterator, Optional
+from typing import Any, AsyncIterator, Optional
 
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
@@ -174,6 +177,7 @@ _FOLLOW_UP_OUTFIT_KEYWORDS = (
 )
 
 _TOOL_CALL_RECURSION_LIMIT = int(os.getenv("STYLIST_TOOL_CALL_RECURSION_LIMIT", "8"))
+_LANGFUSE_DEFAULT_HOST = "https://us.cloud.langfuse.com"
 
 
 def _build_system_prompt(memory_summary: str) -> SystemMessage:
@@ -272,9 +276,247 @@ def _extract_follow_up_search_query(last_assistant: str, user_message: str) -> s
     return f"{query} {refinement}"
 
 
-@lru_cache(maxsize=1)
-def _build_stylist_config(user_id: str) -> RunnableConfig:
-    return RunnableConfig(configurable={"user_id": user_id})
+def _build_stylist_config(user_id: str, callbacks: list[Any] | None = None) -> RunnableConfig:
+    config: RunnableConfig = {"configurable": {"user_id": user_id}}
+    if callbacks:
+        config["callbacks"] = callbacks
+    return config
+
+
+def _normalize_langfuse_trace_id(raw_trace_id: str | None) -> str | None:
+    """Normalize a trace id to Langfuse-compatible 32-char lowercase hex."""
+    if not raw_trace_id:
+        return None
+
+    normalized = raw_trace_id.strip()
+    if not normalized:
+        return None
+
+    try:
+        return uuid.UUID(normalized).hex
+    except ValueError:
+        pass
+
+    hex_chars = re.sub(r"[^0-9a-fA-F]", "", normalized).lower()
+    if not hex_chars:
+        return None
+
+    if len(hex_chars) >= 32:
+        return hex_chars[:32]
+
+    return uuid.uuid5(uuid.NAMESPACE_DNS, normalized).hex
+
+
+def _build_langfuse_callbacks(trace_id: str | None = None, *, user_id: str | None = None) -> list[Any]:
+    """Build optional Langfuse callbacks from environment configuration."""
+    public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "").strip()
+    secret_key = os.getenv("LANGFUSE_SECRET_KEY", "").strip()
+    if not public_key or not secret_key:
+        return []
+
+    host = (os.getenv("LANGFUSE_HOST", "") or os.getenv("LANGFUSE_BASE_URL", "")).strip() or _LANGFUSE_DEFAULT_HOST
+    os.environ["LANGFUSE_PUBLIC_KEY"] = public_key
+    os.environ["LANGFUSE_SECRET_KEY"] = secret_key
+    os.environ["LANGFUSE_HOST"] = host
+
+    try:
+        from langfuse import Langfuse
+        from langfuse.langchain import CallbackHandler
+    except Exception as exc:
+        logger.warning("Langfuse callback setup unavailable: %s", exc)
+        return []
+
+    try:
+        callback_signature = signature(CallbackHandler.__init__)
+        try:
+            _configure_langfuse_client(Langfuse, public_key, secret_key, host)
+        except Exception:
+            logger.debug("Langfuse client init failed; continuing without explicit SDK init.", exc_info=True)
+        kwargs = _build_langfuse_callback_kwargs(
+            callback_signature=callback_signature,
+            trace_id=trace_id,
+            user_id=user_id,
+            public_key=public_key,
+            secret_key=secret_key,
+            host=host,
+            logger=logger,
+        )
+        if not kwargs:
+            logger.debug("Langfuse callback handler has no supported constructor args; skipping setup.")
+            return []
+        return [CallbackHandler(**kwargs)]
+    except Exception as exc:
+        logger.warning("Langfuse callback initialization failed: %s", exc)
+        return []
+
+
+def _configure_langfuse_client(
+    langfuse_cls: Any,
+    public_key: str,
+    secret_key: str,
+    host: str,
+) -> None:
+    """Initialize Langfuse client when constructor supports base_url/host arguments."""
+    client_signature = signature(langfuse_cls.__init__)
+    if "base_url" in client_signature.parameters:
+        langfuse_cls(public_key=public_key, secret_key=secret_key, base_url=host)
+        return
+    if "host" in client_signature.parameters:
+        langfuse_cls(public_key=public_key, secret_key=secret_key, host=host)
+        return
+    langfuse_cls(public_key=public_key, secret_key=secret_key)
+
+
+def _build_langfuse_callback_kwargs(
+    callback_signature: Any,
+    *,
+    trace_id: str | None,
+    user_id: str | None,
+    public_key: str,
+    secret_key: str,
+    host: str,
+    logger: Any,
+) -> dict[str, Any]:
+    """Build constructor kwargs supported by the installed Langfuse callback handler."""
+    supports_kwargs = any(
+        parameter.kind == Parameter.VAR_KEYWORD
+        for parameter in callback_signature.parameters.values()
+    )
+
+    kwargs: dict[str, Any] = {}
+    trace_identifier = _normalize_langfuse_trace_id(trace_id) or trace_id or user_id
+
+    _set_callback_kwarg(kwargs, callback_signature, supports_kwargs, "public_key", public_key)
+    _set_callback_kwarg(kwargs, callback_signature, supports_kwargs, "secret_key", secret_key)
+    _set_host_kwarg(kwargs, callback_signature, supports_kwargs, host)
+    _set_trace_identifier_kwargs(
+        kwargs,
+        callback_signature,
+        supports_kwargs,
+        trace_identifier=trace_identifier,
+        user_id=user_id,
+    )
+    if trace_identifier and not supports_kwargs:
+        _warn_if_trace_context_unsupported(callback_signature, logger)
+    return kwargs
+
+def _set_host_kwarg(
+    kwargs: dict[str, Any],
+    callback_signature: Any,
+    supports_kwargs: bool,
+    host: str,
+) -> None:
+    has_host_arg = "host" in callback_signature.parameters
+    has_base_url_arg = "base_url" in callback_signature.parameters
+    if supports_kwargs or has_host_arg:
+        kwargs["host"] = host
+        return
+    if has_base_url_arg:
+        kwargs["base_url"] = host
+
+
+def _set_trace_identifier_kwargs(
+    kwargs: dict[str, Any],
+    callback_signature: Any,
+    supports_kwargs: bool,
+    *,
+    trace_identifier: str | None,
+    user_id: str | None,
+) -> None:
+    has_user_id_arg = "user_id" in callback_signature.parameters
+    has_metadata_arg = "metadata" in callback_signature.parameters
+    has_trace_context_arg = "trace_context" in callback_signature.parameters
+    if not trace_identifier:
+        return
+
+    _set_callback_kwarg(kwargs, callback_signature, supports_kwargs, "session_id", trace_identifier)
+    if supports_kwargs or has_user_id_arg:
+        kwargs["user_id"] = user_id
+    if supports_kwargs or has_metadata_arg:
+        kwargs["metadata"] = {"trace_id": trace_identifier}
+    if supports_kwargs or has_trace_context_arg:
+        kwargs["trace_context"] = {"trace_id": trace_identifier}
+
+
+def _warn_if_trace_context_unsupported(callback_signature: Any, logger: Any) -> None:
+    if "trace_context" not in callback_signature.parameters:
+        logger.debug("Langfuse trace_context unsupported in installed CallbackHandler signature.")
+
+
+def _set_callback_kwarg(
+    kwargs: dict[str, Any],
+    callback_signature: Any,
+    supports_kwargs: bool,
+    name: str,
+    value: Any,
+) -> None:
+    if value is None:
+        return
+    if supports_kwargs or name in callback_signature.parameters:
+        kwargs[name] = value
+
+
+def _flush_langfuse_callbacks(callbacks: list[Any]) -> None:
+    """Flush Langfuse callback clients if available."""
+    for callback in callbacks:
+        langfuse_client = getattr(callback, "_langfuse_client", None)
+        if langfuse_client is None:
+            langfuse_client = getattr(callback, "langfuse", None)
+
+        flush = getattr(langfuse_client, "flush", None)
+        if callable(flush):
+            try:
+                flush()
+                continue
+            except Exception as exc:
+                logger.warning("Langfuse client flush failed: %s", exc)
+
+        callback_flush = getattr(callback, "flush", None)
+        if callable(callback_flush):
+            try:
+                callback_flush()
+            except Exception as exc:
+                logger.warning("Langfuse callback flush failed: %s", exc)
+
+
+@contextmanager
+def _langfuse_trace_context(user_id: str, run_id: str):
+    callbacks = _build_langfuse_callbacks(run_id, user_id=user_id)
+    if not callbacks:
+        yield callbacks
+        return
+
+    try:
+        from langfuse import propagate_attributes
+    except Exception as exc:
+        logger.debug("Langfuse context propagation unavailable: %s", exc)
+        yield callbacks
+        return
+
+    try:
+        with propagate_attributes(user_id=user_id, session_id=run_id):
+            yield callbacks
+    except Exception as exc:
+        logger.debug("Langfuse propagation failed: %s", exc)
+        yield callbacks
+
+
+def _build_agent_config(
+    user_id: str,
+    run_id: str | None = None,
+    callbacks: list[Any] | None = None,
+) -> dict[str, object]:
+    config: dict[str, object] = {
+        "configurable": {"user_id": user_id},
+        "metadata": {
+            "trace_id": run_id or user_id,
+            "user_id": user_id,
+        },
+        "recursion_limit": _TOOL_CALL_RECURSION_LIMIT,
+    }
+    if callbacks:
+        config["callbacks"] = callbacks
+    return config
 
 
 @lru_cache(maxsize=1)
@@ -309,6 +551,7 @@ async def _run_fast_followup(
     user_id: str,
     user_message: str,
     recent_messages: list[dict],
+    callbacks: list[Any] | None = None,
 ) -> list[str] | None:
     if not recent_messages:
         return None
@@ -321,7 +564,7 @@ async def _run_fast_followup(
         return None
 
     events: list[str] = []
-    cfg = _build_stylist_config(user_id)
+    cfg = _build_stylist_config(user_id, callbacks=callbacks)
 
     if intent == "CONFIRM_SEARCH":
         query = _extract_follow_up_search_query(last_assistant, user_message)
@@ -341,6 +584,35 @@ async def _run_fast_followup(
         return events
 
     return None
+
+
+async def _collect_langfuse_events(
+    messages: list[BaseMessage],
+    config: dict[str, object],
+) -> tuple[list[str], bool]:
+    tool_start_count = 0
+    events: list[str] = []
+    async for event in _get_agent_graph().astream_events(
+        {"messages": messages},
+        config=config,
+        version="v2",
+    ):
+        if event.get("event") == "on_tool_start":
+            tool_start_count += 1
+            if tool_start_count > _TOOL_CALL_RECURSION_LIMIT:
+                return events, True
+        event_sse = _event_to_sse(event)
+        if event_sse is not None:
+            events.append(event_sse)
+    return events, False
+
+
+async def _emit_agent_events(
+    messages: list[BaseMessage],
+    config: dict[str, object],
+) -> tuple[list[str], bool]:
+    """Return event stream lines and whether tool-call recursion cap was reached."""
+    return await _collect_langfuse_events(messages, config)
 
 
 async def _classify_follow_up_intent(user_message: str, last_assistant: str) -> str | None:
@@ -449,7 +721,7 @@ def _event_to_sse(event: dict) -> Optional[str]:
 @lru_cache(maxsize=1)
 def _get_agent_graph():
     llm = _build_llm()
-    return create_react_agent(llm, tools=TOOLS)
+    return create_react_agent(llm, tools=TOOLS, name="stylist_agent")
 
 
 async def stream_stylist_response(
@@ -458,6 +730,7 @@ async def stream_stylist_response(
     recent_messages: list[dict],
     memory_summary: str,
     selected_item_ids: Optional[list[str]] = None,
+    trace_id: Optional[str] = None,
 ) -> AsyncIterator[str]:
     """
     Stream SSE-formatted events to the caller.
@@ -474,47 +747,47 @@ async def stream_stylist_response(
     # Annotate short follow-up confirmations so the agent knows which tool to reach for.
     annotation = await _resolve_follow_up_annotation(user_message, recent_messages)
     augmented_message = f"{annotation}\n{user_message}" if annotation else user_message
-    fast_follow_up = await _run_fast_followup(user_id, user_message, recent_messages)
-    if fast_follow_up is not None:
-        for event_line in fast_follow_up:
-            yield event_line
-        yield f"data: {json.dumps({'type': 'done'})}\n\n"
-        return
 
+    run_id = trace_id or str(uuid.uuid4())
     messages: list[BaseMessage] = [
         system_msg,
         *_to_lc_messages(recent_messages),
         HumanMessage(content=context_prefix + augmented_message),
     ]
 
-    config = {
-        "configurable": {
-            "user_id": user_id,
-        },
-        "recursion_limit": _TOOL_CALL_RECURSION_LIMIT,
-    }
-
-    tool_start_count = 0
     abort = False
+    langfuse_callbacks: list[Any] = []
 
     try:
-        async for event in _get_agent_graph().astream_events(
-            {"messages": messages},
-            config=config,
-            version="v2",
-        ):
-            if event.get("event") == "on_tool_start":
-                tool_start_count += 1
-                if tool_start_count > _TOOL_CALL_RECURSION_LIMIT:
-                    abort = True
-                    break
-            event_sse = _event_to_sse(event)
-            if event_sse is not None:
-                yield event_sse
-
+        with _langfuse_trace_context(user_id=user_id, run_id=run_id) as langfuse_callbacks_ctx:
+            langfuse_callbacks = list(langfuse_callbacks_ctx)
+            fast_follow_up = await _run_fast_followup(
+                user_id,
+                user_message,
+                recent_messages,
+                callbacks=langfuse_callbacks or None,
+            )
+            if fast_follow_up is not None:
+                for event_line in fast_follow_up:
+                    yield event_line
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                return
+            config = _build_agent_config(
+                user_id,
+                run_id=run_id,
+                callbacks=langfuse_callbacks if langfuse_callbacks else None,
+            )
+            event_lines, abort = await _emit_agent_events(
+                messages=messages,
+                config=config,
+            )
+            for event_line in event_lines:
+                yield event_line
     except Exception as exc:
         logger.exception("Agent stream error for user %s: %s", user_id, exc)
         yield f"data: {json.dumps({'type': 'error', 'content': 'Something went wrong. Please try again.'})}\n\n"
+    finally:
+        _flush_langfuse_callbacks(langfuse_callbacks)
     if abort:
         logger.warning("Tool-call recursion cap hit for user %s", user_id)
         yield f"data: {json.dumps({'type': 'error', 'content': 'Tool-call limit reached. Please retry with a shorter request.'})}\n\n"

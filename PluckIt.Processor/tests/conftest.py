@@ -32,6 +32,9 @@ os.environ.setdefault("UPLOADS_CONTAINER_NAME",   "uploads")
 os.environ.setdefault("ARCHIVE_CONTAINER_NAME",   "archive")
 os.environ.setdefault("LOCAL_DEV_USER_ID",        "test-user-001")
 os.environ.setdefault("CORS_ALLOWED_ORIGINS",     "http://localhost:3000")
+os.environ.setdefault("LANGFUSE_PUBLIC_KEY",      "")
+os.environ.setdefault("LANGFUSE_SECRET_KEY",      "")
+os.environ.setdefault("LANGFUSE_HOST",            "https://us.cloud.langfuse.com")
 
 # ── Optional azure sdk stubs for local unit runs without azure packages ─────
 try:

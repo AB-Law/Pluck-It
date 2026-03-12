@@ -53,6 +53,9 @@ jobs:
           GRAFANA_CLOUD_OTLP_ENDPOINT: ${{ secrets.GRAFANA_CLOUD_OTLP_ENDPOINT }}
           GRAFANA_CLOUD_OTLP_HEADERS: ${{ secrets.GRAFANA_CLOUD_OTLP_HEADERS }}
           GRAFANA_CLOUD_OTEL_SERVICE_NAME_PROCESSOR: ${{ vars.GRAFANA_CLOUD_OTEL_SERVICE_NAME_PROCESSOR }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_HOST: ${{ secrets.LANGFUSE_HOST }}
         run: |
           cat > terraform.auto.tfvars <<'OUTER'
           subscription_id = "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
@@ -65,7 +68,7 @@ jobs:
           swa_repository_token = "${{ secrets.SWA_REPOSITORY_TOKEN }}"
           OUTER
 
-          python3 -c "import os; u=''.join(os.environ['SEGMENTATION_ENDPOINT_URL'].splitlines()); t=''.join(os.environ['SEGMENTATION_SHARED_TOKEN'].splitlines()); open('terraform.auto.tfvars','a').write('segmentation_endpoint_url = \"'+u+'\"\nsegmentation_shared_token = \"'+t+'\"\n')"
+          python3 -c "import json, os; u=''.join(os.environ['SEGMENTATION_ENDPOINT_URL'].splitlines()); t=''.join(os.environ['SEGMENTATION_SHARED_TOKEN'].splitlines()); open('terraform.auto.tfvars','a').write('segmentation_endpoint_url = '+json.dumps(u)+'\\nsegmentation_shared_token = '+json.dumps(t)+'\\n')"
 
           if [ -n "$CORS_ALLOWED_ORIGINS" ]; then
             echo "cors_allowed_origins = $CORS_ALLOWED_ORIGINS" >> terraform.auto.tfvars
@@ -82,6 +85,27 @@ jobs:
           if [ -n "$GRAFANA_CLOUD_OTEL_SERVICE_NAME_PROCESSOR" ]; then
             echo "grafana_cloud_processor_service_name = \"$GRAFANA_CLOUD_OTEL_SERVICE_NAME_PROCESSOR\"" >> terraform.auto.tfvars
           fi
+          python3 - <<'PY'
+          import json
+          import os
+
+          values = [
+            ("langfuse_public_key", os.environ.get("LANGFUSE_PUBLIC_KEY", "")),
+            ("langfuse_secret_key", os.environ.get("LANGFUSE_SECRET_KEY", "")),
+            ("langfuse_host", os.environ.get("LANGFUSE_HOST", "")),
+          ]
+
+          lines = []
+          for key, value in values:
+              if not value:
+                  continue
+              safe_value = "".join(value.splitlines())
+              lines.append(f"{key} = {json.dumps(safe_value)}")
+
+          if lines:
+              with open("terraform.auto.tfvars", "a", encoding="utf-8") as fp:
+                  fp.write("\n".join(lines) + "\n")
+          PY
 
       - name: Terraform Init
         working-directory: infra

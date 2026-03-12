@@ -72,6 +72,9 @@ elif app_type == "python":
 		"STORAGE_ACCOUNT_KEY": pick("STORAGE_ACCOUNT_KEY", "AZURE_STORAGE_ACCOUNT_KEY"),
 		"UPLOAD_CONTAINER": pick("UPLOAD_CONTAINER", default="uploads"),
 		"ARCHIVE_CONTAINER": pick("ARCHIVE_CONTAINER", default="archive"),
+		"LANGFUSE_PUBLIC_KEY": pick("LANGFUSE_PUBLIC_KEY"),
+		"LANGFUSE_SECRET_KEY": pick("LANGFUSE_SECRET_KEY"),
+		"LANGFUSE_HOST": pick("LANGFUSE_HOST", "LANGFUSE_BASE_URL", default="https://us.cloud.langfuse.com"),
 	}
 else:
 	raise ValueError(f"Unknown app_type: {app_type}")
