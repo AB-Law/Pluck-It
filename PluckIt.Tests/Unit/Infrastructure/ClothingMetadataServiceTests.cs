@@ -1,5 +1,9 @@
 using System.Reflection;
 using System.Text.Json;
+using Azure;
+using Azure.AI.OpenAI;
+using Moq;
+using OpenAI.Chat;
 using PluckIt.Core;
 using PluckIt.Infrastructure;
 using Shouldly;
@@ -111,6 +115,88 @@ public sealed class ClothingMetadataServiceTests
         IsSupportedMediaType("image/jpeg").ShouldBeTrue();
         IsSupportedMediaType("image/webp").ShouldBeTrue();
         IsSupportedMediaType("video/mp4").ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_ReturnsParsedMetadataFromOpenAi()
+    {
+        const string json = """
+            ```json
+            {
+              "brand": "Acme",
+              "category": "Accessories",
+              "tags": ["cotton", "layered"],
+              "colours": [{ "name": "White", "hex": "#FFFFFF" }]
+            }
+            ```
+            """;
+
+        var chatClient = new Mock<ChatClient>(MockBehavior.Strict);
+        chatClient
+            .Setup(c => c.CompleteChatAsync(
+                It.IsAny<ChatMessage[]>(),
+                It.IsAny<ChatCompletionOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(OpenAiTestHelpers.CreateChatCompletionResult(json));
+
+        var openAi = new Mock<AzureOpenAIClient>(MockBehavior.Strict);
+        openAi
+            .Setup(c => c.GetChatClient("test-deployment"))
+            .Returns(chatClient.Object);
+
+        var sut = new ClothingMetadataService(openAi.Object, "test-deployment");
+        var imageData = BinaryData.FromString("image bytes");
+
+        var actual = await sut.ExtractMetadataAsync(imageData, "image/jpeg", CancellationToken.None);
+
+        actual.Brand.ShouldBe("Acme");
+        actual.Category.ShouldBe("Accessories");
+        actual.Tags.ShouldBe(new[] { "cotton", "layered" });
+        var colour = actual.Colours.ShouldHaveSingleItem();
+        colour.Name.ShouldBe("White");
+        colour.Hex.ShouldBe("#FFFFFF");
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_UnsupportedMediaTypeReturnsEmptyMetadata()
+    {
+        var openAi = new Mock<AzureOpenAIClient>();
+        var sut = new ClothingMetadataService(openAi.Object, "deployment");
+
+        var actual = await sut.ExtractMetadataAsync(BinaryData.FromString("image"), "video/mp4", CancellationToken.None);
+
+        actual.Brand.ShouldBeNull();
+        actual.Category.ShouldBeNull();
+        actual.Tags.ShouldBeEmpty();
+        actual.Colours.ShouldBeEmpty();
+        openAi.Verify(
+            c => c.GetChatClient(It.IsAny<string>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ExtractMetadataAsync_ReturnsEmptyMetadataOnOpenAiError()
+    {
+        var chatClient = new Mock<ChatClient>(MockBehavior.Strict);
+        chatClient
+            .Setup(c => c.CompleteChatAsync(
+                It.IsAny<ChatMessage[]>(),
+                It.IsAny<ChatCompletionOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("service error"));
+
+        var openAi = new Mock<AzureOpenAIClient>(MockBehavior.Strict);
+        openAi
+            .Setup(c => c.GetChatClient("test-deployment"))
+            .Returns(chatClient.Object);
+
+        var sut = new ClothingMetadataService(openAi.Object, "test-deployment");
+        var actual = await sut.ExtractMetadataAsync(BinaryData.FromString("image bytes"), "image/jpeg", CancellationToken.None);
+
+        actual.Brand.ShouldBeNull();
+        actual.Category.ShouldBeNull();
+        actual.Tags.ShouldBeEmpty();
+        actual.Colours.ShouldBeEmpty();
     }
 
 }

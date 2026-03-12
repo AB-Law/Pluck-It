@@ -43,9 +43,9 @@ dotnet sonarscanner begin \
   /d:sonar.cs.opencover.reportsPaths="**/coverage.opencover.xml" \
   /d:sonar.python.coverage.reportPaths="PluckIt.Processor/coverage.xml" \
   /d:sonar.javascript.lcov.reportPaths="PluckIt.Client/coverage/PluckIt.Client/lcov.info" \
-  /d:sonar.exclusions="PluckIt.Processor/.venv/**,PluckIt.Functions/bin/**,PluckIt.Functions/obj/**,**/node_modules/**,PluckIt.Processor/tests/**,PluckIt.Segmentation.Modal/tests/**,k6/**,scripts/**" \
-  /d:sonar.coverage.exclusions="PluckIt.Functions/Program.cs,PluckIt.Functions/Serialization/PluckItJsonContext.cs" \
-  /d:sonar.test.inclusions="PluckIt.Processor/tests/**,PluckIt.Segmentation.Modal/tests/**,PluckIt.Tests/**,PluckIt.Client/src/**/*.spec.ts"
+  /d:sonar.exclusions="PluckIt.Processor/.venv/**,PluckIt.Functions/bin/**,PluckIt.Functions/obj/**,**/node_modules/**,PluckIt.Processor/tests/**,PluckIt.Segmentation.Modal/**,k6/**,scripts/**" \
+  /d:sonar.coverage.exclusions="PluckIt.Functions/Program.cs,PluckIt.Functions/Serialization/PluckItJsonContext.cs,PluckIt.Segmentation.Modal/**" \
+  /d:sonar.test.inclusions="PluckIt.Processor/tests/**,PluckIt.Tests/**,PluckIt.Client/src/**/*.spec.ts"
 
 echo ""
 echo "==> [3/6] Build C#"
