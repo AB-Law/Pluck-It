@@ -12,7 +12,12 @@ import { CollectionService } from '../../core/services/collection.service';
 describe('VaultComponent', () => {
   let component: VaultComponent;
   let fixture: ComponentFixture<VaultComponent>;
-  let router: { navigate: ReturnType<typeof vi.fn> };
+  let router: {
+    navigate: ReturnType<typeof vi.fn>;
+    createUrlTree: ReturnType<typeof vi.fn>;
+    serializeUrl: ReturnType<typeof vi.fn>;
+    isActive: ReturnType<typeof vi.fn>;
+  };
   let wardrobeService: {
     getAll: ReturnType<typeof vi.fn>;
     getWearSuggestions: ReturnType<typeof vi.fn>;
@@ -97,7 +102,14 @@ describe('VaultComponent', () => {
       collections: () => [],
       addItem: vi.fn().mockReturnValue(of({})),
     };
-    router = { navigate: vi.fn() };
+    router = {
+      navigate: vi.fn(),
+      createUrlTree: vi.fn((commands: unknown) => ({
+        toString: () => (typeof commands === 'string' ? commands : `/${(commands as unknown[]).join('/')}`),
+      })),
+      serializeUrl: vi.fn((tree: { toString: () => string }) => tree.toString()),
+      isActive: vi.fn(() => false),
+    };
     route = {
       snapshot: { queryParamMap: convertToParamMap({}) },
       queryParamMap: of(convertToParamMap({})),
@@ -314,7 +326,7 @@ describe('VaultComponent', () => {
     expect(root.textContent).toContain('Test suggestion');
 
     wardrobeService.logWear.mockReturnValueOnce(of({ ...ITEM, wearCount: 2 }));
-    const acceptButton = (Array.from(root.querySelectorAll('button')) as HTMLButtonElement[]).find(
+    const acceptButton = Array.from(root.querySelectorAll('button')).find(
       btn => btn.textContent?.trim() === 'Mark Worn',
     );
     acceptButton?.click();
@@ -323,7 +335,7 @@ describe('VaultComponent', () => {
 
     (component as any).wearSuggestions.set([{ ...SUGGESTION, message: 'Close soon', suggestionId: 's-2' } as any]);
     fixture.detectChanges();
-    const dismissButton = (Array.from(root.querySelectorAll('button')) as HTMLButtonElement[]).find(
+    const dismissButton = Array.from(root.querySelectorAll('button')).find(
       btn => btn.textContent?.trim() === 'Dismiss',
     );
     dismissButton?.click();

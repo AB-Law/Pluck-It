@@ -1,37 +1,34 @@
 import { Component, OnInit, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
-import { RouterModule } from '@angular/router';
 import { DiscoverService } from '../../core/services/discover.service';
 import { ScrapedItem, ScraperSource, DiscoverFeedQuery } from '../../core/models/scraped-item.model';
 import { DiscoverCardComponent } from './discover-card.component';
 import { SourceSidebarComponent } from './source-sidebar.component';
+import { AppHeaderComponent } from '../../shared/app-header.component';
+import { ProfilePanelComponent } from '../profile/profile-panel.component';
 
 @Component({
   selector: 'app-discover',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterModule, DiscoverCardComponent, SourceSidebarComponent],
+  imports: [CommonModule, AppHeaderComponent, ProfilePanelComponent, DiscoverCardComponent, SourceSidebarComponent],
   template: `
     <div class="relative flex h-screen flex-col overflow-hidden bg-black text-slate-100">
 
       <!-- Top bar -->
+      <app-shared-header
+        section="discover"
+        [showSearch]="true"
+        [searchValue]="searchQuery()"
+        searchPlaceholder="Search styles, tags…"
+        (searchValueChange)="searchQuery.set($event)"
+        (notificationsRequested)="noop()"
+        (settingsRequested)="settingsOpen.set(true)"
+      />
+
       <header class="flex items-center gap-4 border-b border-border-chrome px-6 py-3 flex-shrink-0">
         <div class="flex items-center gap-2">
           <span class="material-symbols-outlined text-primary">explore</span>
           <h1 class="text-sm font-bold tracking-wide">Discover</h1>
-        </div>
-
-        <!-- Search -->
-        <div class="flex-1 max-w-sm">
-          <div class="relative">
-            <span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-base">search</span>
-            <input
-              [(ngModel)]="searchQuery"
-              placeholder="Search styles, tags…"
-              class="w-full rounded-lg bg-zinc-900 border border-border-chrome pl-9 pr-3 py-1.5 text-xs
-                     text-slate-100 placeholder-slate-600 outline-none focus:border-primary/50"
-            />
-          </div>
         </div>
 
         <!-- Sort -->
@@ -301,6 +298,10 @@ import { SourceSidebarComponent } from './source-sidebar.component';
         </div>
       }
     </div>
+
+    @if (settingsOpen()) {
+      <app-profile-panel (closed)="settingsOpen.set(false)" />
+    }
   `,
 })
 export class DiscoverComponent implements OnInit {
@@ -315,7 +316,8 @@ export class DiscoverComponent implements OnInit {
   protected selectedItem = signal<ScrapedItem | null>(null);
   protected galleryIndex = signal(0);
   protected modalVoted = signal<'up' | 'down' | null>(null);
-  protected searchQuery = '';
+  protected searchQuery = signal('');
+  protected settingsOpen = signal(false);
   private readonly preloadedImageUrls = new Set<string>();
 
   readonly skeletons = Array.from({ length: 15 }, (_, i) => i);
@@ -328,7 +330,7 @@ export class DiscoverComponent implements OnInit {
   ];
 
   readonly filteredItems = computed(() => {
-    const q = this.searchQuery.toLowerCase().trim();
+    const q = this.searchQuery().toLowerCase().trim();
     if (!q) return this.allItems();
     return this.allItems().filter(item =>
       item.title.toLowerCase().includes(q) ||
@@ -337,6 +339,8 @@ export class DiscoverComponent implements OnInit {
   });
 
   constructor(private readonly discoverService: DiscoverService) { }
+
+  protected noop(): void {}
 
   ngOnInit() {
     this.loadSources();

@@ -1,7 +1,6 @@
 import { Component, OnInit, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import { FormsModule } from '@angular/forms';
+import { ActivatedRoute, Router } from '@angular/router';
 import { WardrobeService } from '../../core/services/wardrobe.service';
 import { UserProfileService } from '../../core/services/user-profile.service';
 import {
@@ -15,6 +14,8 @@ import { VaultSidebarComponent, VaultFilters, SmartGroup } from './vault-sidebar
 import { VaultCardComponent } from './vault-card.component';
 import { ItemDetailDrawerComponent } from './item-detail-drawer.component';
 import { StatCardComponent } from '../../shared/stat-card.component';
+import { AppHeaderComponent } from '../../shared/app-header.component';
+import { ProfilePanelComponent } from '../profile/profile-panel.component';
 import { ReviewItemModalComponent } from '../closet/review-item-modal.component';
 import { AddToCollectionModalComponent } from '../collections/add-to-collection-modal.component';
 import { matchesItem } from '../../core/utils/search.utils';
@@ -27,70 +28,30 @@ import { CpwIntelItem, VaultInsightsResponse } from '../../core/models/vault-ins
   standalone: true,
   imports: [
     CommonModule,
-    FormsModule,
-    RouterLink,
     VaultSidebarComponent,
     VaultCardComponent,
     ItemDetailDrawerComponent,
     VaultInsightsPanelComponent,
     StatCardComponent,
+    AppHeaderComponent,
+    ProfilePanelComponent,
     ReviewItemModalComponent,
     AddToCollectionModalComponent,
   ],
   template: `
     <div class="relative flex h-screen flex-col overflow-hidden bg-black text-slate-100 font-display">
 
-      <!-- ─── Header (matches dashboard) ─────────────────────────── -->
-      <header class="flex items-center justify-between border-b border-border-subtle bg-black px-6 py-4 shrink-0 z-50">
-        <div class="flex items-center gap-8">
-          <!-- Logo -->
-          <a routerLink="/" class="flex items-center gap-3 text-white hover:opacity-80 transition-opacity">
-            <span class="material-symbols-outlined text-primary" style="font-size:30px">checkroom</span>
-            <h2 class="text-white text-xl font-bold tracking-tight">Pluck-It</h2>
-          </a>
-
-          <!-- Vault search -->
-          <label class="hidden md:flex flex-col min-w-[280px]">
-            <div class="flex w-full items-center rounded-lg bg-card-dark border border-[#333] focus-within:border-primary/60 transition-colors">
-              <div class="flex items-center justify-center pl-3 text-slate-text">
-                <span class="material-symbols-outlined" style="font-size:20px">search</span>
-              </div>
-              <input
-                class="w-full bg-transparent border-none text-sm text-white placeholder-slate-text outline-none py-2.5 px-3 font-mono"
-                placeholder="Try 'White summer shirts' or 'Casual linen'…"
-                [ngModel]="searchQuery()" (ngModelChange)="searchQuery.set($event)"
-              />
-            </div>
-          </label>
-        </div>
-
-        <div class="flex items-center gap-3">
-          <!-- Back to wardrobe -->
-          <a routerLink="/"
-             class="p-2 rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] transition-colors"
-             title="Back to Wardrobe">
-            <span class="material-symbols-outlined" style="font-size:20px">home</span>
-          </a>
-
-          <!-- Vault active indicator -->
-          <span
-            class="p-2 rounded-lg bg-primary/10 text-primary border border-primary/30"
-            title="Digital Vault">
-            <span class="material-symbols-outlined" style="font-size:20px">inventory_2</span>
-          </span>
-
-          <!-- Collections icon -->
-          <a routerLink="/collections"
-             class="p-2 rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] transition-colors"
-             title="My Collections">
-            <span class="material-symbols-outlined" style="font-size:20px">folder_special</span>
-          </a>
-
-          <button class="p-2 rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] transition-colors">
-            <span class="material-symbols-outlined" style="font-size:20px">notifications</span>
-          </button>
-        </div>
-      </header>
+      <app-shared-header
+        section="vault"
+        [showSearch]="true"
+        [searchValue]="searchQuery()"
+        searchPlaceholder="Try 'White summer shirts' or 'Casual linen'…"
+        (searchValueChange)="searchQuery.set($event)"
+        [showBackShortcut]="true"
+        backShortcutLabel="Back to Wardrobe"
+        (notificationsRequested)="noop()"
+        (settingsRequested)="settingsOpen.set(true)"
+      />
 
       <!-- ─── Body (3-col layout) ──────────────────────────────────── -->
       <div class="flex flex-1 overflow-hidden">
@@ -231,12 +192,17 @@ import { CpwIntelItem, VaultInsightsResponse } from '../../core/models/vault-ins
         />
       }
 
+      @if (settingsOpen()) {
+        <app-profile-panel (closed)="settingsOpen.set(false)" />
+      }
+
     </div>
   `,
 })
 export class VaultComponent implements OnInit {
 
   protected allItems = signal<ClothingItem[]>([]);
+  protected readonly settingsOpen = signal(false);
   protected selectedItem = signal<ClothingItem | null>(null);
   protected editingItem = signal<ClothingItem | null>(null);
   protected sharingItem = signal<ClothingItem | null>(null);
@@ -288,6 +254,8 @@ export class VaultComponent implements OnInit {
     this.loadWearSuggestions();
     this.loadInsights();
   }
+
+  protected noop(): void {}
 
   // ── Computed stats ──────────────────────────────────────────────────────
 

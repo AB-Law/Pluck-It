@@ -8,30 +8,35 @@ import { AuthService } from '../../core/services/auth.service';
 import { ClothingItem } from '../../core/models/clothing-item.model';
 import { CreateCollectionModalComponent } from './create-collection-modal.component';
 import { EMPTY, map, switchMap, tap } from 'rxjs';
+import { AppHeaderComponent } from '../../shared/app-header.component';
+import { ProfilePanelComponent } from '../profile/profile-panel.component';
 
 @Component({
   selector: 'app-collections',
   standalone: true,
-  imports: [CommonModule, RouterLink, CreateCollectionModalComponent],
+  imports: [CommonModule, RouterLink, AppHeaderComponent, ProfilePanelComponent, CreateCollectionModalComponent],
   template: `
     <div class="flex h-screen flex-col bg-black text-slate-100 font-display overflow-hidden">
 
       <!-- Header -->
-      <header class="sticky top-0 z-50 flex h-16 w-full items-center justify-between border-b border-border-chrome bg-black px-6 shrink-0">
-        <div class="flex items-center gap-4">
-          <a routerLink="/" class="text-slate-400 hover:text-white transition-colors">
-            <span class="material-symbols-outlined">arrow_back</span>
-          </a>
+      <div class="sticky top-0 z-50">
+        <app-shared-header
+          section="collections"
+          [showSearch]="false"
+          (notificationsRequested)="noop()"
+          (settingsRequested)="settingsOpen.set(true)"
+        />
+        <div class="px-6 h-14 border-b border-border-chrome flex items-center justify-between bg-black">
           <h2 class="text-xl font-bold tracking-tighter text-slate-100">Collections</h2>
+          <button
+            class="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-white hover:bg-blue-500 transition-colors"
+            (click)="showCreateModal.set(true)"
+          >
+            <span class="material-symbols-outlined text-sm">add</span>
+            New Collection
+          </button>
         </div>
-        <button
-          class="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-white hover:bg-blue-500 transition-colors"
-          (click)="showCreateModal.set(true)"
-        >
-          <span class="material-symbols-outlined text-sm">add</span>
-          New Collection
-        </button>
-      </header>
+      </div>
 
       <!-- Body: 2-col split -->
       <div class="flex flex-1 overflow-hidden">
@@ -196,6 +201,10 @@ import { EMPTY, map, switchMap, tap } from 'rxjs';
         (cancelled)="showCreateModal.set(false)"
       />
     }
+
+    @if (settingsOpen()) {
+      <app-profile-panel (closed)="settingsOpen.set(false)" />
+    }
   `,
 })
 export class CollectionsComponent implements OnInit {
@@ -203,6 +212,7 @@ export class CollectionsComponent implements OnInit {
   protected loading         = signal(true);
   protected activeCollection = signal<Collection | null>(null);
   protected showCreateModal  = signal(false);
+  protected settingsOpen    = signal(false);
   protected shareLabel       = signal('Copy Link');
   protected collectionItemsMap = signal<Record<string, ClothingItem[]>>({});
 
@@ -241,6 +251,8 @@ export class CollectionsComponent implements OnInit {
       )
       .subscribe();
   }
+
+  protected noop(): void {}
 
   selectCollection(col: Collection): void {
     this.activeCollection.set(col);
