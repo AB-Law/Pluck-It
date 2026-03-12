@@ -135,24 +135,29 @@ def run_digest_for_user_with_status(user_id: str, force: bool = False) -> tuple[
       - generated: digest generated and persisted
       - failed: no digest produced due runtime issues or LLM empty output
     """
-    # 1. Load data
+    # 1. Load profile to check lightweight skip signals before expensive wardrobe load.
+    profile_container = get_user_profiles_container_sync()
+    profile = _get_user_profile(profile_container, user_id)
+    if not force and profile.get("wardrobeHashAtLastDigest") == profile.get("wardrobeFingerprint"):
+        return None, "skipped_by_hash"
+    if not force and not profile.get("recommendationOptIn", True):
+        return None, "skipped_by_opt_out"
+
+    # 2. Load data
     wardrobe_data = _load_user_wardrobe(user_id)
     if wardrobe_data is None:
         return None, "failed"
     if not wardrobe_data["item_ids"]:
         return None, "skipped_by_hash"
 
-    profile_container = get_user_profiles_container_sync()
-    profile = _get_user_profile(profile_container, user_id)
-    
-    # 2. Skip checks
+    # 3. Skip checks
     current_hash = compute_wardrobe_hash(wardrobe_data["item_ids"])
     if _should_skip_digest(profile, current_hash, force):
-        if profile.get("wardrobeHashAtLastDigest") == current_hash and not force:
-            return None, "skipped_by_hash"
+        return None, "skipped_by_hash"
+    if not force and not profile.get("recommendationOptIn", True):
         return None, "skipped_by_opt_out"
 
-    # 3. Analyze wardrobe & feedback
+    # 4. Analyze wardrobe & feedback
     ranked_items, category_counts, climate_signals = _analyze_wardrobe(wardrobe_data["items"])
     liked, disliked = _load_recent_feedback(user_id)
     
@@ -204,8 +209,6 @@ def _get_user_profile(container: any, user_id: str) -> dict:
 
 def _should_skip_digest(profile: dict, current_hash: str, force: bool) -> bool:
     if not force and profile.get("wardrobeHashAtLastDigest") == current_hash:
-        return True
-    if not profile.get("recommendationOptIn", True):
         return True
     return False
 
@@ -321,6 +324,7 @@ def _save_digest_and_update_profile(profile_container, profile, digest, confiden
     try:
         get_digests_container_sync().upsert_item(digest)
         profile["wardrobeHashAtLastDigest"] = digest["wardrobeHash"]
+        profile["wardrobeFingerprint"] = digest["wardrobeHash"]
         if confidence is not None:
             profile["styleConfidenceProfile"] = confidence
         if climate and not profile.get("climateZone"):

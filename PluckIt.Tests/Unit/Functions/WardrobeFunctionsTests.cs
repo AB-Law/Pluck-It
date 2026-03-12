@@ -1,4 +1,6 @@
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Shouldly;
@@ -59,17 +61,32 @@ private static WardrobeFunctions CreateSut(
         InMemoryWardrobeRepository? repo = null,
         FakeBlobSasService? sas = null,
         InMemoryWearHistoryRepository? wearHistoryRepo = null,
-        InMemoryStylingActivityRepository? stylingActivityRepo = null)
+        InMemoryStylingActivityRepository? stylingActivityRepo = null,
+        InMemoryUserProfileRepository? userProfileRepo = null)
     {
         var cfg = TestConfiguration.WithDevUser(UserId);
         return new WardrobeFunctions(
             repo  ?? new InMemoryWardrobeRepository(),
-            wearHistoryRepo ?? new InMemoryWearHistoryRepository(),
-            stylingActivityRepo ?? new InMemoryStylingActivityRepository(),
             sas   ?? new FakeBlobSasService(),
             new FakeImageJobQueue(),
+            new WardrobeFunctionsMutationDependencies(
+                wearHistoryRepo ?? new InMemoryWearHistoryRepository(),
+                stylingActivityRepo ?? new InMemoryStylingActivityRepository(),
+                userProfileRepo ?? new InMemoryUserProfileRepository()),
             new WardrobeFunctionsAuthContext(UserId, TestFactory.CreateTokenValidator(cfg)),
             TestFactory.NullLogger<WardrobeFunctions>());
+    }
+
+    private static string ComputeWardrobeFingerprint(IEnumerable<string> itemIds)
+    {
+        var canonical = string.Join(",", itemIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .OrderBy(id => id, StringComparer.Ordinal));
+        using var sha = SHA256.Create();
+        var bytes = Encoding.UTF8.GetBytes(canonical);
+        var hash = sha.ComputeHash(bytes);
+        return Convert.ToHexString(hash)[..16].ToLowerInvariant();
     }
 
     /// <summary>Deserializes the paged envelope from the response body.</summary>
@@ -102,10 +119,12 @@ private static WardrobeFunctions CreateSut(
     {
         var sut = new WardrobeFunctions(
             new InMemoryWardrobeRepository(),
-            new InMemoryWearHistoryRepository(),
-            new InMemoryStylingActivityRepository(),
             new FakeBlobSasService(),
             new FakeImageJobQueue(),
+            new WardrobeFunctionsMutationDependencies(
+                new InMemoryWearHistoryRepository(),
+                new InMemoryStylingActivityRepository(),
+                new InMemoryUserProfileRepository()),
             new WardrobeFunctionsAuthContext(null, TestFactory.CreateTokenValidator(TestConfiguration.Unauthenticated())),
             TestFactory.NullLogger<WardrobeFunctions>());
 
@@ -860,5 +879,54 @@ private static WardrobeFunctions CreateSut(
 
         result.StatusCode.ShouldBe(HttpStatusCode.Created);
         repo.AllItems.Single().Id.ShouldNotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public async Task SaveItem_UpdatesWardrobeFingerprint()
+    {
+        var repo = new InMemoryWardrobeRepository();
+        var profileRepo = new InMemoryUserProfileRepository()
+            .WithProfile(new UserProfile { Id = UserId, WardrobeFingerprint = "old" });
+        var sut = CreateSut(repo, userProfileRepo: profileRepo);
+        var newItem = new ClothingItem { Id = "new-1", UserId = "ignored", ImageUrl = "https://b.com/new.png" };
+        var json = JsonSerializer.Serialize(newItem, PluckItJsonContext.Default.ClothingItem);
+
+        await sut.SaveItem(
+            TestRequest.Post("http://localhost/api/wardrobe", json), CancellationToken.None);
+
+        profileRepo.All[UserId].WardrobeFingerprint.ShouldBe(ComputeWardrobeFingerprint(["new-1"]));
+    }
+
+    [Fact]
+    public async Task UpdateWardrobeItem_UpdatesWardrobeFingerprint()
+    {
+        var existing = MakeItem("item-002");
+        var repo = new InMemoryWardrobeRepository().WithItems(existing);
+        var profileRepo = new InMemoryUserProfileRepository()
+            .WithProfile(new UserProfile { Id = UserId, WardrobeFingerprint = "old" });
+        var updatedItem = MakeItem("item-002", wearCount: 7);
+        var json = JsonSerializer.Serialize(updatedItem, PluckItJsonContext.Default.ClothingItem);
+        var sut = CreateSut(repo, userProfileRepo: profileRepo);
+
+        await sut.UpdateWardrobeItem(
+            TestRequest.Put("http://localhost/api/wardrobe/item-002", json),
+            "item-002",
+            CancellationToken.None);
+
+        profileRepo.All[UserId].WardrobeFingerprint.ShouldBe(ComputeWardrobeFingerprint(["item-002"]));
+    }
+
+    [Fact]
+    public async Task DeleteWardrobeItem_UpdatesWardrobeFingerprint()
+    {
+        var repo = new InMemoryWardrobeRepository().WithItems(MakeItem("to-delete"));
+        var profileRepo = new InMemoryUserProfileRepository()
+            .WithProfile(new UserProfile { Id = UserId, WardrobeFingerprint = "old" });
+        var sut = CreateSut(repo, userProfileRepo: profileRepo);
+
+        await sut.DeleteWardrobeItem(
+            TestRequest.Delete("http://localhost/api/wardrobe/to-delete"), "to-delete", CancellationToken.None);
+
+        profileRepo.All[UserId].WardrobeFingerprint.ShouldBe(ComputeWardrobeFingerprint([]));
     }
 }

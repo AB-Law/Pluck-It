@@ -1,5 +1,6 @@
 import sys
 import types
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -310,3 +311,108 @@ async def test_compute_vault_insights_safely_handles_non_numeric_price_amount():
     assert result["insufficientData"] is False
     assert result["cpwIntel"][0]["cpw"] is None
     assert result["cpwIntel"][0]["forecast"] is None
+
+
+@pytest.mark.unit
+async def test_compute_vault_insights_returns_cached_payload_when_fingerprint_matches():
+    from agents.vault_insights import compute_vault_insights
+
+    future_expires_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    cached_payload = {
+        "generatedAt": "2026-03-12T00:00:00+00:00",
+        "currency": "USD",
+        "insufficientData": False,
+        "fxDate": "2026-03-12",
+        "conversionStatus": "static_rates",
+        "behavioralInsights": {
+            "topColorWearShare": {"color": "black", "pct": 55.0},
+            "unworn90dPct": 12.5,
+            "mostExpensiveUnworn": {"itemId": "item-1", "amount": 42.0, "currency": "USD"},
+            "sparseHistory": True,
+        },
+        "cpwIntel": [
+            {
+                "itemId": "item-1",
+                "cpw": 10.0,
+                "badge": "low",
+                "breakEvenReached": False,
+                "breakEvenTargetCpw": 100.0,
+                "recentWearRate": 0.5,
+                "historicalWearRate": 0.2,
+                "wearRateTrend": "up",
+                "wearRateDelta": 0.3,
+                "forecast": None,
+            }
+        ],
+    }
+    cache_record = {
+        "id": "test-user|90|100",
+        "userId": "test-user",
+        "windowDays": 90,
+        "targetCpw": 100.0,
+        "wardrobeFingerprint": "fp-123",
+        "payload": cached_payload,
+        "expiresAt": future_expires_at,
+    }
+
+    cache = AsyncMock()
+    cache.query_items = _async_iter([cache_record])
+    wardrobe = AsyncMock()
+    wardrobe.query_items = _async_iter([])
+    events = AsyncMock()
+    events.query_items = _async_iter([])
+    profiles = AsyncMock()
+    profiles.read_item = AsyncMock(return_value={"currencyCode": "USD", "wardrobeFingerprint": "fp-123"})
+
+    with (
+        patch("agents.vault_insights.get_vault_insights_cache_container", return_value=cache),
+        patch("agents.vault_insights.get_wardrobe_container", return_value=wardrobe),
+        patch("agents.vault_insights.get_wear_events_container", return_value=events),
+        patch("agents.vault_insights.get_user_profiles_container", return_value=profiles),
+    ):
+        result = await compute_vault_insights("test-user")
+
+    assert result == cached_payload
+
+
+@pytest.mark.unit
+async def test_compute_vault_insights_writes_cache_entry_on_miss():
+    from agents.vault_insights import compute_vault_insights
+
+    wardrobe_items = [
+        {
+            "id": "item-1",
+            "wearCount": 1,
+            "lastWornAt": "2026-03-01T00:00:00Z",
+            "dateAdded": "2026-02-01T00:00:00Z",
+            "price": {"amount": 100, "originalCurrency": "USD"},
+            "colours": [{"name": "Black", "hex": "#000000"}],
+            "tags": [],
+        }
+    ]
+    window_events = [
+        {"itemId": "item-1", "occurredAt": "2026-03-02T00:00:00Z"},
+    ]
+
+    wardrobe = AsyncMock()
+    wardrobe.query_items = _async_iter(wardrobe_items)
+    events = AsyncMock()
+    events.query_items = _async_iter(window_events)
+    profiles = AsyncMock()
+    profiles.read_item = AsyncMock(
+        return_value={"currencyCode": "USD", "wardrobeFingerprint": "fp-456"}
+    )
+    cache = AsyncMock()
+    cache.query_items = _async_iter([])
+    cache.upsert_item = AsyncMock()
+
+    with (
+        patch("agents.vault_insights.get_vault_insights_cache_container", return_value=cache),
+        patch("agents.vault_insights.get_wardrobe_container", return_value=wardrobe),
+        patch("agents.vault_insights.get_wear_events_container", return_value=events),
+        patch("agents.vault_insights.get_user_profiles_container", return_value=profiles),
+    ):
+        result = await compute_vault_insights("test-user")
+
+    assert result["currency"] == "USD"
+    cache.upsert_item.assert_called_once()

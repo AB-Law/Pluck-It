@@ -1,4 +1,5 @@
 using System.Net;
+using System;
 using Shouldly;
 using PluckIt.Core;
 using PluckIt.Functions.Functions;
@@ -92,5 +93,45 @@ public sealed class StylistFunctionsTests
             CancellationToken.None);
 
         stylist.CallCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task GetRecommendations_AppliesQueryKnobsFromRequest()
+    {
+        var keep = MakeItem("keep");
+        keep.WearCount = 3;
+        keep.DateAdded = DateTimeOffset.UtcNow;
+        keep.Category = "Tops";
+        var skip = MakeItem("skip");
+        skip.WearCount = 1;
+        skip.DateAdded = DateTimeOffset.UtcNow.AddDays(-2);
+        skip.Category = "Tops";
+        var bottom = MakeItem("bottom");
+        bottom.WearCount = 5;
+        bottom.DateAdded = DateTimeOffset.UtcNow.AddDays(-1);
+        bottom.Category = "Bottoms";
+
+        var repo = new InMemoryWardrobeRepository().WithItems(skip, keep, bottom);
+        var stylist = new FakeStylistService();
+        var sut = CreateSut(repo, stylist);
+        var requestBody = """
+            { "category":"Tops", "minWears":2, "maxWears":6, "pageSize":1 }
+            """;
+
+        var result = await sut.GetRecommendations(
+            TestRequest.Post("http://localhost/api/stylist/recommendations", requestBody),
+            CancellationToken.None) as TestHttpResponseData;
+
+        result!.StatusCode.ShouldBe(HttpStatusCode.OK);
+        stylist.CallCount.ShouldBe(1);
+        stylist.LastRequest.ShouldNotBeNull();
+        stylist.LastRequest!.PageSize.ShouldBe(1);
+        stylist.LastRequest!.Category.ShouldBe("Tops");
+        stylist.LastRequest!.MinWears.ShouldBe(2);
+        stylist.LastRequest!.MaxWears.ShouldBe(6);
+        stylist.LastWardrobe.ShouldNotBeNull();
+        stylist.LastWardrobe!.Count.ShouldBe(1);
+        stylist.LastWardrobe![0].Category.ShouldBe("Tops");
+        stylist.LastWardrobe![0].WearCount.ShouldBeGreaterThanOrEqualTo(2);
     }
 }

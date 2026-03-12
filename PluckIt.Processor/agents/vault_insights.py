@@ -11,6 +11,8 @@ No LLM calls. This module computes:
 from __future__ import annotations
 
 import math
+import os
+import logging
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -19,8 +21,10 @@ from .db import (
     get_wardrobe_container,
     get_wear_events_container,
     get_user_profiles_container,
+    get_vault_insights_cache_container,
 )
 
+_logger = logging.getLogger(__name__)
 _FX_LAST_REFRESH: Optional[datetime] = None
 _FX_CACHE: dict[tuple[str, str], float] = {}
 _KNOWN_COLORS = {
@@ -28,6 +32,7 @@ _KNOWN_COLORS = {
     "pink", "purple", "brown", "beige", "grey", "gray", "cream", "olive",
     "maroon", "teal", "gold", "silver",
 }
+_DEFAULT_CACHE_TTL_MS = 300_000
 
 
 def _ensure_fx_cache() -> tuple[str, str]:
@@ -175,11 +180,31 @@ async def compute_vault_insights(
     cutoff = now - timedelta(days=max(1, window_days))
     fx_date, fx_status = _ensure_fx_cache()
 
-    currency = await _get_profile_currency(user_id)
+    currency, wardrobe_fingerprint = await _get_profile_meta(user_id)
+
+    cache_payload = await _get_cached_vault_insights(
+        user_id=user_id,
+        window_days=window_days,
+        target_cpw=target_cpw,
+        wardrobe_fingerprint=wardrobe_fingerprint,
+        now=now,
+    )
+    if cache_payload is not None:
+        return cache_payload
+
     items, window_events = await _fetch_user_data(user_id, cutoff)
 
     if not items:
-        return _insufficient_data_response(now, currency, fx_date, fx_status)
+        payload = _insufficient_data_response(now, currency, fx_date, fx_status)
+        await _set_cached_vault_insights(
+            user_id=user_id,
+            window_days=window_days,
+            target_cpw=target_cpw,
+            wardrobe_fingerprint=wardrobe_fingerprint,
+            payload=payload,
+            now=now,
+        )
+        return payload
 
     # 1. Behavioral Insights
     item_by_id = {i.get("id"): i for i in items if i.get("id")}
@@ -195,7 +220,7 @@ async def compute_vault_insights(
         for item in items
     ]
 
-    return {
+    payload = {
         "generatedAt": now.isoformat(),
         "currency": currency,
         "insufficientData": False,
@@ -209,14 +234,112 @@ async def compute_vault_insights(
         },
         "cpwIntel": cpw_intel,
     }
+    await _set_cached_vault_insights(
+        user_id=user_id,
+        window_days=window_days,
+        target_cpw=target_cpw,
+        wardrobe_fingerprint=wardrobe_fingerprint,
+        payload=payload,
+        now=now,
+    )
+    return payload
 
-async def _get_profile_currency(user_id: str) -> str:
+def _normalize_target_cpw(target_cpw: float) -> str:
+    normalized = f"{float(target_cpw):.6f}".rstrip("0").rstrip(".")
+    return normalized if normalized else "0"
+
+
+def _build_vault_cache_id(user_id: str, window_days: int, target_cpw: float) -> str:
+    return f"{user_id}|{window_days}|{_normalize_target_cpw(target_cpw)}"
+
+
+def _get_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name, str(default))
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+async def _get_profile_meta(user_id: str) -> tuple[str, Optional[str]]:
     try:
         profiles = get_user_profiles_container()
         profile = await profiles.read_item(item=user_id, partition_key=user_id)
-        return (profile.get("currencyCode") or "USD").upper()
+        currency = (profile.get("currencyCode") or "USD").upper()
+        wardrobe_fingerprint = (
+            profile.get("wardrobeFingerprint")
+            or profile.get("WardrobeFingerprint")
+            or profile.get("wardrobeHashAtLastDigest")
+            or None
+        )
+        return currency, wardrobe_fingerprint
     except Exception:
-        return "USD"
+        return "USD", None
+
+
+async def _get_cached_vault_insights(
+    user_id: str,
+    window_days: int,
+    target_cpw: float,
+    wardrobe_fingerprint: Optional[str],
+    now: datetime,
+) -> Optional[dict]:
+    cache_key = _build_vault_cache_id(user_id, window_days, target_cpw)
+    try:
+        cache_container = get_vault_insights_cache_container()
+        async for cached in cache_container.query_items(
+            query="SELECT * FROM c WHERE c.id = @cacheId AND c.userId = @userId",
+            parameters=[
+                {"name": "@cacheId", "value": cache_key},
+                {"name": "@userId", "value": user_id},
+            ],
+            partition_key=user_id,
+            max_item_count=1,
+        ):
+            if not isinstance(cached, dict):
+                return None
+            if cached.get("wardrobeFingerprint") != wardrobe_fingerprint:
+                return None
+            expires_at = _parse_iso(cached.get("expiresAt"))
+            if expires_at is None or expires_at < now:
+                return None
+            payload = cached.get("payload")
+            if isinstance(payload, dict):
+                return payload
+            return None
+    except Exception as exc:
+        _logger.debug("Vault insight cache read failed for user %s: %s", user_id, exc)
+    return None
+
+
+async def _set_cached_vault_insights(
+    user_id: str,
+    window_days: int,
+    target_cpw: float,
+    wardrobe_fingerprint: Optional[str],
+    payload: dict,
+    now: datetime,
+) -> None:
+    cache_key = _build_vault_cache_id(user_id, window_days, target_cpw)
+    ttl_ms = _get_int_env("COSMOS_DB_VAULT_INSIGHTS_CACHE_TTL_MS", _DEFAULT_CACHE_TTL_MS)
+    expires_at = now + timedelta(milliseconds=max(1000, ttl_ms))
+    try:
+        cache_container = get_vault_insights_cache_container()
+        await cache_container.upsert_item(
+            {
+                "id": cache_key,
+                "userId": user_id,
+                "windowDays": window_days,
+                "targetCpw": float(target_cpw),
+                "wardrobeFingerprint": wardrobe_fingerprint,
+                "payload": payload,
+                "generatedAt": now.isoformat(),
+                "expiresAt": expires_at.isoformat(),
+                "cacheTtlMs": ttl_ms,
+            }
+        )
+    except Exception as exc:
+        _logger.debug("Vault insight cache write failed for user %s: %s", user_id, exc)
 
 async def _fetch_user_data(user_id: str, cutoff: datetime) -> tuple[list[dict], list[dict]]:
     wardrobe = get_wardrobe_container()

@@ -303,6 +303,34 @@ resource "azurerm_cosmosdb_sql_container" "user_profiles" {
   }
 }
 
+# Cache for short-lived vault insights payloads (deduplicates repeated expensive reads).
+resource "azurerm_cosmosdb_sql_container" "vault_insights_cache" {
+  name                  = "VaultInsightsCache"
+  resource_group_name   = azurerm_resource_group.rg_pluckit_archive.name
+  account_name          = azurerm_cosmosdb_account.pluckit.name
+  database_name         = azurerm_cosmosdb_sql_database.pluckit.name
+  partition_key_paths   = ["/userId"]
+  partition_key_version = 1
+
+  indexing_policy {
+    indexing_mode = "consistent"
+
+    included_path {
+      path = "/*"
+    }
+
+    included_path {
+      path = "/userId/?"
+    }
+    included_path {
+      path = "/generatedAt/?"
+    }
+    included_path {
+      path = "/expiresAt/?"
+    }
+  }
+}
+
 # Stores per-user conversation memory: rolling summary + last-digest wardrobe hash.
 # TTL of 30 days auto-expires stale summaries.
 resource "azurerm_cosmosdb_sql_container" "conversations" {
@@ -804,6 +832,8 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
     "COSMOS_DB_USER_SOURCE_SUBSCRIPTIONS_CONTAINER" = azurerm_cosmosdb_sql_container.user_source_subscriptions.name
     "COSMOS_DB_TASTE_CALIBRATION_CONTAINER"         = azurerm_cosmosdb_sql_container.taste_calibration.name
     "COSMOS_DB_USER_BANS_CONTAINER"                 = azurerm_cosmosdb_sql_container.user_bans.name
+    "COSMOS_DB_VAULT_INSIGHTS_CACHE_CONTAINER"      = azurerm_cosmosdb_sql_container.vault_insights_cache.name
+    "COSMOS_DB_VAULT_INSIGHTS_CACHE_TTL_MS"         = "300000"
     # Azure OpenAI — primary model for chat/agents
     "AZURE_OPENAI_ENDPOINT"   = var.ai_gpt4o_endpoint
     "AZURE_OPENAI_API_KEY"    = var.ai_api_key

@@ -72,6 +72,13 @@ public class UserProfile
   /// </summary>
   public string? WardrobeHashAtLastDigest { get; set; }
 
+  /// <summary>
+  /// Lightweight hash of all wardrobe item IDs after the latest wardrobe mutation.
+  /// Wardrobe mutations update this value so digest handlers can skip expensive
+  /// loading when the wardrobe has not changed since the last digest.
+  /// </summary>
+  public string? WardrobeFingerprint { get; set; }
+
   // ── Personalization graph fields (AI-inferred, never user-declared) ────────
 
   /// <summary>

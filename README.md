@@ -165,7 +165,7 @@ All resources are in resource group **PluckIt-RG** (West Europe).
 | Storage Account (Functions) | *(see infra/main.tf)* | Deployment package blobs only |
 | Cosmos DB Account | `pluckit-prod-cosmos` | Free tier, Session consistency |
 | Cosmos DB Database | `PluckIt` | Shared 1,000 RU/s throughput |
-| Cosmos Containers | Wardrobe, WearEvents, StylingActivity, UserProfiles, Conversations, Digests, Moods, DigestFeedback, Collections | See `infra/main.tf` for partition keys and index policies |
+| Cosmos Containers | Wardrobe, WearEvents, StylingActivity, UserProfiles, Conversations, Digests, Moods, DigestFeedback, Collections, VaultInsightsCache | See `infra/main.tf` for partition keys and index policies |
 | .NET Function App | `pluckit-prod-api-func` | Flex Consumption, dotnet-isolated 10.0 |
 | Python Function App | `pluckit-prod-processor-func` | Flex Consumption, Python 3.12 |
 | Static Web App | `pluckit-prod-web` | Free tier, East Asia, custom domain |
@@ -252,6 +252,7 @@ Add these to `PluckIt.Functions/local.settings.json` and `PluckIt.Processor/loca
 - `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` — Langfuse tracing credentials
 - `LANGFUSE_HOST` (optional) — Langfuse API host (defaults to `https://us.cloud.langfuse.com`)  
   You can also use `LANGFUSE_BASE_URL` in place of `LANGFUSE_HOST`.
+- `COSMOS_DB_VAULT_INSIGHTS_CACHE_CONTAINER` / `COSMOS_DB_VAULT_INSIGHTS_CACHE_TTL_MS` — optional processor cache container and TTL (ms) for vault insights
 
 For Codespaces, add the same names as **Codespaces secrets** (not Actions secrets — they are separate namespaces).
 For CI, set `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and optional `LANGFUSE_HOST` in GitHub Action secrets so `terraform-infra.yml` can pass them into `terraform.auto.tfvars`.

@@ -26,6 +26,7 @@ os.environ.setdefault("COSMOS_DB_SCRAPER_SOURCES_CONTAINER",            "Scraper
 os.environ.setdefault("COSMOS_DB_SCRAPED_ITEMS_CONTAINER",              "ScrapedItems")
 os.environ.setdefault("COSMOS_DB_USER_SOURCE_SUBSCRIPTIONS_CONTAINER",  "UserSourceSubscriptions")
 os.environ.setdefault("COSMOS_DB_TASTE_CALIBRATION_CONTAINER",          "TasteCalibration")
+os.environ.setdefault("COSMOS_DB_VAULT_INSIGHTS_CACHE_CONTAINER",       "VaultInsightsCache")
 os.environ.setdefault("STORAGE_ACCOUNT_NAME",     "testaccount")
 os.environ.setdefault("STORAGE_ACCOUNT_KEY",      "dGVzdA==")
 os.environ.setdefault("UPLOADS_CONTAINER_NAME",   "uploads")
