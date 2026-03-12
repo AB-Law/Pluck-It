@@ -34,10 +34,14 @@ jobs:
       with:
         python-version: "3.12"
         cache: 'pip'
-        cache-dependency-path: PluckIt.Processor/requirements.txt
+        cache-dependency-path: |
+          PluckIt.Processor/requirements-prod.txt
+          PluckIt.Processor/requirements-test.txt
 
-    - name: Install runtime + dev dependencies
-      run: pip install -r requirements.txt && pip install pytest pytest-asyncio pytest-cov httpx anyio[trio]
+    - name: Install runtime + test dependencies
+      run: |
+        pip install -r requirements-prod.txt
+        pip install -r requirements-test.txt
 
     - name: Run unit tests
       run: python -m pytest tests/unit/ -v --tb=short -m unit --cov=. --cov-report=xml
@@ -66,29 +70,31 @@ jobs:
       with:
         python-version: "3.12"
         cache: 'pip'
-        cache-dependency-path: PluckIt.Processor/requirements.txt
+        cache-dependency-path: PluckIt.Processor/requirements-prod.txt
 
-    - name: Install dependencies (pre-build for Linux target)
+    - name: Cache runtime site-packages
+      id: cache-python-packages
+      uses: actions/cache@v4
+      with:
+        path: PluckIt.Processor/.python_packages
+        key: py-packages-${{ runner.os }}-${{ hashFiles('PluckIt.Processor/requirements-prod.txt') }}
+        restore-keys: |
+          py-packages-${{ runner.os }}-
+
+    - name: Install production dependencies (pre-build for Linux target)
+      if: steps.cache-python-packages.outputs.cache-hit != 'true'
       run: |
         pip install \
           --target .python_packages/lib/site-packages \
           --no-compile \
-          -r requirements.txt
+          -r requirements-prod.txt
 
-    - name: Cache ML models
-      id: cache-ml-models
-      uses: actions/cache@v4
-      with:
-        path: PluckIt.Processor/models
-        key: ml-models-u2net-v0.0.0
-
-    - name: Download ML models
-      if: steps.cache-ml-models.outputs.cache-hit != 'true'
+    - name: Print deploy artifact size baseline
       run: |
-        mkdir -p models
-        curl -fSL "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net.onnx" \
-          -o models/u2net.onnx
-        echo "u2net.onnx: $(du -h models/u2net.onnx | cut -f1)"
+        echo "Function app source:"
+        du -sh .
+        echo "Installed site-packages:"
+        du -sh .python_packages
 
     - name: Azure Login
       uses: azure/login@v2
