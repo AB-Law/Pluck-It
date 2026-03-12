@@ -55,23 +55,26 @@ const STYLE_OPTIONS = [
 
     <!-- Slide-over panel -->
     <aside
-      class="panel-animate fixed top-0 right-0 z-50 h-full w-full max-w-sm bg-black border-l border-[#1F1F1F] flex flex-col shadow-2xl"
+      class="panel-animate fixed top-0 right-0 z-50 h-full w-full max-w-full md:max-w-sm bg-black border-l border-[#1F1F1F] flex flex-col shadow-2xl"
       role="dialog" aria-modal="true" aria-labelledby="profile-panel-title"
       (click)="$event.stopPropagation()"
     >
       <!-- Header -->
-      <div class="flex items-center justify-between px-6 py-5 border-b border-[#1F1F1F] shrink-0">
+      <div class="flex items-center justify-between px-4 py-4 border-b border-[#1F1F1F] shrink-0">
         <div>
           <h2 id="profile-panel-title" class="text-white font-bold text-base uppercase tracking-tight">Profile & Settings</h2>
           <p class="text-xs text-slate-500 font-mono mt-0.5">Body stats · Currency · Size system</p>
         </div>
-        <button class="text-slate-500 hover:text-white transition-colors" (click)="closed.emit()" aria-label="Close">
+        <button
+          class="touch-target h-10 w-10 flex items-center justify-center rounded-lg text-slate-500 hover:text-white transition-colors"
+          (click)="closed.emit()" aria-label="Close"
+        >
           <span class="material-symbols-outlined">close</span>
         </button>
       </div>
 
       <!-- Body -->
-      <div class="flex-1 overflow-y-auto px-6 py-6 space-y-8">
+      <div class="flex-1 overflow-y-auto px-4 py-4 md:px-6 md:py-6 space-y-8">
 
         @if (saving()) {
           <div class="flex items-center gap-2 text-primary text-xs font-mono">
@@ -107,7 +110,7 @@ const STYLE_OPTIONS = [
             <!-- Size system -->
             <div>
               <label class="block text-xs text-slate-500 font-mono mb-2">Preferred Size System</label>
-              <div class="flex border border-[#1F1F1F]">
+              <div class="flex border border-[#1F1F1F] touch-target">
                 @for (sys of sizeSystems; track sys; let last = $last) {
                   <button
                     type="button"
@@ -249,12 +252,12 @@ const STYLE_OPTIONS = [
       <div class="px-6 py-5 border-t border-[#1F1F1F] flex gap-4 shrink-0">
         <button
           type="button"
-          class="flex-1 h-11 text-xs font-bold uppercase tracking-widest text-slate-400 hover:text-white border border-[#1F1F1F] hover:border-slate-500 transition-colors"
+          class="touch-target flex-1 h-11 text-xs font-bold uppercase tracking-widest text-slate-400 hover:text-white border border-[#1F1F1F] hover:border-slate-500 transition-colors"
           (click)="closed.emit()"
         >Cancel</button>
         <button
           type="button"
-          class="flex-1 bg-primary hover:bg-blue-500 transition-colors h-11 text-xs font-bold uppercase tracking-widest text-white shadow-lg shadow-primary/20 disabled:opacity-50"
+          class="touch-target flex-1 bg-primary hover:bg-blue-500 transition-colors h-11 text-xs font-bold uppercase tracking-widest text-white shadow-lg shadow-primary/20 disabled:opacity-50"
           [disabled]="saving()"
           (click)="save()"
         >Save</button>

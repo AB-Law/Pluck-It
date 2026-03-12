@@ -1,4 +1,4 @@
-import { Component, OnInit, computed, signal, inject } from '@angular/core';
+import { Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild, computed, effect, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink, ActivatedRoute, Router } from '@angular/router';
 import { Collection } from '../../core/models/collection.model';
@@ -10,13 +10,14 @@ import { CreateCollectionModalComponent } from './create-collection-modal.compon
 import { EMPTY, map, switchMap, tap } from 'rxjs';
 import { AppHeaderComponent } from '../../shared/app-header.component';
 import { ProfilePanelComponent } from '../profile/profile-panel.component';
+import { MobileNavState } from '../../shared/layout/mobile-nav.state';
 
 @Component({
   selector: 'app-collections',
   standalone: true,
   imports: [CommonModule, RouterLink, AppHeaderComponent, ProfilePanelComponent, CreateCollectionModalComponent],
   template: `
-    <div class="flex h-screen flex-col bg-black text-slate-100 font-display overflow-hidden">
+    <div class="flex h-[100dvh] flex-col bg-black text-slate-100 font-display overflow-hidden pb-16 md:pb-0">
 
       <!-- Header -->
       <div class="sticky top-0 z-50">
@@ -24,25 +25,37 @@ import { ProfilePanelComponent } from '../profile/profile-panel.component';
           section="collections"
           [showSearch]="false"
           (notificationsRequested)="noop()"
-          (settingsRequested)="settingsOpen.set(true)"
+          (settingsRequested)="openSettings()"
         />
-        <div class="px-6 h-14 border-b border-border-chrome flex items-center justify-between bg-black">
-          <h2 class="text-xl font-bold tracking-tighter text-slate-100">Collections</h2>
-          <button
-            class="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-bold text-white hover:bg-blue-500 transition-colors"
-            (click)="showCreateModal.set(true)"
-          >
-            <span class="material-symbols-outlined text-sm">add</span>
-            New Collection
-          </button>
+        <div class="px-4 sm:px-6 h-14 border-b border-border-chrome flex items-center justify-between bg-black gap-2">
+          <h2 class="text-lg md:text-xl font-bold tracking-tighter text-slate-100">Collections</h2>
+          <div class="flex items-center gap-2">
+            @if (!isDesktopLayout()) {
+              <button
+                class="touch-target h-10 w-10 rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] flex items-center justify-center"
+                type="button"
+                (click)="openCollectionsList()"
+                title="Show collection list"
+              >
+                <span class="material-symbols-outlined" style="font-size:20px">menu</span>
+              </button>
+            }
+            <button
+              class="flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-500 transition-colors touch-target"
+                (click)="showCreateModal.set(true)"
+              >
+              <span class="material-symbols-outlined text-sm">add</span>
+              New Collection
+            </button>
+          </div>
         </div>
       </div>
 
       <!-- Body: 2-col split -->
-      <div class="flex flex-1 overflow-hidden">
+      <div class="flex flex-1 min-h-0 overflow-hidden">
 
         <!-- Left: collection list -->
-        <aside class="w-80 flex-shrink-0 border-r border-border-chrome overflow-y-auto p-4 space-y-2">
+        <aside class="w-80 flex-shrink-0 border-r border-border-chrome overflow-y-auto p-4 space-y-2 hidden md:block">
 
           @if (loading()) {
             <div class="flex items-center justify-center py-12 text-slate-500 text-sm">
@@ -84,8 +97,70 @@ import { ProfilePanelComponent } from '../profile/profile-panel.component';
           }
         </aside>
 
+        @if (showCollectionsList()) {
+          <div class="mobile-overlay-shell md:hidden" (click)="closeCollectionsList()"></div>
+          <aside
+            class="fixed inset-0 z-50 w-full border-r border-border-chrome overflow-y-auto bg-black p-4 space-y-2"
+          >
+            <div class="mb-4 flex items-center justify-between">
+              <h3 class="text-sm font-bold uppercase tracking-wider text-slate-500">Collections</h3>
+              <button
+                type="button"
+                class="touch-target h-10 w-10 flex items-center justify-center rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333]"
+                (click)="closeCollectionsList()"
+                title="Close collections list"
+              >
+                <span class="material-symbols-outlined" style="font-size:20px">close</span>
+              </button>
+            </div>
+            @if (loading()) {
+              <div class="flex items-center justify-center py-12 text-slate-500 text-sm">
+                <span class="material-symbols-outlined animate-spin mr-2" style="font-size:20px">progress_activity</span>
+                Loading…
+              </div>
+            } @else if (collections().length === 0) {
+              <div class="flex flex-col items-center justify-center py-12 text-slate-600 text-sm">
+                <span class="material-symbols-outlined mb-3" style="font-size:40px">folder_off</span>
+                <p>No collections yet.</p>
+                <button
+                  class="mt-4 text-primary text-xs underline touch-target"
+                  (click)="openCreateMobile();"
+                >Create one →</button>
+              </div>
+            } @else {
+              @for (col of collections(); track col.id) {
+                <button
+                  class="w-full text-left rounded-xl border p-4 transition-all"
+                  [class]="activeCollection()?.id === col.id ? 'border-primary bg-primary/10' : 'border-border-chrome bg-card-dark hover:border-slate-600'"
+                  (click)="selectCollectionFromMobile(col)"
+                >
+                  <div class="flex items-start justify-between gap-2 mb-2">
+                    <h4 class="text-sm font-bold text-slate-100 truncate">{{ col.name }}</h4>
+                    <span class="text-[10px] font-mono shrink-0"
+                      [class]="col.isPublic ? 'text-green-500' : 'text-slate-500'">
+                      {{ col.isPublic ? 'PUBLIC' : 'PRIVATE' }}
+                    </span>
+                  </div>
+                  @if (col.description) {
+                    <p class="text-xs text-slate-500 line-clamp-2 mb-2">{{ col.description }}</p>
+                  }
+                  <div class="flex items-center justify-between text-[10px] text-slate-500 font-mono">
+                    <span>{{ col.clothingItemIds.length }} items</span>
+                    <span>{{ col.memberUserIds.length + 1 }} members</span>
+                  </div>
+                </button>
+              }
+            }
+          </aside>
+        }
+
         <!-- Right: collection detail -->
-        <main class="flex-1 overflow-y-auto p-6">
+        <main
+          #mainScrollArea
+          class="min-h-0 flex-1 overflow-y-auto touch-pan-y p-4 md:p-6 outline-none"
+          tabindex="-1"
+          aria-label="Collection details"
+        >
           @if (activeCollection(); as col) {
             <!-- Collection header -->
             <div class="mb-6 flex items-start justify-between">
@@ -203,11 +278,15 @@ import { ProfilePanelComponent } from '../profile/profile-panel.component';
     }
 
     @if (settingsOpen()) {
-      <app-profile-panel (closed)="settingsOpen.set(false)" />
+      <app-profile-panel (closed)="closeSettingsPanel()" />
     }
   `,
 })
-export class CollectionsComponent implements OnInit {
+export class CollectionsComponent implements OnInit, OnDestroy {
+  @ViewChild('mainScrollArea')
+  private readonly mainScrollArea?: ElementRef<HTMLElement>;
+  protected readonly showCollectionsList = signal(false);
+  protected readonly desktopLayout = signal(false);
 
   protected loading         = signal(true);
   protected activeCollection = signal<Collection | null>(null);
@@ -221,6 +300,15 @@ export class CollectionsComponent implements OnInit {
   private readonly authService       = inject(AuthService);
   private readonly route             = inject(ActivatedRoute);
   private readonly router            = inject(Router);
+  private readonly mobileNavState    = inject(MobileNavState);
+
+  constructor() {
+    effect(() => {
+      if (this.mobileNavState.activePanel() === 'none') {
+        this.restoreMainFocusTarget();
+      }
+    });
+  }
 
   readonly collections = computed(() => this.collectionService.collections());
 
@@ -250,6 +338,68 @@ export class CollectionsComponent implements OnInit {
         }),
       )
       .subscribe();
+    this.updateLayoutMode();
+  }
+
+  ngOnDestroy(): void {
+    this.mobileNavState.closePanel();
+  }
+
+  @HostListener('window:resize')
+  protected onWindowResize(): void {
+    this.updateLayoutMode();
+  }
+
+  protected isDesktopLayout(): boolean {
+    return this.desktopLayout();
+  }
+
+  protected openSettings(): void {
+    this.mobileNavState.closePanel();
+    if (!this.desktopLayout()) {
+      this.mobileNavState.openProfile();
+      return;
+    }
+
+    this.settingsOpen.set(true);
+  }
+
+  protected closeSettingsPanel(): void {
+    this.settingsOpen.set(false);
+    this.mobileNavState.closePanel();
+    this.restoreMainFocusTarget();
+  }
+
+  private restoreMainFocusTarget(): void {
+    queueMicrotask(() => {
+      this.mainScrollArea?.nativeElement?.focus({ preventScroll: true });
+    });
+  }
+
+  protected openCollectionsList(): void {
+    this.showCollectionsList.set(true);
+  }
+
+  protected closeCollectionsList(): void {
+    this.showCollectionsList.set(false);
+  }
+
+  protected openCreateMobile(): void {
+    this.closeCollectionsList();
+    this.showCreateModal.set(true);
+  }
+
+  protected selectCollectionFromMobile(col: Collection): void {
+    this.selectCollection(col);
+    this.closeCollectionsList();
+  }
+
+  private updateLayoutMode(): void {
+    if (globalThis.window === undefined) return;
+    this.desktopLayout.set(globalThis.window.innerWidth >= 768);
+    if (this.desktopLayout()) {
+      this.showCollectionsList.set(false);
+    }
   }
 
   protected noop(): void {}

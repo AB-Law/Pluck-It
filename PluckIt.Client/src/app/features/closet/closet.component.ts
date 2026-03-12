@@ -31,7 +31,7 @@ interface UploadQueueItem {
   imports: [UploadItemComponent, ClothingCardComponent, ReviewItemModalComponent],
   template: `
     <!-- ─── Extraction Hub ──────────────────────────────────────────── -->
-    <section class="p-6 md:p-8 border-b border-border-subtle bg-gradient-to-b from-[#0a0a0a] to-background-dark">
+    <section class="p-4 sm:p-6 border-b border-border-subtle bg-gradient-to-b from-[#0a0a0a] to-background-dark">
       <div class="flex items-center justify-between mb-4">
         <h1 class="text-2xl font-bold text-white tracking-tight">The Extraction Hub</h1>
         <span class="text-[10px] font-mono text-primary bg-primary/10 px-2 py-1 rounded border border-primary/20 tracking-wider">
@@ -58,7 +58,7 @@ interface UploadQueueItem {
 
     <!-- ─── Upload Pipeline Strip ──────────────────────────────────────── -->
     @if (uploadQueue().length > 0 || serverOnlyDrafts().length > 0) {
-      <section class="px-6 md:px-8 py-4 border-b border-border-subtle bg-black/30">
+    <section class="px-4 sm:px-6 md:px-8 py-4 border-b border-border-subtle bg-black/30">
         <h3 class="text-[10px] font-mono text-slate-500 uppercase tracking-widest mb-3">Upload Pipeline</h3>
         <div class="flex flex-wrap gap-2">
 
@@ -83,15 +83,15 @@ interface UploadQueueItem {
               }
               <span class="max-w-[100px] truncate">{{ qi.category ?? qi.file.name }}</span>
               @if (qi.status === 'ready' && qi.draftId) {
-                <button class="ml-1 underline text-green-400 hover:text-green-200"
+                <button class="ml-1 underline text-green-400 hover:text-green-200 touch-target"
                   (click)="onQueueItemReview(qi)">Review</button>
               }
               @if (qi.status === 'failed' && qi.draftId) {
-                <button class="ml-1 underline text-yellow-400 hover:text-yellow-200"
+                <button class="ml-1 underline text-yellow-400 hover:text-yellow-200 touch-target"
                   (click)="onQueueItemRetry(qi)">Retry</button>
               }
               @if (qi.status === 'failed' || qi.status === 'ready') {
-                <button class="ml-1 text-slate-400 hover:text-red-300"
+                <button class="ml-1 text-slate-400 hover:text-red-300 touch-target"
                   (click)="onQueueItemDismiss(qi)" aria-label="Dismiss">✕</button>
               }
             </div>
@@ -114,14 +114,14 @@ interface UploadQueueItem {
               }
               <span class="max-w-[100px] truncate">{{ draft.category ?? 'Item' }}</span>
               @if (draft.draftStatus === 'Ready') {
-                <button class="ml-1 underline text-green-400 hover:text-green-200"
+                <button class="ml-1 underline text-green-400 hover:text-green-200 touch-target"
                   (click)="reviewingDraft.set(draft)">Review</button>
               }
               @if (draft.draftStatus === 'Failed' && !retryingDraftIds().has(draft.id)) {
-                <button class="ml-1 underline text-yellow-400 hover:text-yellow-200"
+                <button class="ml-1 underline text-yellow-400 hover:text-yellow-200 touch-target"
                   (click)="onServerDraftRetry(draft)">Retry</button>
               }
-              <button class="ml-1 text-slate-400 hover:text-red-300"
+              <button class="ml-1 text-slate-400 hover:text-red-300 touch-target"
                 (click)="onServerDraftDismiss(draft)" aria-label="Dismiss">✕</button>
             </div>
           }
@@ -130,19 +130,19 @@ interface UploadQueueItem {
     }
 
     <!-- ─── Digital Archive ────────────────────────────────────────── -->
-    <section class="p-6 md:p-8 flex-1">
+    <section class="p-4 sm:p-6 md:p-8 flex-1">
 
       <!-- Header + filters -->
       <div class="flex flex-col gap-4 mb-6">
         <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div>
-            <h2 class="text-xl font-bold text-white">Digital Archive</h2>
+            <h2 class="text-lg md:text-xl font-bold text-white">Digital Archive</h2>
             <p class="text-sm text-slate-text font-mono mt-1">{{ allItems().length }} ITEMS INDEXED</p>
           </div>
 
           <!-- Sort dropdown -->
-          <select
-            class="rounded-lg bg-card-dark border border-[#333] text-sm text-slate-200 px-3 py-1.5 outline-none focus:border-primary/60 transition-colors font-mono"
+            <select
+            class="rounded-lg bg-card-dark border border-[#333] text-sm text-slate-200 px-3 py-2.5 outline-none focus:border-primary/60 transition-colors font-mono touch-target"
             [value]="sortKey()"
             (change)="onSortChange($any($event.target).value)"
           >
@@ -158,7 +158,7 @@ interface UploadQueueItem {
         <!-- Category pills -->
         <div class="flex flex-wrap gap-2">
           <button
-            class="px-4 py-1.5 rounded-full text-sm font-medium transition-colors"
+            class="px-4 py-2 rounded-full text-sm font-medium transition-colors touch-target"
             [class]="selectedCategory() === 'all'
               ? 'bg-white text-black'
               : 'bg-card-dark border border-[#333] text-slate-text hover:text-white hover:border-slate-500'"
@@ -167,7 +167,7 @@ interface UploadQueueItem {
 
           @for (cat of allCategories(); track cat) {
             <button
-              class="px-4 py-1.5 rounded-full text-sm font-medium transition-colors capitalize"
+            class="px-4 py-2 rounded-full text-sm font-medium transition-colors capitalize touch-target"
               [class]="selectedCategory() === cat
                 ? 'bg-white text-black'
                 : 'bg-card-dark border border-[#333] text-slate-text hover:text-white hover:border-slate-500'"
@@ -179,7 +179,7 @@ interface UploadQueueItem {
 
       <!-- Loading skeleton -->
       @if (loading()) {
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-10">
+        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6 pb-10">
           @for (n of [1,2,3,4,5,6,7,8]; track n) {
             <div class="bg-card-dark rounded-xl overflow-hidden animate-pulse">
               <div class="aspect-[4/5] bg-[#222]"></div>
@@ -200,12 +200,22 @@ interface UploadQueueItem {
             @if (allItems().length === 0) { Your wardrobe is empty. Upload your first item above. }
             @else { No items match the selected filter. }
           </p>
+          @if (allItems().length === 0) {
+            <button
+              class="touch-target px-5 py-2.5 rounded-lg bg-primary/20 text-primary border border-primary/40 hover:bg-primary/30"
+              type="button"
+              (click)="openUploadFromEmptyState()"
+              aria-label="Upload first item"
+            >
+              Upload first item
+            </button>
+          }
         </div>
       }
 
       <!-- Items grid -->
       @if (!loading() && filteredItems().length > 0) {
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-10">
+        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6 pb-10">
           @for (item of filteredItems(); track item.id) {
             <app-clothing-card
               [item]="item"
@@ -220,8 +230,8 @@ interface UploadQueueItem {
         <!-- Load More -->
         @if (hasMore()) {
           <div class="pb-10 flex justify-center">
-            <button
-              class="px-6 py-2.5 rounded-lg border border-[#333] text-sm font-medium text-slate-300 hover:text-white hover:border-slate-500 transition-colors font-mono disabled:opacity-50"
+          <button
+              class="px-6 py-2.5 rounded-lg border border-[#333] text-sm font-medium text-slate-300 hover:text-white hover:border-slate-500 transition-colors font-mono disabled:opacity-50 touch-target"
               [disabled]="loadingMore()"
               (click)="loadMore()"
             >
@@ -403,6 +413,10 @@ export class WardrobeComponent implements OnInit {
 
   /** Called by DashboardComponent header Upload button */
   triggerUpload(): void {
+    this.uploadRef.openFilePicker();
+  }
+
+  protected openUploadFromEmptyState(): void {
     this.uploadRef.openFilePicker();
   }
 

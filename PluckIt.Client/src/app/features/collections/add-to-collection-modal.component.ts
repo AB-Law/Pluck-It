@@ -16,7 +16,7 @@ import { catchError, map } from 'rxjs/operators';
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
       (click)="onBackdropClick($event)"
     >
-      <div class="relative w-full max-w-md rounded-xl border border-border-chrome bg-black p-6 shadow-2xl mx-4">
+      <div class="relative w-full max-w-none md:max-w-md h-full md:h-auto rounded-none md:rounded-xl border border-border-chrome bg-black p-4 md:p-6 shadow-2xl mx-0 md:mx-4 md:min-h-0">
 
         <!-- Header -->
         <div class="mb-6 flex items-center justify-between">
@@ -26,7 +26,11 @@ import { catchError, map } from 'rxjs/operators';
               Add <span class="text-primary font-mono">{{ item().brand || 'this item' }}</span> to a collection
             </p>
           </div>
-          <button class="text-slate-500 hover:text-white transition-colors" (click)="closed.emit()">
+          <button
+            class="touch-target h-10 w-10 flex items-center justify-center rounded-lg text-slate-500 hover:text-white transition-colors"
+            aria-label="Close"
+            (click)="closed.emit()"
+          >
             <span class="material-symbols-outlined">close</span>
           </button>
         </div>
@@ -46,12 +50,12 @@ import { catchError, map } from 'rxjs/operators';
           <div class="space-y-2 max-h-60 overflow-y-auto pr-1">
             @for (col of collections(); track col.id) {
               <label
-                class="flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-colors"
+                class="touch-target flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-colors"
                 [class]="selectedIds().has(col.id) ? 'border-primary bg-primary/10' : 'border-border-chrome hover:border-slate-600'"
               >
                 <input
                   type="checkbox"
-                  class="accent-primary"
+                  class="touch-target accent-primary w-5 h-5"
                   [checked]="selectedIds().has(col.id)"
                   (change)="toggleCollection(col.id)"
                 />
@@ -75,13 +79,13 @@ import { catchError, map } from 'rxjs/operators';
         }
         <div class="mt-6 flex gap-3">
           <button
-            class="flex-1 rounded-lg border border-border-chrome py-2.5 text-sm font-bold text-slate-300 hover:bg-card-dark transition-colors"
+            class="flex-1 touch-target rounded-lg border border-border-chrome py-2.5 text-sm font-bold text-slate-300 hover:bg-card-dark transition-colors"
             (click)="closed.emit()"
           >
             Cancel
           </button>
           <button
-            class="flex-1 rounded-lg bg-primary py-2.5 text-sm font-bold text-white hover:bg-blue-500 transition-colors disabled:opacity-50"
+            class="flex-1 touch-target rounded-lg bg-primary py-2.5 text-sm font-bold text-white hover:bg-blue-500 transition-colors disabled:opacity-50"
             [disabled]="saving() || selectedIds().size === 0"
             (click)="save()"
           >

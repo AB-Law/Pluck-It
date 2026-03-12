@@ -18,7 +18,7 @@ import { CommonModule } from '@angular/common';
   standalone: true,
   imports: [CommonModule],
   template: `
-    <div class="relative h-5 flex items-center select-none" #track (mousedown)="onTrackDown($event)">
+    <div class="relative h-10 flex items-center select-none touch-none" #track (pointerdown)="onTrackDown($event)">
       <!-- Background rail -->
       <div class="absolute inset-y-0 flex items-center w-full">
         <div class="relative h-1 w-full rounded-full bg-border-chrome">
@@ -30,17 +30,17 @@ import { CommonModule } from '@angular/common';
           ></div>
           <!-- Low thumb -->
           <div
-            class="absolute top-1/2 -translate-y-1/2 h-3 w-3 rounded-full border-2 border-primary bg-black cursor-pointer z-10"
+            class="absolute touch-target top-1/2 -translate-y-1/2 h-6 w-6 rounded-full border-2 border-primary bg-black cursor-pointer z-10"
             [style.left.%]="lowPct"
             style="transform: translate(-50%, -50%)"
-            (mousedown)="startDrag($event, 'low')"
+            (pointerdown)="startDrag($event, 'low')"
           ></div>
           <!-- High thumb -->
           <div
-            class="absolute top-1/2 -translate-y-1/2 h-3 w-3 rounded-full border-2 border-primary bg-black cursor-pointer z-10"
+            class="absolute touch-target top-1/2 -translate-y-1/2 h-6 w-6 rounded-full border-2 border-primary bg-black cursor-pointer z-10"
             [style.left.%]="highPct"
             style="transform: translate(-50%, -50%)"
-            (mousedown)="startDrag($event, 'high')"
+            (pointerdown)="startDrag($event, 'high')"
           ></div>
         </div>
       </div>
@@ -73,15 +73,17 @@ export class RangeSliderComponent {
     return ((this.value()[1] - this.min()) / range) * 100;
   }
 
-  startDrag(e: MouseEvent, thumb: 'low' | 'high'): void {
+  startDrag(e: PointerEvent, thumb: 'low' | 'high'): void {
     e.preventDefault();
     e.stopPropagation();
+    (e.currentTarget as HTMLElement | null)?.setPointerCapture?.(e.pointerId);
     this.dragging = thumb;
   }
 
-  @HostListener('document:mousemove', ['$event'])
-  onMouseMove(e: MouseEvent): void {
+  @HostListener('document:pointermove', ['$event'])
+  onPointerMove(e: PointerEvent): void {
     if (!this.dragging) return;
+    e.preventDefault?.();
     const rect = this.trackRef.nativeElement.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     const range = this.max() - this.min();
@@ -99,11 +101,12 @@ export class RangeSliderComponent {
     }
   }
 
-  @HostListener('document:mouseup')
-  onMouseUp(): void { this.dragging = null; }
+  @HostListener('document:pointerup')
+  onPointerUp(): void { this.dragging = null; }
 
-  onTrackDown(e: MouseEvent): void {
+  onTrackDown(e: PointerEvent): void {
     if ((e.target as HTMLElement).tagName === 'DIV' && this.dragging === null) {
+      e.preventDefault?.();
       const rect = this.trackRef.nativeElement.getBoundingClientRect();
       const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
       const range = this.max() - this.min();

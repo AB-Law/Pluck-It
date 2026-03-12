@@ -32,9 +32,9 @@ describe('RangeSliderComponent', () => {
     expect(component.highPct).toBe(0);
   });
 
-  it('starts dragging on thumb mousedown', () => {
+  it('starts dragging on thumb pointerdown', () => {
     const spy = vi.fn();
-    const event = { preventDefault: spy, stopPropagation: vi.fn() } as unknown as MouseEvent;
+    const event = { preventDefault: spy, stopPropagation: vi.fn() } as unknown as PointerEvent;
     component.startDrag(event, 'low');
     expect(spy).toHaveBeenCalled();
     expect((component as unknown as { dragging: string | null }).dragging).toBe('low');
@@ -44,13 +44,13 @@ describe('RangeSliderComponent', () => {
     let emitted: [number, number] | null = null;
     component.valueChange.subscribe((value) => { emitted = value; });
 
-    component.startDrag({ preventDefault: () => {}, stopPropagation: () => {} } as MouseEvent, 'low');
+    component.startDrag({ preventDefault: () => {}, stopPropagation: () => {}, pointerId: 1 } as PointerEvent, 'low');
     vi.spyOn(component.trackRef.nativeElement, 'getBoundingClientRect').mockReturnValue({
       left: 0,
       width: 100,
     } as DOMRect);
 
-    component.onMouseMove({ clientX: 95 } as MouseEvent);
+    component.onPointerMove({ clientX: 95 } as PointerEvent);
     expect(component.value()).toEqual([70, 80]);
     expect(emitted).toEqual([70, 80]);
   });
@@ -59,13 +59,13 @@ describe('RangeSliderComponent', () => {
     let emitted: [number, number] | null = null;
     component.valueChange.subscribe((value) => { emitted = value; });
 
-    component.startDrag({ preventDefault: () => {}, stopPropagation: () => {} } as MouseEvent, 'high');
+    component.startDrag({ preventDefault: () => {}, stopPropagation: () => {}, pointerId: 1 } as PointerEvent, 'high');
     vi.spyOn(component.trackRef.nativeElement, 'getBoundingClientRect').mockReturnValue({
       left: 0,
       width: 100,
     } as DOMRect);
 
-    component.onMouseMove({ clientX: 10 } as MouseEvent);
+    component.onPointerMove({ clientX: 10 } as PointerEvent);
     expect(component.value()).toEqual([20, 30]);
     expect(emitted).toEqual([20, 30]);
   });
@@ -85,7 +85,7 @@ describe('RangeSliderComponent', () => {
       currentTarget: component.trackRef.nativeElement,
       preventDefault: () => {},
       stopPropagation: () => {},
-    } as unknown as MouseEvent);
+    } as unknown as PointerEvent);
     expect(emitted).toEqual([20, 80]);
     expect((component as unknown as { dragging: string | null }).dragging).toBe('low');
   });
@@ -105,11 +105,11 @@ describe('RangeSliderComponent', () => {
       currentTarget: component.trackRef.nativeElement,
       preventDefault: () => {},
       stopPropagation: () => {},
-    } as unknown as MouseEvent);
+    } as unknown as PointerEvent);
     expect(emitted).toEqual([20, 90]);
     expect((component as unknown as { dragging: string | null }).dragging).toBe('high');
 
-    component.onMouseUp();
+    component.onPointerUp();
     expect((component as unknown as { dragging: string | null }).dragging).toBe(null);
   });
 });

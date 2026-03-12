@@ -6,12 +6,14 @@ import { DashboardComponent } from './dashboard.component';
 import { WardrobeService } from '../../core/services/wardrobe.service';
 import { UserProfileService } from '../../core/services/user-profile.service';
 import { AuthService } from '../../core/services/auth.service';
+import { MobileNavState } from '../../shared/layout/mobile-nav.state';
 
 describe('DashboardComponent', () => {
   let component: DashboardComponent;
   let fixture: ComponentFixture<DashboardComponent>;
   let wardrobeService: { [key: string]: ReturnType<typeof vi.fn> };
   let authService: { logout: ReturnType<typeof vi.fn>; user: ReturnType<typeof vi.fn> };
+  let mobileNavState: MobileNavState;
   let router: {
     navigate: ReturnType<typeof vi.fn>;
     createUrlTree: ReturnType<typeof vi.fn>;
@@ -52,7 +54,12 @@ describe('DashboardComponent', () => {
     }).compileComponents();
     fixture = TestBed.createComponent(DashboardComponent);
     component = fixture.componentInstance;
+    mobileNavState = TestBed.inject(MobileNavState);
     fixture.detectChanges();
+  });
+
+  afterEach(() => {
+    mobileNavState.closePanel();
   });
 
   it('should create', () => {
@@ -117,5 +124,68 @@ describe('DashboardComponent', () => {
     component.logout();
     expect(authService.logout).toHaveBeenCalled();
     expect(router.navigate).toHaveBeenCalledWith(['/login']);
+  });
+
+  it('routes settings open to shell profile panel on mobile and local panel on desktop', () => {
+    Object.defineProperty(globalThis.window, 'innerWidth', { value: 390, configurable: true });
+    (component as any).onWindowResize();
+    mobileNavState.closePanel();
+    (component as any).openSettings();
+    expect(mobileNavState.activePanel()).toBe('profile');
+    expect((component as any).settingsOpen()).toBe(false);
+
+    mobileNavState.closePanel();
+    Object.defineProperty(globalThis.window, 'innerWidth', { value: 1400, configurable: true });
+    (component as any).onWindowResize();
+    (component as any).openSettings();
+    expect((component as any).settingsOpen()).toBe(true);
+    expect(mobileNavState.activePanel()).toBe('none');
+  });
+
+  it('routes digest open to shell digest panel on mobile and local overlay on desktop', () => {
+    Object.defineProperty(globalThis.window, 'innerWidth', { value: 390, configurable: true });
+    (component as any).onWindowResize();
+    mobileNavState.closePanel();
+    (component as any).openDigest();
+    expect(mobileNavState.activePanel()).toBe('digest');
+    expect((component as any).digestOpen()).toBe(false);
+
+    mobileNavState.closePanel();
+    Object.defineProperty(globalThis.window, 'innerWidth', { value: 1200, configurable: true });
+    (component as any).onWindowResize();
+    (component as any).openDigest();
+    expect((component as any).digestOpen()).toBe(true);
+    expect(mobileNavState.activePanel()).toBe('none');
+  });
+
+  it('closes any stale shell panel and restores main focus target when settings close', async () => {
+    Object.defineProperty(globalThis.window, 'innerWidth', { value: 390, configurable: true });
+    (component as any).onWindowResize();
+    mobileNavState.openDigest();
+    fixture.detectChanges();
+
+    const focusSpy = vi.spyOn(
+      fixture.nativeElement.querySelector('[aria-label="Wardrobe items"]') as HTMLElement,
+      'focus',
+    );
+
+    (component as any).settingsOpen.set(true);
+    (component as any).closeSettingsPanel();
+
+    expect(mobileNavState.activePanel()).toBe('none');
+    await Promise.resolve();
+    expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true });
+  });
+
+  it('resets stale mobile panel state before opening settings', () => {
+    Object.defineProperty(globalThis.window, 'innerWidth', { value: 390, configurable: true });
+    (component as any).onWindowResize();
+    mobileNavState.openDigest();
+    const closeSpy = vi.spyOn(mobileNavState, 'closePanel');
+
+    (component as any).openSettings();
+
+    expect(closeSpy).toHaveBeenCalled();
+    expect(mobileNavState.activePanel()).toBe('profile');
   });
 });

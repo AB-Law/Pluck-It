@@ -6,9 +6,9 @@ import { PrivacyComponent } from './features/legal/privacy.component';
 import { authGuard } from './core/guards/auth.guard';
 
 export const routes: Routes = [
-  { path: 'login', component: LoginComponent },
-  { path: 'tos', component: TosComponent },
-  { path: 'privacy', component: PrivacyComponent },
+  { path: 'login', component: LoginComponent, data: { mobileShell: false } },
+  { path: 'tos', component: TosComponent, data: { mobileShell: false } },
+  { path: 'privacy', component: PrivacyComponent, data: { mobileShell: false } },
   { path: '', component: DashboardComponent, canActivate: [authGuard] },
   {
     path: 'vault',

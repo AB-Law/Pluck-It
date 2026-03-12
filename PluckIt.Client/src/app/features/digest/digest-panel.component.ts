@@ -31,23 +31,25 @@ import { WardrobeDigest, DigestSuggestion } from '../../core/models/digest.model
 
     <!-- Slide-over panel -->
     <aside
-      class="panel-animate fixed top-0 right-0 z-50 h-full w-full max-w-sm bg-black border-l border-[#1F1F1F] flex flex-col shadow-2xl"
+      class="panel-animate fixed top-0 right-0 z-50 h-full w-full max-w-full md:max-w-sm bg-black border-l border-[#1F1F1F] flex flex-col shadow-2xl"
       role="dialog" aria-modal="true" aria-labelledby="digest-panel-title"
       (click)="$event.stopPropagation()"
     >
       <!-- Header -->
-      <div class="flex items-center justify-between px-6 py-5 border-b border-[#1F1F1F] shrink-0">
+      <div class="flex items-center justify-between px-4 py-4 border-b border-[#1F1F1F] shrink-0">
         <div>
           <h2 id="digest-panel-title" class="text-white font-bold text-base uppercase tracking-tight">Weekly Digest</h2>
           <p class="text-xs text-slate-500 font-mono mt-0.5">AI-curated purchase suggestions</p>
         </div>
-        <button class="text-slate-500 hover:text-white transition-colors" (click)="closed.emit()" aria-label="Close">
+        <button
+          class="touch-target h-10 w-10 flex items-center justify-center rounded-lg text-slate-500 hover:text-white transition-colors"
+          (click)="closed.emit()" aria-label="Close">
           <span class="material-symbols-outlined">close</span>
         </button>
       </div>
 
       <!-- Body -->
-      <div class="flex-1 overflow-y-auto px-6 py-6">
+      <div class="flex-1 overflow-y-auto px-4 py-5 md:px-6 md:py-6">
 
         @if (loading()) {
           <div class="flex flex-col items-center gap-3 py-12 text-slate-500">
@@ -105,7 +107,7 @@ import { WardrobeDigest, DigestSuggestion } from '../../core/models/digest.model
                 <div class="flex items-center gap-2">
                   <button
                     type="button"
-                    class="flex items-center gap-1 h-8 px-3 rounded-lg border transition-colors text-xs font-mono"
+                    class="touch-target flex items-center gap-1 h-10 px-3 rounded-lg border transition-colors text-xs font-mono"
                     [class]="feedbackSent()[i] === 'up'
                       ? 'bg-green-900/30 border-green-700 text-green-400'
                       : 'border-[#1F1F1F] text-slate-500 hover:border-green-700 hover:text-green-400'"
@@ -119,7 +121,7 @@ import { WardrobeDigest, DigestSuggestion } from '../../core/models/digest.model
 
                   <button
                     type="button"
-                    class="flex items-center gap-1 h-8 px-3 rounded-lg border transition-colors text-xs font-mono"
+                    class="touch-target flex items-center gap-1 h-10 px-3 rounded-lg border transition-colors text-xs font-mono"
                     [class]="feedbackSent()[i] === 'down'
                       ? 'bg-red-900/30 border-red-700 text-red-400'
                       : 'border-[#1F1F1F] text-slate-500 hover:border-red-700 hover:text-red-400'"

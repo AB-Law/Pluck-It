@@ -87,14 +87,14 @@ function sizeType(category: string | null): 'letter' | 'bottoms' | 'shoe' | 'non
     >
       <!-- ── Modal shell ────────────────────────────────────────────────── -->
       <div
-        class="modal-animate w-full max-w-4xl bg-black border border-[#1F1F1F] shadow-2xl flex flex-col max-h-[90vh]"
+      class="modal-animate h-full w-full max-w-none md:max-w-4xl md:max-h-[90vh] md:h-auto bg-black border border-[#1F1F1F] shadow-2xl flex flex-col rounded-none md:rounded-lg"
         role="dialog" aria-modal="true" aria-labelledby="enrich-modal-title"
         (click)="$event.stopPropagation()"
       >
 
         <!-- Header -->
         @if (draft) {
-          <div class="flex items-center justify-between p-6 border-b border-[#1F1F1F] shrink-0">
+          <div class="flex items-center justify-between px-4 py-4 md:px-6 md:py-6 border-b border-[#1F1F1F] shrink-0">
             <div class="flex items-center gap-4">
               <!-- Thumbnail -->
               <div class="w-12 h-12 bg-[#0d0d0d] border border-[#1F1F1F] flex items-center justify-center overflow-hidden shrink-0">
@@ -112,7 +112,7 @@ function sizeType(category: string | null): 'letter' | 'bottoms' | 'shoe' | 'non
               </div>
             </div>
             <button
-              class="text-slate-500 hover:text-white transition-colors"
+              class="touch-target h-10 w-10 flex items-center justify-center rounded-lg text-slate-500 hover:text-white transition-colors"
               (click)="cancelled.emit()" aria-label="Close"
             >
               <span class="material-symbols-outlined">close</span>
@@ -122,7 +122,7 @@ function sizeType(category: string | null): 'letter' | 'bottoms' | 'shoe' | 'non
 
         <!-- Body -->
         @if (draft) {
-          <div class="flex-1 overflow-y-auto modal-scroll px-8 py-7">
+          <div class="flex-1 overflow-y-auto modal-scroll px-4 py-4 md:px-8 md:py-7">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
 
               <!-- ══ Left column ════════════════════════════════════════════ -->
@@ -212,7 +212,7 @@ function sizeType(category: string | null): 'letter' | 'bottoms' | 'shoe' | 'non
                     @for (tag of draft.tags; track tag) {
                       <span class="inline-flex items-center gap-1 px-2 py-1 bg-[#1a1a1a] border border-[#333] text-slate-300 text-[11px] font-mono uppercase tracking-wide">
                         {{ tag }}
-                        <button type="button" class="text-slate-500 hover:text-red-400 transition-colors ml-1"
+                        <button type="button" class="touch-target text-slate-500 hover:text-red-400 transition-colors ml-1 p-0.5"
                                 (click)="removeTag(tag)" [attr.aria-label]="'Remove tag ' + tag">
                           <span class="material-symbols-outlined" style="font-size:13px">close</span>
                         </button>
@@ -229,7 +229,7 @@ function sizeType(category: string | null): 'letter' | 'bottoms' | 'shoe' | 'non
                       class="flex-1 bg-transparent border border-[#1F1F1F] focus:border-primary focus:outline-none text-white font-mono h-9 px-3 text-xs transition-colors placeholder-slate-600"
                     />
                     <button type="button"
-                            class="bg-[#1F1F1F] hover:bg-[#2a2a2a] text-slate-300 h-9 px-3 text-xs font-mono border border-[#333] transition-colors"
+                            class="touch-target bg-[#1F1F1F] hover:bg-[#2a2a2a] text-slate-300 h-11 px-3 text-xs font-mono border border-[#333] transition-colors"
                             (click)="addTag()">
                       ADD
                     </button>
@@ -396,17 +396,17 @@ function sizeType(category: string | null): 'letter' | 'bottoms' | 'shoe' | 'non
         }
 
         <!-- Footer -->
-        <div class="px-6 py-5 border-t border-[#1F1F1F] flex items-center justify-end gap-4 bg-black shrink-0">
+        <div class="px-4 py-4 md:px-6 md:py-5 border-t border-[#1F1F1F] flex items-center justify-end gap-3 md:gap-4 bg-black shrink-0">
           <button
             type="button"
-            class="px-8 h-12 text-xs font-bold uppercase tracking-widest text-slate-400 hover:text-white transition-colors"
+            class="touch-target px-5 md:px-8 h-11 md:h-12 text-xs font-bold uppercase tracking-widest text-slate-400 hover:text-white transition-colors"
             (click)="cancelled.emit()"
           >
             {{ isEditMode ? 'Cancel' : 'Discard' }}
           </button>
           <button
             type="button"
-            class="bg-primary hover:bg-blue-500 transition-colors px-8 h-12 text-xs font-bold uppercase tracking-widest text-white shadow-lg shadow-primary/20"
+            class="touch-target bg-primary hover:bg-blue-500 transition-colors px-5 md:px-8 h-11 md:h-12 text-xs font-bold uppercase tracking-widest text-white shadow-lg shadow-primary/20"
             (click)="onSave()"
           >
             {{ isEditMode ? 'Save Changes' : 'Add to Wardrobe' }}
