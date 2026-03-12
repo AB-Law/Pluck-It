@@ -267,6 +267,38 @@ describe('VaultComponent', () => {
     expect(component.breakEvenFor('missing')).toBe(false);
   });
 
+  it('enriches insight rows with item labels and image urls when wardrobe data is present', () => {
+    (component as any).allItems.set([ITEM]);
+    (component as any).insights.set({
+      generatedAt: '2026-03-12T00:00:00Z',
+      currency: 'USD',
+      insufficientData: false,
+      behavioralInsights: {
+        topColorWearShare: { color: 'black', pct: 20 },
+        unworn90dPct: 0,
+        mostExpensiveUnworn: { itemId: 'i-2', amount: 20, currency: 'USD' },
+      },
+      cpwIntel: [
+        {
+          itemId: 'i-1',
+          badge: 'low',
+          breakEvenReached: false,
+          breakEvenTargetCpw: 100,
+          recentWearRate: 1.2,
+          historicalWearRate: 0.6,
+          wearRateTrend: 'up',
+        },
+      ],
+    });
+
+    const enriched = (component as any).enrichedInsights();
+    expect(enriched?.cpwIntel?.[0]).toMatchObject({
+      itemId: 'i-1',
+      itemLabel: 'UNQ · Top',
+      imageUrl: '/img/1.jpg',
+    });
+  });
+
   it('opens share/edit modals and accepts wear suggestions', () => {
     const suggestion = { suggestionId: 's-1', itemId: 'i-1', message: 'Wear this' };
     component.acceptSuggestion(suggestion as any);

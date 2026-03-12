@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace PluckIt.Core;
 
 public class VaultInsightsResponse
@@ -40,6 +42,14 @@ public class CpwIntelItem
   public bool BreakEvenReached { get; set; }
   public decimal BreakEvenTargetCpw { get; set; }
   public CpwForecast? Forecast { get; set; }
+  /// <summary>Recent rolling wear-rate direction versus historical behavior.</summary>
+  public WearRateTrendType? WearRateTrend { get; set; }
+  /// <summary>Recent rolling wear rate used for trend and projection logic.</summary>
+  public decimal? RecentWearRate { get; set; }
+  /// <summary>Historical average wear rate over the item's ownership window.</summary>
+  public decimal? HistoricalWearRate { get; set; }
+  /// <summary>Recent minus historical wear-rate delta.</summary>
+  public decimal? WearRateDelta { get; set; }
 }
 
 public class CpwForecast
@@ -47,4 +57,19 @@ public class CpwForecast
   public decimal TargetCpw { get; set; }
   public string? ProjectedMonth { get; set; }
   public int? ProjectedWearsNeeded { get; set; }
+  /// <summary>Recent rolling wear rate used for projection text and confidence checks.</summary>
+  public decimal? RecentWearRate { get; set; }
+  /// <summary>Historical average wear rate used to contextualize trend direction.</summary>
+  public decimal? HistoricalWearRate { get; set; }
+  /// <summary>Recent rolling wear-rate direction versus historical behavior.</summary>
+  public WearRateTrendType? WearRateTrend { get; set; }
+}
+
+/// <summary>Normalized direction values for CPW wear-rate trend signals.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum WearRateTrendType
+{
+  Up,
+  Down,
+  Stable,
 }

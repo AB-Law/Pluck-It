@@ -55,6 +55,8 @@ public class WearSuggestionItem
   public string Message { get; set; } = default!;
   public DateTimeOffset ActivityAt { get; set; }
   public DateTimeOffset? ExpiresAt { get; set; }
+  /// <summary>SAS-backed image URL for the suggested wardrobe item.</summary>
+  public string? ImageUrl { get; set; }
 }
 
 public class WearSuggestionsResponse
