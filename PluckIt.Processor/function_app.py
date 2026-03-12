@@ -132,6 +132,30 @@ _otel_configured = False
 _otel_log_handler_installed = False
 _http_request_counter = None
 _http_request_duration_ms = None
+_OTLP_SIGNAL_PATH_TRACES = "/v1/traces"
+_OTLP_SIGNAL_PATH_METRICS = "/v1/metrics"
+_OTLP_SIGNAL_PATH_LOGS = "/v1/logs"
+_OTLP_SIGNAL_PATHS = (
+    _OTLP_SIGNAL_PATH_TRACES,
+    _OTLP_SIGNAL_PATH_METRICS,
+    _OTLP_SIGNAL_PATH_LOGS,
+)
+
+
+def _build_signal_endpoint(base_or_signal_endpoint: str, signal_path: str) -> str:
+    """Accept either a full signal URL (.../v1/<signal>) or a base OTLP URL (.../otlp)."""
+    normalized = (base_or_signal_endpoint or "").rstrip("/")
+    if not normalized:
+        return normalized
+    if signal_path not in _OTLP_SIGNAL_PATHS:
+        return f"{normalized}{signal_path}"
+    for known_signal_path in _OTLP_SIGNAL_PATHS:
+        if not normalized.endswith(known_signal_path):
+            continue
+        if known_signal_path == signal_path:
+            return normalized
+        return f"{normalized[:-len(known_signal_path)]}{signal_path}"
+    return f"{normalized}{signal_path}"
 
 
 def _normalize_otel_headers(raw_headers: Optional[str]) -> dict[str, str] | None:
@@ -159,11 +183,13 @@ def _init_otel_providers() -> None:
     if _otel_providers_initialized:
         return
 
-    endpoint = os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-    if not endpoint:
-        logger.info("OTEL endpoint = %s", endpoint)
+    traces_raw_endpoint = os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+    if not traces_raw_endpoint:
+        logger.info("OTEL endpoint = %s", traces_raw_endpoint)
         logger.warning("OpenTelemetry skipped: no OTLP endpoint configured")
         return
+    traces_endpoint = _build_signal_endpoint(traces_raw_endpoint, _OTLP_SIGNAL_PATH_TRACES)
+    logger.info("Resolved OTLP traces endpoint = %s", traces_endpoint)
 
     headers = _normalize_otel_headers(os.getenv("OTEL_EXPORTER_OTLP_HEADERS"))
     service_name = os.getenv("OTEL_SERVICE_NAME", "pluckit-processor-func")
@@ -190,19 +216,32 @@ def _init_otel_providers() -> None:
         resource = Resource.create({"service.name": service_name, "service.namespace": "pluckit", "deployment.environment": env})
 
         tracer_provider = TracerProvider(resource=resource)
-        tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, headers=headers)))
+        logger.info("Configuring trace exporter to %s", traces_endpoint)
+        tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=traces_endpoint, headers=headers)))
         trace.set_tracer_provider(tracer_provider)
 
-        metrics_endpoint = os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+        metrics_raw_endpoint = (
+            os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
+            or traces_raw_endpoint
+            or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+        )
+        metrics_endpoint = _build_signal_endpoint(metrics_raw_endpoint or "", _OTLP_SIGNAL_PATH_METRICS)
         if metrics_endpoint:
+            logger.info("Resolved OTLP metrics endpoint = %s", metrics_endpoint)
             metric_reader = PeriodicExportingMetricReader(
                 OTLPMetricExporter(endpoint=metrics_endpoint, headers=headers),
                 export_interval_millis=60_000,
             )
             metrics.set_meter_provider(MeterProvider(resource=resource, metric_readers=[metric_reader]))
 
-        logs_endpoint = os.getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT") or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+        logs_raw_endpoint = (
+            os.getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
+            or traces_raw_endpoint
+            or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+        )
+        logs_endpoint = _build_signal_endpoint(logs_raw_endpoint or "", _OTLP_SIGNAL_PATH_LOGS)
         if logs_endpoint:
+            logger.info("Resolved OTLP logs endpoint = %s", logs_endpoint)
             logger_provider = LoggerProvider(resource=resource)
             logger_provider.add_log_record_processor(
                 BatchLogRecordProcessor(OTLPLogExporter(endpoint=logs_endpoint, headers=headers))
@@ -215,7 +254,13 @@ def _init_otel_providers() -> None:
                 _otel_log_handler_installed = True
 
         _otel_providers_initialized = True
-        logger.warning("OpenTelemetry providers initialized service=%s endpoint=%s", service_name, endpoint)
+        logger.warning(
+            "OpenTelemetry providers initialized service=%s traces=%s metrics=%s logs=%s",
+            service_name,
+            traces_endpoint,
+            metrics_endpoint,
+            logs_endpoint,
+        )
     except Exception as exc:
         logger.warning("OpenTelemetry provider initialization failed: %s", exc)
 
