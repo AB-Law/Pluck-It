@@ -1,0 +1,23 @@
+# Local and development artifacts (never needed in Functions runtime package)
+.venv/
+.venv/**
+__pycache__/
+.pytest_cache/
+coverage.xml
+coverage*
+local.settings.json
+.env
+.env.*
+*.py[cod]
+
+# Test suite and local scripts
+tests/
+requirements-test.txt
+
+# Repository metadata and infra artifacts
+.github/
+infra/
+README.md
+README.*
+
+# Keep runtime environment only; function entrypoints stay at repo root under PluckIt.Processor

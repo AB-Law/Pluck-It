@@ -93,12 +93,6 @@ def _json_response_with_cache(payload: object, request: Request):
     return JSONResponse(content=payload, headers=headers)
 
 
-# Point rembg at the bundled model directory so it never downloads at runtime.
-os.environ.setdefault(
-    "U2NET_HOME",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "models"),
-)
-
 import azure.functions as func
 from fastapi import FastAPI, Depends, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -812,17 +806,11 @@ def _normalize_image(image_bytes: bytes) -> bytes:
         return image_bytes
 
 
-def _remove_background(image_bytes: bytes) -> bytes:
-    from rembg import remove as rembg_remove
-    normalised = _normalize_image(image_bytes)
-    return rembg_remove(normalised)
-
-
 def _segment_with_modal(image_bytes: bytes) -> bytes:
     """
     Send image to the Modal BiRefNet segmentation service.
     Returns transparent PNG bytes.
-    Raises on any error so the caller can fall back to rembg.
+    Raises on any error so the caller can return a 500 response.
     """
     import httpx
     endpoint_url = os.getenv("SEGMENTATION_ENDPOINT_URL", "").rstrip("/")
@@ -910,16 +898,11 @@ async def _process_image_payload_to_webp(image_bytes: bytes, item_id: str) -> by
         transparent_png = await asyncio.to_thread(_segment_with_modal, image_bytes)
         logger.info("process-image: Modal BiRefNet segmentation succeeded")
     except Exception as modal_ex:
-        logger.warning(
-            "process-image: Modal segmentation failed for %s (%s); falling back to rembg",
-            item_id,
-            modal_ex,
+        logger.exception("process-image: Modal segmentation failed for %s", item_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Image segmentation failed: {modal_ex}",
         )
-        try:
-            transparent_png = await asyncio.to_thread(_remove_background, image_bytes)
-        except Exception as ex:
-            logger.exception("Background removal failed for %s: %s", item_id, ex)
-            raise HTTPException(status_code=500, detail=f"Failed to process image: {ex}")
 
     try:
         with Image.open(io.BytesIO(transparent_png)) as rgba_img:
@@ -1162,7 +1145,7 @@ async def process_image(request: Request):
     """
     Accept an image as multipart/form-data (field 'image') or raw bytes.
     Optional form field 'item_id' sets the blob/Cosmos id directly.
-    Attempts Modal BiRefNet segmentation; falls back to rembg on failure.
+    Calls Modal BiRefNet segmentation and returns 500 on segmentation failures.
     If the archive blob already exists for item_id (e.g. a retry after a
     connection-drop), segmentation is skipped and the existing URL is returned.
     Returns {id, imageUrl}.
