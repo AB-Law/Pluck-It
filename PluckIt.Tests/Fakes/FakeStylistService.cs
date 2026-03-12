@@ -1,3 +1,4 @@
+using System.Linq;
 using PluckIt.Core;
 
 namespace PluckIt.Tests.Fakes;
@@ -8,6 +9,9 @@ namespace PluckIt.Tests.Fakes;
 /// </summary>
 public sealed class FakeStylistService : IStylistService
 {
+    public List<ClothingItem>? LastWardrobe { get; private set; }
+    public StylistRequest? LastRequest { get; private set; }
+
     public IReadOnlyCollection<OutfitRecommendation> Response { get; set; } =
     [
         new OutfitRecommendation
@@ -34,6 +38,8 @@ public sealed class FakeStylistService : IStylistService
         CancellationToken cancellationToken = default)
     {
         CallCount++;
+        LastWardrobe = wardrobe.ToList();
+        LastRequest = request;
         return Task.FromResult(Response);
     }
 }

@@ -39,9 +39,17 @@ public class StylistFunctions(
 
         request ??= new StylistRequest();
 
+        var pageSize = Math.Clamp(request.PageSize ?? 100, 1, 100);
+
         var wardrobePaged = await repo.GetAllAsync(
             userId!,
-            new WardrobeQuery { PageSize = 200 },
+            new WardrobeQuery
+            {
+                PageSize = pageSize,
+                Category = request.Category,
+                MinWears = request.MinWears,
+                MaxWears = request.MaxWears,
+            },
             cancellationToken);
         var wardrobe = wardrobePaged.Items;
 

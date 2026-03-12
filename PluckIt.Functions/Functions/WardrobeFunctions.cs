@@ -1,6 +1,7 @@
 using System.Net;
 using System.Globalization;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Azure.Functions.Worker;
@@ -20,15 +21,28 @@ public sealed class WardrobeFunctionsAuthContext(string? localDevUserId, GoogleT
     public GoogleTokenValidator TokenValidator { get; } = tokenValidator;
 }
 
+public sealed class WardrobeFunctionsMutationDependencies(
+    IWearHistoryRepository wearHistoryRepository,
+    IStylingActivityRepository stylingActivityRepository,
+    IUserProfileRepository userProfileRepository)
+{
+    public IWearHistoryRepository WearHistoryRepository { get; } = wearHistoryRepository;
+    public IStylingActivityRepository StylingActivityRepository { get; } = stylingActivityRepository;
+    public IUserProfileRepository UserProfileRepository { get; } = userProfileRepository;
+}
+
 public class WardrobeFunctions(
     IWardrobeRepository repo,
-    IWearHistoryRepository wearHistoryRepo,
-    IStylingActivityRepository stylingActivityRepo,
     IBlobSasService sasService,
     IImageJobQueue jobQueue,
+    WardrobeFunctionsMutationDependencies mutationDependencies,
     WardrobeFunctionsAuthContext authContext,
     ILogger<WardrobeFunctions> logger)
 {
+    private readonly IWearHistoryRepository wearHistoryRepo = mutationDependencies.WearHistoryRepository;
+    private readonly IStylingActivityRepository stylingActivityRepo = mutationDependencies.StylingActivityRepository;
+    private readonly IUserProfileRepository userProfileRepo = mutationDependencies.UserProfileRepository;
+
     private const string ContentTypeHeader = "Content-Type";
     private const string JsonContentType = "application/json; charset=utf-8";
     private const string OctetStream = "application/octet-stream";
@@ -153,6 +167,7 @@ public class WardrobeFunctions(
 
         updated.UserId = userId!;
         await repo.UpsertAsync(updated, cancellationToken);
+        await RefreshWardrobeFingerprintAsync(userId!, cancellationToken);
         return req.CreateResponse(HttpStatusCode.NoContent);
     }
 
@@ -174,6 +189,7 @@ public class WardrobeFunctions(
             return req.CreateResponse(HttpStatusCode.NotFound);
 
         await repo.DeleteAsync(id, userId!, cancellationToken);
+        await RefreshWardrobeFingerprintAsync(userId!, cancellationToken);
 
         // Best-effort blob delete — orphan cleanup Function will catch any misses
         if (!string.IsNullOrEmpty(existing.ImageUrl))
@@ -279,6 +295,8 @@ public class WardrobeFunctions(
         {
             // Swallow secondary write failures to avoid duplicate wear increments on client retry.
         }
+
+        await RefreshWardrobeFingerprintAsync(userId!, cancellationToken);
 
         updated.ImageUrl = sasService.GenerateSasUrl(updated.ImageUrl);
         return await JsonOk(req, updated, PluckItJsonContext.Default.ClothingItem);
@@ -565,6 +583,7 @@ public class WardrobeFunctions(
             DraftUpdatedAt = now,
         };
         await repo.UpsertAsync(draftDoc, CancellationToken.None);
+        await RefreshWardrobeFingerprintAsync(userId!, CancellationToken.None);
         if (logger.IsEnabled(LogLevel.Information))
             logger.LogInformation("Draft {ItemId} created for user {UserId}, status Processing.", itemId, userId);
 
@@ -640,6 +659,8 @@ public class WardrobeFunctions(
         if (!string.IsNullOrEmpty(rawUrl))
             await sasService.DeleteBlobAsync(rawUrl, CancellationToken.None);
 
+        await RefreshWardrobeFingerprintAsync(userId!, cancellationToken);
+
         accepted.ImageUrl = sasService.GenerateSasUrl(accepted.ImageUrl);
         return await JsonOk(req, accepted, PluckItJsonContext.Default.ClothingItem);
     }
@@ -672,6 +693,7 @@ public class WardrobeFunctions(
         item.DraftUpdatedAt = now;
         item.DraftError = null;
         await repo.UpsertAsync(item, CancellationToken.None);
+        await RefreshWardrobeFingerprintAsync(userId!, CancellationToken.None);
         if (logger.IsEnabled(LogLevel.Information))
             logger.LogInformation("Retrying failed draft {ItemId} for user {UserId}.", id, userId);
 
@@ -766,6 +788,7 @@ public class WardrobeFunctions(
             item.DateAdded = DateTimeOffset.UtcNow;
 
         await repo.UpsertAsync(item, cancellationToken);
+        await RefreshWardrobeFingerprintAsync(userId!, cancellationToken);
 
         var response = req.CreateResponse(HttpStatusCode.Created);
         response.Headers.Add("Location", $"/api/wardrobe/{item.Id}");
@@ -799,6 +822,58 @@ public class WardrobeFunctions(
         if (!string.IsNullOrEmpty(devId)) return (true, devId);
 
         return (false, null);
+    }
+
+    private async Task RefreshWardrobeFingerprintAsync(string userId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var allItemIds = new List<string>();
+            string? continuationToken = null;
+            do
+            {
+                var page = await repo.GetAllAsync(
+                    userId,
+                    new WardrobeQuery
+                    {
+                        PageSize = 100,
+                        ContinuationToken = continuationToken,
+                    },
+                    cancellationToken);
+
+                foreach (var item in page.Items)
+                    allItemIds.Add(item.Id);
+
+                continuationToken = page.NextContinuationToken;
+            }
+            while (!string.IsNullOrEmpty(continuationToken));
+
+            var profile = await userProfileRepo.GetAsync(userId, cancellationToken);
+            if (profile is null)
+                profile = new UserProfile { Id = userId };
+
+            profile.WardrobeFingerprint = ComputeWardrobeFingerprint(allItemIds);
+            await userProfileRepo.UpsertAsync(profile, cancellationToken);
+        }
+        catch (Exception exc)
+        {
+            logger.LogWarning(exc, "Failed to refresh wardrobe fingerprint for user {UserId}.", userId);
+        }
+    }
+
+    private static string ComputeWardrobeFingerprint(IEnumerable<string> itemIds)
+    {
+        var ordered = itemIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .OrderBy(id => id, StringComparer.Ordinal)
+            .ToArray();
+        var canonical = string.Join(",", ordered);
+
+        using var sha = SHA256.Create();
+        var bytes = Encoding.UTF8.GetBytes(canonical);
+        var hash = sha.ComputeHash(bytes);
+        return Convert.ToHexString(hash).Substring(0, 16).ToLowerInvariant();
     }
 
     private static async Task<HttpResponseData> JsonOk<T>(

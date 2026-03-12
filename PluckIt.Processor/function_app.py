@@ -31,6 +31,7 @@ Endpoints:
   POST /api/taste/quiz/{session_id}/respond — record a thumbs-up/down response
   POST /api/taste/quiz/{session_id}/complete — finalise quiz and update style profile
 """
+from __future__ import annotations
 
 import asyncio
 import base64
@@ -66,6 +67,31 @@ def _get_float_env(name: str, default: float) -> float:
         logger.warning("Invalid value for %s, using default %s", name, default)
         return default
 
+
+def _build_json_etag(payload: object) -> str:
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return f"\"{hashlib.sha256(body.encode('utf-8')).hexdigest()}\""
+
+
+def _is_not_modified(request: Request, etag: str) -> bool:
+    return request.headers.get("if-none-match") == etag
+
+
+def _cache_headers(etag: str) -> dict[str, str]:
+    return {
+        "ETag": etag,
+        "Cache-Control": "no-cache, no-store, max-age=0, must-revalidate",
+    }
+
+
+def _json_response_with_cache(payload: object, request: Request):
+    etag = _build_json_etag(payload)
+    headers = _cache_headers(etag)
+    if _is_not_modified(request, etag):
+        return Response(status_code=304, headers=headers)
+    return JSONResponse(content=payload, headers=headers)
+
+
 # Point rembg at the bundled model directory so it never downloads at runtime.
 os.environ.setdefault(
     "U2NET_HOME",
@@ -73,7 +99,7 @@ os.environ.setdefault(
 )
 
 import azure.functions as func
-from fastapi import FastAPI, Depends, HTTPException, Query, Request
+from fastapi import FastAPI, Depends, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -95,6 +121,7 @@ _DB_LIMIT_PARAM = "@limit"
 _DB_USER_ID_PARAM = "@uid"
 _TASTE_MODULE_NAME_TAG = "agents.taste_calibration"
 _WEBP_MEDIA_TYPE = "image/webp"
+_SSE_DATA_PREFIX = "data: "
 _ARCHIVE_BLOB_SUFFIX = "-transparent.webp"
 _WEBP_QUALITY = 85
 _WEBP_METHOD = 6
@@ -1026,13 +1053,13 @@ class ChatRequest(BaseModel):
 def _inject_trace_id(sse_line: str, trace_id: Optional[str]) -> str:
     if not trace_id:
         return sse_line
-    if not sse_line.startswith("data: "):
+    if not sse_line.startswith(_SSE_DATA_PREFIX):
         return sse_line
 
     try:
-        payload = json.loads(sse_line.removeprefix("data: ").strip())
+        payload = json.loads(sse_line.removeprefix(_SSE_DATA_PREFIX).strip())
         payload["traceId"] = trace_id
-        return f"data: {json.dumps(payload)}\n\n"
+        return f"{_SSE_DATA_PREFIX}{json.dumps(payload)}\n\n"
     except Exception:
         return sse_line
 
@@ -1081,7 +1108,7 @@ async def chat(
             sse_line = _inject_trace_id(sse_line, trace_id)
             if '"type": "token"' in sse_line:
                 try:
-                    data = json.loads(sse_line.removeprefix("data: ").strip())
+                    data = json.loads(sse_line.removeprefix(_SSE_DATA_PREFIX).strip())
                     collected_tokens.append(data.get("content", ""))
                 except Exception:
                     pass
@@ -1097,7 +1124,7 @@ async def chat(
             ]
             new_summary = await maybe_summarize(user_id, updated_messages, memory.summary)
             yield _inject_trace_id(
-                f"data: {json.dumps({'type': 'memory_update', 'updated': new_summary is not None})}\n\n",
+                f"{_SSE_DATA_PREFIX}{json.dumps({'type': 'memory_update', 'updated': new_summary is not None})}\n\n",
                 trace_id,
             )
 
@@ -1176,12 +1203,13 @@ async def run_digest_now(user_id: Annotated[str, Depends(get_user_id)], force: b
 @fastapi_app.get(
     "/api/digest/latest",
     responses={
+        304: {"description": "Digest has not changed."},
         200: {"description": "Most recent digest returned."},
         401: {"description": "Authentication failed."},
         500: {"description": "Could not load digest."},
     },
 )
-async def get_latest_digest(user_id: Annotated[str, Depends(get_user_id)]):
+async def get_latest_digest(request: Request, user_id: Annotated[str, Depends(get_user_id)]):
     """Return the most recently generated wardrobe digest for the user."""
     from agents.db import get_digests_container
     try:
@@ -1197,12 +1225,12 @@ async def get_latest_digest(user_id: Annotated[str, Depends(get_user_id)]):
             results.append(item)
 
         if not results:
-            return {"digest": None}
+            return _json_response_with_cache({"digest": None}, request)
 
         digest = results[0]
         for key in ["_rid", "_self", "_etag", "_attachments", "_ts"]:
             digest.pop(key, None)
-        return {"digest": digest}
+        return _json_response_with_cache({"digest": digest}, request)
     except Exception as exc:
         logger.exception("Failed to load digest for user %s: %s", user_id, exc)
         raise HTTPException(status_code=500, detail="Could not load digest.")
@@ -1211,12 +1239,14 @@ async def get_latest_digest(user_id: Annotated[str, Depends(get_user_id)]):
 @fastapi_app.get(
     "/api/insights/vault",
     responses={
+        304: {"description": "Insights payload has not changed."},
         200: {"description": "Vault insight data returned."},
         401: {"description": "Authentication failed."},
         500: {"description": "Could not compute vault insights."},
     },
 )
 async def get_vault_insights(
+    request: Request,
     user_id: Annotated[str, Depends(get_user_id)],
     window_days: Annotated[int, Query(alias="windowDays")] = 90,
     target_cpw: Annotated[float, Query(alias="targetCpw")] = 100.0,
@@ -1229,7 +1259,7 @@ async def get_vault_insights(
             window_days=window_days,
             target_cpw=target_cpw,
         )
-        return result
+        return _json_response_with_cache(result, request)
     except Exception as exc:
         logger.exception("Failed to compute vault insights for user %s: %s", user_id, exc)
         raise HTTPException(status_code=500, detail="Could not compute vault insights.")

@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from contextlib import suppress
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from function_app import _build_json_etag
 
 from fastapi import HTTPException
 import pytest
@@ -164,6 +165,29 @@ async def test_get_latest_digest_returns_suggestions(async_client, mock_digests_
         response = await async_client.get("/api/digest/latest")
 
     assert response.status_code == 200
+    assert "etag" in response.headers
+    assert response.headers["cache-control"] == "no-cache, no-store, max-age=0, must-revalidate"
+
+
+@pytest.mark.unit
+async def test_get_latest_digest_returns_304_when_match(async_client, mock_digests_container):
+    with patch("agents.db.get_digests_container", return_value=mock_digests_container):
+        first = await async_client.get("/api/digest/latest")
+
+    payload = {"digest": {
+        "id": "digest-001",
+        "userId": "test-user-001",
+        "suggestions": [{"item": "A white linen shirt", "reason": "Versatile base"}],
+        "generatedAt": "2026-01-06T09:00:00Z",
+    }}
+    expected_etag = _build_json_etag(payload)
+
+    assert first.headers["etag"] == expected_etag
+
+    with patch("agents.db.get_digests_container", return_value=mock_digests_container):
+        second = await async_client.get("/api/digest/latest", headers={"if-none-match": expected_etag})
+
+    assert second.status_code == 304
 
 
 @pytest.mark.unit
@@ -183,6 +207,32 @@ async def test_get_vault_insights_returns_payload(async_client):
     assert data["currency"] == "INR"
     assert data["behavioralInsights"]["topColorWearShare"]["color"] == "black"
     assert data["behavioralInsights"]["topColorWearShare"]["pct"] == pytest.approx(63.0)
+
+
+@pytest.mark.unit
+async def test_get_vault_insights_returns_304_when_match(async_client):
+    fake = {
+        "generatedAt": "2026-03-04T10:00:00Z",
+        "currency": "INR",
+        "insufficientData": False,
+        "behavioralInsights": {"topColorWearShare": {"color": "black", "pct": 63.0}},
+        "cpwIntel": [],
+    }
+    expected_etag = _build_json_etag(fake)
+    with patch("agents.vault_insights.compute_vault_insights", new=AsyncMock(return_value=fake)):
+        first = await async_client.get("/api/insights/vault?windowDays=90&targetCpw=100")
+
+    assert first.status_code == 200
+    assert first.headers["etag"] == expected_etag
+    assert first.headers["cache-control"] == "no-cache, no-store, max-age=0, must-revalidate"
+
+    with patch("agents.vault_insights.compute_vault_insights", new=AsyncMock(return_value=fake)):
+        second = await async_client.get(
+            "/api/insights/vault?windowDays=90&targetCpw=100",
+            headers={"if-none-match": expected_etag},
+        )
+
+    assert second.status_code == 304
 
 
 # ── POST /api/digest/run ─────────────────────────────────────────────────────

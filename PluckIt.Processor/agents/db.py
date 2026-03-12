@@ -120,6 +120,10 @@ def get_digest_feedback_container():
     return _async_container("COSMOS_DB_DIGEST_FEEDBACK_CONTAINER", "DigestFeedback")
 
 
+def get_vault_insights_cache_container():
+    return _async_container("COSMOS_DB_VAULT_INSIGHTS_CACHE_CONTAINER", "VaultInsightsCache")
+
+
 def get_digest_feedback_container_sync():
     return _sync_container("COSMOS_DB_DIGEST_FEEDBACK_CONTAINER", "DigestFeedback")
 

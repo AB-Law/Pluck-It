@@ -17,7 +17,16 @@ from agents.digest_agent import (
 
 @pytest.mark.unit
 def test_run_digest_for_user_with_status_fails_when_wardrobe_cannot_load():
-    with patch("agents.digest_agent._load_user_wardrobe", return_value=None):
+    profile_container = MagicMock()
+    profile_container.read_item.return_value = {
+        "wardrobeHashAtLastDigest": "hash-old",
+        "wardrobeFingerprint": "hash-new",
+    }
+
+    with (
+        patch("agents.digest_agent.get_user_profiles_container_sync", return_value=profile_container),
+        patch("agents.digest_agent._load_user_wardrobe", return_value=None),
+    ):
         digest, outcome = run_digest_for_user_with_status("user-fail-load")
 
     assert digest is None
@@ -30,17 +39,20 @@ def test_run_digest_for_user_with_status_skips_by_hash():
     profile_container.read_item.return_value = {
         "id": "user-hash-match",
         "wardrobeHashAtLastDigest": "hash-123",
+        "wardrobeFingerprint": "hash-123",
         "recommendationOptIn": True,
     }
+    mock_load = MagicMock(return_value={"items": [], "item_ids": ["item-1"]})
     with (
         patch("agents.digest_agent.get_user_profiles_container_sync", return_value=profile_container),
-        patch("agents.digest_agent._load_user_wardrobe", return_value={"items": [], "item_ids": ["item-1"]}),
+        patch("agents.digest_agent._load_user_wardrobe", mock_load),
         patch("agents.digest_agent.compute_wardrobe_hash", return_value="hash-123"),
     ):
         digest, outcome = run_digest_for_user_with_status("user-hash-match")
 
     assert digest is None
     assert outcome == "skipped_by_hash"
+    mock_load.assert_not_called()
 
 
 @pytest.mark.unit
@@ -138,6 +150,26 @@ def test_save_digest_and_update_profile_returns_false_on_exception():
         result = _save_digest_and_update_profile(profile_container, profile, digest, None, "temperate")
 
     assert result is False
+
+
+@pytest.mark.unit
+def test_save_digest_and_update_profile_updates_fingerprint():
+    profile_container = MagicMock()
+    profile = {
+        "id": "user-save-exc",
+        "wardrobeHashAtLastDigest": "old-hash",
+        "climateZone": "temperate",
+    }
+    digest = {"wardrobeHash": "new-hash"}
+    digests_container = MagicMock()
+
+    with patch("agents.digest_agent.get_digests_container_sync", return_value=digests_container):
+        result = _save_digest_and_update_profile(profile_container, profile, digest, None, "temperate")
+
+    assert result is True
+    assert profile["wardrobeFingerprint"] == "new-hash"
+    profile_container.upsert_item.assert_called_once_with(profile)
+    digests_container.upsert_item.assert_called_once_with(digest)
 
 
 @pytest.mark.unit

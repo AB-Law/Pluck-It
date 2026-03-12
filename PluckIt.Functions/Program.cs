@@ -81,6 +81,11 @@ var host = new HostBuilder()
                 sp.GetRequiredService<CosmosClient>(),
                 cosmosDatabase,
                 cosmosUserProfilesContainer));
+        services.AddSingleton(sp =>
+            new WardrobeFunctionsMutationDependencies(
+                sp.GetRequiredService<IWearHistoryRepository>(),
+                sp.GetRequiredService<IStylingActivityRepository>(),
+                sp.GetRequiredService<IUserProfileRepository>()));
 
         var cosmosCollectionsContainer = config["Cosmos:CollectionsContainer"] ?? "Collections";
         services.AddSingleton<ICollectionRepository>(sp =>
