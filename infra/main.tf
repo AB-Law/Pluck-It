@@ -62,6 +62,16 @@ resource "azurerm_storage_queue" "image_processing_jobs" {
   storage_account_name = azurerm_storage_account.sa_pluckit.name
 }
 
+resource "azurerm_storage_queue" "taste_analysis_jobs" {
+  name                 = "taste-analysis-jobs"
+  storage_account_name = azurerm_storage_account.sa_pluckit.name
+}
+
+resource "azurerm_storage_queue" "taste_analysis_jobs_poison" {
+  name                 = "taste-analysis-jobs-poison"
+  storage_account_name = azurerm_storage_account.sa_pluckit.name
+}
+
 resource "azurerm_cosmosdb_account" "pluckit" {
   name                = "${local.base_name}-cosmos"
   location            = azurerm_resource_group.rg_pluckit_archive.location
@@ -538,6 +548,54 @@ resource "azurerm_cosmosdb_sql_container" "scraped_items" {
   }
 }
 
+resource "azurerm_cosmosdb_sql_container" "taste_analysis_jobs" {
+  name                  = "TasteAnalysisJobs"
+  resource_group_name   = azurerm_resource_group.rg_pluckit_archive.name
+  account_name          = azurerm_cosmosdb_account.pluckit.name
+  database_name         = azurerm_cosmosdb_sql_database.pluckit.name
+  partition_key_paths   = ["/jobId"]
+  partition_key_version = 1
+  default_ttl           = 1209600 # 14 days in seconds
+
+  indexing_policy {
+    indexing_mode = "consistent"
+
+    included_path {
+      path = "/*"
+    }
+
+    included_path { path = "/jobId/?" }
+    included_path { path = "/userId/?" }
+    included_path { path = "/status/?" }
+    included_path { path = "/createdAt/?" }
+    included_path { path = "/updatedAt/?" }
+    included_path { path = "/retryCount/?" }
+  }
+}
+
+resource "azurerm_cosmosdb_sql_container" "taste_analysis_job_dead_letters" {
+  name                  = "TasteAnalysisJobDeadLetters"
+  resource_group_name   = azurerm_resource_group.rg_pluckit_archive.name
+  account_name          = azurerm_cosmosdb_account.pluckit.name
+  database_name         = azurerm_cosmosdb_sql_database.pluckit.name
+  partition_key_paths   = ["/jobId"]
+  partition_key_version = 1
+  default_ttl           = 2592000 # 30 days in seconds
+
+  indexing_policy {
+    indexing_mode = "consistent"
+
+    included_path {
+      path = "/*"
+    }
+
+    included_path { path = "/jobId/?" }
+    included_path { path = "/userId/?" }
+    included_path { path = "/status/?" }
+    included_path { path = "/createdAt/?" }
+  }
+}
+
 # UserSourceSubscriptions: which sources each user has subscribed to.
 # Partitioned by /userId for fast per-user subscription lookups.
 resource "azurerm_cosmosdb_sql_container" "user_source_subscriptions" {
@@ -816,6 +874,7 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
     "ARCHIVE_CONTAINER_NAME"                        = azurerm_storage_container.archive.name
     "STORAGE_ACCOUNT_NAME"                          = azurerm_storage_account.sa_pluckit.name
     "STORAGE_ACCOUNT_KEY"                           = azurerm_storage_account.sa_pluckit.primary_access_key
+    "StorageQueue"                                  = "DefaultEndpointsProtocol=https;AccountName=${azurerm_storage_account.sa_pluckit.name};AccountKey=${azurerm_storage_account.sa_pluckit.primary_access_key};EndpointSuffix=core.windows.net"
     "COSMOS_DB_ENDPOINT"                            = azurerm_cosmosdb_account.pluckit.endpoint
     "COSMOS_DB_KEY"                                 = azurerm_cosmosdb_account.pluckit.primary_key
     "COSMOS_DB_DATABASE"                            = azurerm_cosmosdb_sql_database.pluckit.name
@@ -831,6 +890,10 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
     "COSMOS_DB_SCRAPED_ITEMS_CONTAINER"             = azurerm_cosmosdb_sql_container.scraped_items.name
     "COSMOS_DB_USER_SOURCE_SUBSCRIPTIONS_CONTAINER" = azurerm_cosmosdb_sql_container.user_source_subscriptions.name
     "COSMOS_DB_TASTE_CALIBRATION_CONTAINER"         = azurerm_cosmosdb_sql_container.taste_calibration.name
+    "COSMOS_DB_TASTE_JOBS_CONTAINER"                = azurerm_cosmosdb_sql_container.taste_analysis_jobs.name
+    "COSMOS_DB_TASTE_JOB_DEAD_LETTER_CONTAINER"     = azurerm_cosmosdb_sql_container.taste_analysis_job_dead_letters.name
+    "TASTE_JOB_QUEUE_NAME"                          = "taste-analysis-jobs"
+    "TASTE_JOB_DEAD_LETTER_QUEUE_NAME"              = "taste-analysis-jobs-poison"
     "COSMOS_DB_USER_BANS_CONTAINER"                 = azurerm_cosmosdb_sql_container.user_bans.name
     "COSMOS_DB_VAULT_INSIGHTS_CACHE_CONTAINER"      = azurerm_cosmosdb_sql_container.vault_insights_cache.name
     "COSMOS_DB_VAULT_INSIGHTS_CACHE_TTL_MS"         = "300000"

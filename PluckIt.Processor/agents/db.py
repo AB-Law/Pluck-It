@@ -168,3 +168,27 @@ def get_user_bans_container():
 
 def get_user_bans_container_sync():
     return _sync_container("COSMOS_DB_USER_BANS_CONTAINER", "UserBans")
+
+
+def get_taste_jobs_container():
+    return _async_container("COSMOS_DB_TASTE_JOBS_CONTAINER", "TasteAnalysisJobs")
+
+
+def get_taste_jobs_container_sync():
+    return _sync_container("COSMOS_DB_TASTE_JOBS_CONTAINER", "TasteAnalysisJobs")
+
+
+def get_taste_job_dead_letters_container():
+    return _async_container("COSMOS_DB_TASTE_JOB_DEAD_LETTER_CONTAINER", "TasteAnalysisJobDeadLetters")
+
+
+def get_taste_job_dead_letters_container_sync():
+    return _sync_container("COSMOS_DB_TASTE_JOB_DEAD_LETTER_CONTAINER", "TasteAnalysisJobDeadLetters")
+
+# --------- Taste queue --------------
+
+def get_taste_queue_container():
+    return _async_container("COSMOS_DB_TASTE_QUEUE_CONTAINER", "TasteQueue")
+
+def get_taste_queue_container_sync():
+    return _sync_container("COSMOS_DB_TASTE_QUEUE_CONTAINER", "TasteQueue")

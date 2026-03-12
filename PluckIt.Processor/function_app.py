@@ -130,7 +130,6 @@ _ERR_MOOD_NOT_FOUND = "Mood not found."
 
 background_tasks = set()
 
-_TASTE_JOB_QUEUE: asyncio.Queue[dict[str, Any]] | None = None
 # In-memory dedupe guards are process-local only (lost on cold start/restart).
 # Duplicates may still happen across instances/restarts, so this mechanism
 # assumes downstream side-effect handlers (for example, _update_user_profile)
@@ -139,11 +138,11 @@ _TASTE_JOB_QUEUE: asyncio.Queue[dict[str, Any]] | None = None
 # such as Redis or Cosmos DB.
 _TASTE_JOB_IN_FLIGHT: dict[str, float] = {}
 _TASTE_JOB_COMPLETED: dict[str, float] = {}
-_TASTE_JOB_PERSISTED: list[dict[str, Any]] = []
-_TASTE_WORKER_TASK: asyncio.Task[Any] | None = None
 
 _TASTE_JOB_DEDUPE_TTL_SECONDS = _get_int_env("TASTE_JOB_DEDUPE_TTL_SECONDS", 180)
 _TASTE_JOB_COMPLETED_TTL_SECONDS = _get_int_env("TASTE_JOB_COMPLETED_TTL_SECONDS", 3600)
+_TASTE_JOB_QUEUE_NAME = os.getenv("TASTE_JOB_QUEUE_NAME", "taste-analysis-jobs")
+_TASTE_JOB_DEAD_LETTER_QUEUE_NAME = os.getenv("TASTE_JOB_DEAD_LETTER_QUEUE_NAME", "taste-analysis-jobs-poison")
 _TASTE_JOB_MAX_RETRIES = 3
 _TASTE_JOB_BASE_BACKOFF_SECONDS = _get_float_env("TASTE_JOB_BASE_BACKOFF_SECONDS", 0.75)
 _TASTE_JOB_MAX_BACKOFF_SECONDS = _get_float_env("TASTE_JOB_MAX_BACKOFF_SECONDS", 6.0)
@@ -152,7 +151,6 @@ _TASTE_JOB_PROFILE_UPDATE_MAX_RETRIES = 2
 _WEEKLY_DIGEST_MAX_CONCURRENCY = _get_int_env("WEEKLY_DIGEST_MAX_CONCURRENCY", 6)
 _SCRAPER_MAX_CONCURRENCY = _get_int_env("SCRAPER_MAX_CONCURRENCY", 4)
 
-_TASTE_JOB_QUEUE_MAX_SIZE = _get_int_env("TASTE_JOB_QUEUE_MAX_SIZE", 1024)
 
 logger = logging.getLogger(__name__)
 _otel_configured = False
@@ -423,7 +421,6 @@ async def _startup_log() -> None:
     _init_http_metrics()
     env = os.getenv("AZURE_FUNCTIONS_ENVIRONMENT", "Production")
     logger.info("PluckIt Processor started — environment=%s", env)
-    _ensure_taste_worker_running()
 
 
 # ── Azure Functions ASGI app (handles HTTP via FastAPI + non-HTTP triggers) ──
@@ -432,13 +429,6 @@ app = func.AsgiFunctionApp(app=fastapi_app, http_auth_level=func.AuthLevel.ANONY
 
 
 # ── Helper utilities ─────────────────────────────────────────────────────────
-
-def _get_taste_job_queue() -> asyncio.Queue[dict[str, Any]]:
-    global _TASTE_JOB_QUEUE
-    if _TASTE_JOB_QUEUE is None:
-        _TASTE_JOB_QUEUE = asyncio.Queue(maxsize=_TASTE_JOB_QUEUE_MAX_SIZE)
-    return _TASTE_JOB_QUEUE
-
 
 def _taste_job_id(user_id: str, item_id: str, image_url: str, gallery_image_index: int | None) -> str:
     return hashlib.sha256(
@@ -470,43 +460,149 @@ def _mark_taste_job_completed(job_id: str, now: float) -> None:
     _TASTE_JOB_COMPLETED[job_id] = now + _TASTE_JOB_COMPLETED_TTL_SECONDS
 
 
-def _persist_taste_job(job: dict[str, Any]) -> None:
-    # Hook for durable persistence (eg: Cosmos/Redis queue table) when shutdown
-    # or cancellation occurs before a job can be processed.
-    _TASTE_JOB_PERSISTED.append(job)
-    # Current implementation keeps jobs in-memory for in-process recovery.
-    # Replace with durable storage for guaranteed cross-process replay.
-    logger.warning(
-        "Persisting pending taste-profile job for recovery: %s (item %s, user %s)",
-        job.get("job_id"),
-        job.get("item_id"),
-        job.get("user_id"),
-    )
+def _build_taste_job_message(job_id: str, user_id: str, item_id: str, image_url: str, gallery_image_index: int | None) -> dict[str, Any]:
+    return {
+        "job_id": job_id,
+        "user_id": user_id,
+        "item_id": item_id,
+        "image_url": image_url,
+        "gallery_image_index": gallery_image_index,
+    }
 
 
-def _drain_taste_job_queue_for_shutdown(queue: asyncio.Queue[dict[str, Any]]) -> None:
-    while True:
-        try:
-            job = queue.get_nowait()
-        except asyncio.QueueEmpty:
-            break
-        try:
-            _persist_taste_job(job)
-        finally:
-            queue.task_done()
+def _build_taste_job_document(
+    job: dict[str, Any],
+    status: str,
+    *,
+    error: str | None = None,
+    dead_lettered: bool | None = None,
+) -> dict[str, Any]:
+    now_iso = datetime.now(timezone.utc).isoformat()
+    doc: dict[str, Any] = {
+        "id": job["job_id"],
+        "jobId": job["job_id"],
+        "status": status,
+        "userId": job["user_id"],
+        "itemId": job["item_id"],
+        "imageUrl": job["image_url"],
+        "galleryImageIndex": job.get("gallery_image_index"),
+        "retryCount": job.get("retryCount", 0),
+        "createdAt": job.get("createdAt", now_iso),
+        "updatedAt": now_iso,
+        "payload": job,
+    }
+    if error is not None:
+        doc["lastError"] = error
+    if dead_lettered is not None:
+        doc["deadLettered"] = dead_lettered
+    return doc
 
 
-def _ensure_taste_worker_running() -> None:
-    global _TASTE_WORKER_TASK
-    if _TASTE_WORKER_TASK is not None and not _TASTE_WORKER_TASK.done():
+def _get_taste_job_container():
+    from agents.db import get_taste_jobs_container
+
+    return get_taste_jobs_container()
+
+
+def _is_taste_job_doc_final(doc: dict[str, Any]) -> bool:
+    return doc.get("status") in {"completed", "dead_lettered"}
+
+
+async def _load_taste_job_doc(job_id: str) -> dict[str, Any] | None:
+    container = _get_taste_job_container()
+    try:
+        return await container.read_item(item=job_id, partition_key=job_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Taste job doc not found for %s: %s", job_id, exc)
+        return None
+
+
+async def _upsert_taste_job_doc(doc: dict[str, Any]) -> None:
+    container = _get_taste_job_container()
+    await container.upsert_item(doc)
+
+
+async def _claim_taste_job(job: dict[str, Any]) -> bool:
+    """Create or refresh a queued job document with best-effort idempotency."""
+    now = datetime.now(timezone.utc).isoformat()
+    job_id = job["job_id"]
+
+    existing = await _load_taste_job_doc(job_id)
+    if existing is not None:
+        if _is_taste_job_doc_final(existing):
+            return False
+        if existing.get("status") == "in_flight":
+            # If a worker is currently processing, skip duplicate scheduling.
+            return False
+        if existing.get("status") == "queued":
+            return False
+        # For failed jobs, allow one re-queue attempt by replacing status.
+        if existing.get("status") == "failed":
+            job = {**job, "retryCount": existing.get("retryCount", 0) + 1, "createdAt": existing.get("createdAt", now)}
+
+    doc = _build_taste_job_document(job, "queued")
+    await _upsert_taste_job_doc(doc)
+    return True
+
+
+async def _set_taste_job_status(job_id: str, status: str, **kwargs: Any) -> None:
+    existing = await _load_taste_job_doc(job_id)
+    if existing is None:
         return
+    now_iso = datetime.now(timezone.utc).isoformat()
+    existing["status"] = status
+    existing["updatedAt"] = now_iso
+    existing["retryCount"] = existing.get("retryCount", 0)
+    if status == "in_flight":
+        existing["retryCount"] = existing.get("retryCount", 0) + 1
+    if "error" in kwargs and kwargs["error"] is not None:
+        existing["lastError"] = kwargs["error"]
+    if kwargs:
+        existing.update(kwargs)
+    await _upsert_taste_job_doc(existing)
 
-    _TASTE_WORKER_TASK = asyncio.create_task(_taste_job_worker())
-    background_tasks.add(_TASTE_WORKER_TASK)
-    _TASTE_WORKER_TASK.add_done_callback(background_tasks.discard)
+
+def _serialize_taste_job(job: dict[str, Any]) -> str:
+    return base64.b64encode(json.dumps(job).encode("utf-8")).decode("utf-8")
 
 
-def _maybe_enqueue_taste_job(
+def _parse_taste_job(raw_message: Any) -> dict[str, Any]:
+    if hasattr(raw_message, "get_body"):
+        raw_body = raw_message.get_body().decode("utf-8")
+    else:
+        raw_body = str(raw_message)
+    try:
+        return json.loads(raw_body)
+    except Exception:
+        try:
+            return json.loads(base64.b64decode(raw_body).decode("utf-8"))
+        except Exception as exc:
+            raise ValueError(f"Invalid taste-job payload: {exc}") from exc
+
+
+def _get_taste_jobs_queue_client() -> "QueueClient":
+    from azure.storage.queue import QueueClient
+
+    queue_conn_str = os.getenv("StorageQueue")
+    if not queue_conn_str:
+        account_name = os.getenv("STORAGE_ACCOUNT_NAME", "")
+        account_key = os.getenv("STORAGE_ACCOUNT_KEY", "")
+        queue_conn_str = (
+            f"DefaultEndpointsProtocol=https;"
+            f"AccountName={account_name};"
+            f"AccountKey={account_key};"
+            f"EndpointSuffix=core.windows.net"
+        )
+    return QueueClient.from_connection_string(queue_conn_str, _TASTE_JOB_QUEUE_NAME)
+
+
+def _send_taste_job_message(job: dict[str, Any]) -> None:
+    queue_client = _get_taste_jobs_queue_client()
+    serialized = _serialize_taste_job(job)
+    queue_client.send_message(serialized)
+
+
+async def _maybe_enqueue_taste_job(
     user_id: str,
     item_id: str,
     image_url: str,
@@ -524,29 +620,31 @@ def _maybe_enqueue_taste_job(
         logger.debug("Skipping duplicate taste job %s for user %s item %s", job_id, user_id, item_id)
         return False
 
-    _ensure_taste_worker_running()
+    job = _build_taste_job_message(job_id, user_id, item_id, image_url, gallery_image_index)
+    job["createdAt"] = datetime.now(timezone.utc).isoformat()
+    job["retryCount"] = 0
+
     try:
-        _get_taste_job_queue().put_nowait(
-            {
-                "job_id": job_id,
-                "user_id": user_id,
-                "item_id": item_id,
-                "image_url": image_url,
-                "gallery_image_index": gallery_image_index,
-            }
-        )
-    except asyncio.QueueFull:
+        accepted = await _claim_taste_job(job)
+    except Exception as exc:  # noqa: BLE001
         _TASTE_JOB_IN_FLIGHT.pop(job_id, None)
-        logger.warning(
-            "Taste-profile job queue full, dropping queue request for job %s (item %s, user %s)",
-            job_id,
-            item_id,
-            user_id,
-        )
+        logger.warning("Could not create taste job state for %s: %s", job_id, exc)
+        raise
+
+    if not accepted:
+        _TASTE_JOB_IN_FLIGHT.pop(job_id, None)
+        logger.debug("Skipping duplicate taste job %s for user %s item %s", job_id, user_id, item_id)
+        return False
+
+    try:
+        _send_taste_job_message(job)
+    except Exception as exc:  # noqa: BLE001
+        _TASTE_JOB_IN_FLIGHT.pop(job_id, None)
+        logger.exception("Failed to enqueue taste job %s: %s", job_id, exc)
+        await _set_taste_job_status(job_id, "failed", error=str(exc))
         raise
     logger.info("Queued taste-profile job %s for item %s (user %s)", job_id, item_id, user_id)
     return True
-
 
 async def _run_in_executor_with_retry(
     operation,
@@ -612,40 +710,77 @@ async def _run_taste_profile_job(job: dict[str, Any]) -> None:
     )
 
 
-async def _taste_job_worker() -> None:
-    logger.info("Starting taste-profile feedback worker.")
-    queue = _get_taste_job_queue()
+@app.function_name(name="ProcessTasteAnalysisJob")
+@app.queue_trigger(
+    arg_name="queue_message",
+    queue_name=_TASTE_JOB_QUEUE_NAME,
+    connection="StorageQueue",
+)
+async def _process_taste_profile_job(queue_message) -> None:
     try:
-        while True:
-            try:
-                job = await queue.get()
-            except asyncio.CancelledError:
-                logger.info("Taste-profile feedback worker cancelled; draining outstanding jobs.")
-                _drain_taste_job_queue_for_shutdown(queue)
-                raise
+        job = _parse_taste_job(queue_message)
+    except ValueError as exc:
+        logger.warning("Dropping invalid taste-analysis queue message: %s", exc)
+        return
 
-            job_id = job.get("job_id", "")
-            try:
-                await _run_taste_profile_job(job)
-            except asyncio.CancelledError:
-                logger.warning(
-                    "Taste-profile job cancelled before completion; persisting for retry: %s",
-                    job_id,
-                )
-                _persist_taste_job(job)
-                queue.task_done()
-                _drain_taste_job_queue_for_shutdown(queue)
-                raise
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Taste-profile job failed: %s", exc)
-                queue.task_done()
-            else:
-                if job_id:
-                    _mark_taste_job_completed(job_id, now=time.monotonic())
-                queue.task_done()
-    except asyncio.CancelledError:
-        logger.info("Taste-profile feedback worker stopped.")
+    job_id = job.get("job_id")
+    if not job_id:
+        return
+
+    now = time.monotonic()
+    if _is_taste_job_duplicate(job_id, now):
+        logger.debug("Skipping duplicate in-flight taste job %s from queue.", job_id)
+        return
+
+    existing = await _load_taste_job_doc(job_id)
+    if existing is not None and existing.get("status") == "completed":
+        _mark_taste_job_completed(job_id, now=time.monotonic())
+        return
+    if existing is not None and existing.get("status") == "dead_lettered":
+        _mark_taste_job_completed(job_id, now=time.monotonic())
+        return
+
+    try:
+        await _set_taste_job_status(job_id, "in_flight")
+        await _run_taste_profile_job(job)
+        await _set_taste_job_status(job_id, "completed", lastCompletedAt=datetime.now(timezone.utc).isoformat())
+        _mark_taste_job_completed(job_id, now=time.monotonic())
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Taste-profile job failed for %s: %s", job_id, exc)
+        await _set_taste_job_status(job_id, "failed", error=str(exc))
+        _TASTE_JOB_IN_FLIGHT.pop(job_id, None)
         raise
+
+
+@app.function_name(name="ProcessTasteAnalysisJobDlq")
+@app.queue_trigger(
+    arg_name="dead_letter_queue_message",
+    queue_name=_TASTE_JOB_DEAD_LETTER_QUEUE_NAME,
+    connection="StorageQueue",
+)
+async def _process_taste_profile_job_dead_letter(dead_letter_queue_message) -> None:
+    try:
+        parsed_job = _parse_taste_job(dead_letter_queue_message)
+    except ValueError:
+        parsed_job = {"raw_payload": str(dead_letter_queue_message)}
+
+    job_id = parsed_job.get("job_id", f"unknown-{time.time_ns()}")
+    raw_payload = parsed_job.get("raw_payload", parsed_job)
+    dead_letter_payload = {
+        "jobId": job_id,
+        "status": "dead_lettered",
+        "payload": raw_payload,
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+        "sourceQueue": _TASTE_JOB_DEAD_LETTER_QUEUE_NAME,
+    }
+    dead_letter_payload["id"] = f"{job_id}-{int(time.time() * 1000)}"
+
+    from agents.db import get_taste_job_dead_letters_container
+
+    await get_taste_job_dead_letters_container().upsert_item(dead_letter_payload)
+    await _set_taste_job_status(job_id, "dead_lettered", error="Poison queue message")
+
+    logger.warning("Persisted taste-analysis dead-letter message for job %s", job_id)
 
 
 def _get_env(name: str, default: Optional[str] = None) -> str:
@@ -2176,7 +2311,7 @@ async def feedback_scraped_item(
             image_url = item.get("imageUrl", "")
         if image_url and signal == "up":
             try:
-                if _maybe_enqueue_taste_job(
+                if await _maybe_enqueue_taste_job(
                     user_id=user_id,
                     item_id=item_id,
                     image_url=image_url,

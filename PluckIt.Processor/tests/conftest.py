@@ -27,10 +27,15 @@ os.environ.setdefault("COSMOS_DB_SCRAPED_ITEMS_CONTAINER",              "Scraped
 os.environ.setdefault("COSMOS_DB_USER_SOURCE_SUBSCRIPTIONS_CONTAINER",  "UserSourceSubscriptions")
 os.environ.setdefault("COSMOS_DB_TASTE_CALIBRATION_CONTAINER",          "TasteCalibration")
 os.environ.setdefault("COSMOS_DB_VAULT_INSIGHTS_CACHE_CONTAINER",       "VaultInsightsCache")
+os.environ.setdefault("COSMOS_DB_TASTE_JOBS_CONTAINER",                "TasteAnalysisJobs")
+os.environ.setdefault("COSMOS_DB_TASTE_JOB_DEAD_LETTER_CONTAINER",     "TasteAnalysisJobDeadLetters")
 os.environ.setdefault("STORAGE_ACCOUNT_NAME",     "testaccount")
 os.environ.setdefault("STORAGE_ACCOUNT_KEY",      "dGVzdA==")
 os.environ.setdefault("UPLOADS_CONTAINER_NAME",   "uploads")
 os.environ.setdefault("ARCHIVE_CONTAINER_NAME",   "archive")
+os.environ.setdefault("StorageQueue",             "UseDevelopmentStorage=true")
+os.environ.setdefault("TASTE_JOB_QUEUE_NAME",    "taste-analysis-jobs")
+os.environ.setdefault("TASTE_JOB_DEAD_LETTER_QUEUE_NAME", "taste-analysis-jobs-poison")
 os.environ.setdefault("LOCAL_DEV_USER_ID",        "test-user-001")
 os.environ.setdefault("CORS_ALLOWED_ORIGINS",     "http://localhost:3000")
 os.environ.setdefault("LANGFUSE_PUBLIC_KEY",      "")
@@ -64,6 +69,9 @@ except Exception:
 
         def blob_trigger(self, *args, **kwargs):
             return self._make_decorator("blob_trigger")
+
+        def queue_trigger(self, *args, **kwargs):
+            return self._make_decorator("queue_trigger")
 
         def timer_trigger(self, *args, **kwargs):
             return self._make_decorator("timer_trigger")

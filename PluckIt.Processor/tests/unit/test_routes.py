@@ -11,7 +11,6 @@ Unit tests for FastAPI routes in function_app.py:
 """
 import asyncio
 from types import SimpleNamespace
-from contextlib import suppress
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from function_app import _build_json_etag
@@ -529,7 +528,8 @@ async def test_post_scraper_item_feedback_up_queues_background_taste_job(async_c
     container.upsert_item = AsyncMock(return_value={"id": "item-001", "scoreSignal": 1})
 
     with patch("agents.db.get_scraped_items_container", return_value=container), patch(
-        "function_app._maybe_enqueue_taste_job", return_value=True
+        "function_app._maybe_enqueue_taste_job",
+        new=AsyncMock(return_value=True),
     ) as mock_enqueue:
         response = await async_client.post(
             "/api/scraper/items/item-001/feedback",
@@ -578,31 +578,16 @@ async def test_feedback_rejects_invalid_signal(async_client):
 
 
 @pytest.mark.unit
-def test_maybe_enqueue_taste_job_dedupe_guard():
-    from function_app import (
-        _maybe_enqueue_taste_job,
-        _TASTE_JOB_COMPLETED,
-        _TASTE_JOB_IN_FLIGHT,
-    )
+async def test_maybe_enqueue_taste_job_enqueues_new_job_and_creates_state():
+    import function_app
 
-    _TASTE_JOB_IN_FLIGHT.clear()
-    _TASTE_JOB_COMPLETED.clear()
+    function_app._TASTE_JOB_IN_FLIGHT.clear()
+    function_app._TASTE_JOB_COMPLETED.clear()
 
-    queue: list[dict] = []
-
-    class _Queue:
-        def put_nowait(self, item: dict) -> None:
-            queue.append(item)
-
-    with patch("function_app._ensure_taste_worker_running"), patch("function_app._get_taste_job_queue", return_value=_Queue()):
-        first = _maybe_enqueue_taste_job(
-            user_id="user-001",
-            item_id="item-001",
-            image_url="https://cdn.example.com/item.png",
-            gallery_image_index=0,
-            signal="up",
-        )
-        duplicate = _maybe_enqueue_taste_job(
+    with patch("function_app._load_taste_job_doc", AsyncMock(return_value=None)), patch(
+        "function_app._upsert_taste_job_doc", AsyncMock()
+    ) as upsert_job, patch("function_app._send_taste_job_message", return_value=None) as send_message:
+        created = await function_app._maybe_enqueue_taste_job(
             user_id="user-001",
             item_id="item-001",
             image_url="https://cdn.example.com/item.png",
@@ -610,10 +595,33 @@ def test_maybe_enqueue_taste_job_dedupe_guard():
             signal="up",
         )
 
-    assert first is True
-    assert duplicate is False
-    assert len(queue) == 1
-    assert any("job_id" in item for item in queue)
+    assert created is True
+    assert upsert_job.called
+    assert send_message.called
+
+
+@pytest.mark.unit
+async def test_maybe_enqueue_taste_job_deduplicates_completed_job_states():
+    import function_app
+
+    function_app._TASTE_JOB_IN_FLIGHT.clear()
+    function_app._TASTE_JOB_COMPLETED.clear()
+
+    existing = {"id": "job-abc", "jobId": "job-abc", "status": "completed"}
+    with patch("function_app._load_taste_job_doc", AsyncMock(return_value=existing)), patch(
+        "function_app._upsert_taste_job_doc"
+    ) as upsert_job, patch("function_app._send_taste_job_message") as send_message:
+        queued = await function_app._maybe_enqueue_taste_job(
+            user_id="user-001",
+            item_id="item-001",
+            image_url="https://cdn.example.com/item.png",
+            gallery_image_index=0,
+            signal="up",
+        )
+
+    assert queued is False
+    assert not upsert_job.called
+    assert not send_message.called
 
 
 @pytest.mark.unit
@@ -705,72 +713,126 @@ async def test_run_taste_profile_job_updates_profile_when_inferred_data_exists()
 
 
 @pytest.mark.unit
-async def test_taste_job_worker_logs_and_continues_on_failure():
+async def test_process_taste_profile_job_marks_celestial_completion():
     import function_app
 
-    queue = asyncio.Queue()
-    await queue.put({"job_id": "job-1", "user_id": "u-1", "item_id": "item-1", "image_url": "https://cdn.example.com/1.png"})
-    await queue.put({"job_id": "job-2", "user_id": "u-1", "item_id": "item-2", "image_url": "https://cdn.example.com/2.png"})
-
-    def _run_taste_profile_job_side_effect(job: dict[str, object]) -> None:
-        if job["job_id"] == "job-1":
-            raise RuntimeError("transient job failure")
-
-    with patch("function_app._get_taste_job_queue", return_value=queue), patch(
+    document = {"jobId": "job-1", "status": "queued"}
+    with patch("function_app._parse_taste_job", return_value={"job_id": "job-1", "user_id": "u-1", "item_id": "item-1", "image_url": "https://cdn.example.com/1.png"}), patch(
+        "function_app._load_taste_job_doc",
+        AsyncMock(return_value=document),
+    ), patch(
+        "function_app._set_taste_job_status",
+        AsyncMock(),
+    ) as set_status, patch(
         "function_app._run_taste_profile_job",
-        side_effect=_run_taste_profile_job_side_effect,
-    ) as mock_run:
-        worker_task = asyncio.create_task(function_app._taste_job_worker())
-        await queue.join()
-        worker_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await worker_task
+        AsyncMock(return_value=None),
+    ) as run_job, patch(
+        "function_app._mark_taste_job_completed"
+    ) as mark_completed:
+        await function_app._process_taste_profile_job("payload")
 
-    assert mock_run.call_count == 2
+    assert run_job.called
+    set_status.assert_any_await(ANY, "in_flight")
+    set_status.assert_any_await(ANY, "completed", lastCompletedAt=ANY)
+    mark_completed.assert_called_once()
 
 
 @pytest.mark.unit
-async def test_taste_job_worker_persists_pending_jobs_on_cancellation():
+async def test_process_taste_profile_job_marks_dead_letter_on_error():
     import function_app
 
-    queue = asyncio.Queue()
-    await queue.put({"job_id": "job-1", "user_id": "u-1", "item_id": "item-1", "image_url": "https://cdn.example.com/1.png"})
-    await queue.put({"job_id": "job-2", "user_id": "u-1", "item_id": "item-2", "image_url": "https://cdn.example.com/2.png"})
-    job_started = asyncio.Event()
-
-    async def _block_job(_: dict[str, object]) -> None:
-        job_started.set()
-        await asyncio.Future()
-
-    with patch("function_app._get_taste_job_queue", return_value=queue), patch(
+    with patch("function_app._parse_taste_job", return_value={"job_id": "job-2", "user_id": "u-2", "item_id": "item-2", "image_url": "https://cdn.example.com/2.png"}), patch(
+        "function_app._load_taste_job_doc",
+        AsyncMock(return_value={"jobId": "job-2", "status": "queued"}),
+    ), patch(
+        "function_app._set_taste_job_status",
+        AsyncMock(),
+    ) as set_status, patch(
         "function_app._run_taste_profile_job",
-        side_effect=_block_job,
-    ) as mock_run, patch("function_app._persist_taste_job") as mock_persist:
-        worker_task = asyncio.create_task(function_app._taste_job_worker())
-        await job_started.wait()
-        worker_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await worker_task
+        AsyncMock(side_effect=RuntimeError("failure")),
+    ):
+        with pytest.raises(RuntimeError):
+            await function_app._process_taste_profile_job("payload")
 
-    assert mock_run.call_count == 1
-    assert mock_persist.call_count == 2
+    set_status.assert_any_await(ANY, "in_flight")
+    set_status.assert_any_await(ANY, "failed", error=ANY)
 
 
 @pytest.mark.unit
-async def test_taste_job_worker_marks_completed_only_on_success():
+async def test_process_taste_profile_job_dlq_persists_dead_letter():
     import function_app
 
-    queue = asyncio.Queue()
-    await queue.put({"job_id": "job-fail", "user_id": "u-1", "item_id": "item-1", "image_url": "https://cdn.example.com/1.png"})
+    dead_letter_container = MagicMock()
+    dead_letter_container.upsert_item = AsyncMock()
+    with patch("function_app._parse_taste_job", return_value={"job_id": "job-3", "payload": {"x": 1}}), patch(
+        "agents.db.get_taste_job_dead_letters_container",
+        return_value=dead_letter_container,
+    ), patch("function_app._set_taste_job_status", AsyncMock()):
+        await function_app._process_taste_profile_job_dead_letter("payload")
 
-    with patch("function_app._get_taste_job_queue", return_value=queue), patch(
+    dead_letter_container.upsert_item.assert_awaited_once()
+
+
+@pytest.mark.unit
+async def test_process_taste_profile_job_dlq_payload_parse_error_uses_unknown_job_and_raw_payload():
+    import function_app
+
+    dead_letter_container = MagicMock()
+    dead_letter_container.upsert_item = AsyncMock()
+
+    with patch("function_app._parse_taste_job", side_effect=ValueError("invalid")) as parse_mock, patch(
+        "function_app._set_taste_job_status",
+        AsyncMock(),
+    ) as set_status, patch(
+        "agents.db.get_taste_job_dead_letters_container",
+        return_value=dead_letter_container,
+    ):
+        await function_app._process_taste_profile_job_dead_letter("legacy-bad-payload")
+
+    parse_mock.assert_called_once_with("legacy-bad-payload")
+    dead_letter_payload = dead_letter_container.upsert_item.await_args.args[0]
+    assert dead_letter_payload["jobId"].startswith("unknown-")
+    assert dead_letter_payload["payload"] == "legacy-bad-payload"
+    assert dead_letter_payload["sourceQueue"] == function_app._TASTE_JOB_DEAD_LETTER_QUEUE_NAME
+    set_status.assert_any_await(ANY, "dead_lettered", error="Poison queue message")
+
+
+@pytest.mark.unit
+async def test_taste_job_state_transitions_to_dead_lettered_after_failures():
+    import function_app
+
+    function_app._TASTE_JOB_IN_FLIGHT.clear()
+    function_app._TASTE_JOB_COMPLETED.clear()
+
+    state_transitions: list[str] = []
+
+    def _capture_state(_job_id: str, status: str, **kwargs: object) -> None:
+        state_transitions.append(status)
+
+    dead_letter_container = MagicMock()
+    dead_letter_container.upsert_item = AsyncMock()
+
+    job = {"job_id": "job-transition", "user_id": "u-3", "item_id": "item-3", "image_url": "https://cdn.example.com/3.png"}
+    with patch("function_app._parse_taste_job", return_value=job), patch(
+        "function_app._load_taste_job_doc",
+        AsyncMock(return_value={"jobId": "job-transition", "status": "queued"}),
+    ), patch(
+        "function_app._set_taste_job_status",
+        AsyncMock(side_effect=_capture_state),
+    ) as set_status, patch(
         "function_app._run_taste_profile_job",
-        side_effect=RuntimeError("failure"),
-    ), patch("function_app._mark_taste_job_completed") as mark_completed:
-        worker_task = asyncio.create_task(function_app._taste_job_worker())
-        await queue.join()
-        worker_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await worker_task
+        AsyncMock(side_effect=RuntimeError("transient failure")),
+    ), patch(
+        "agents.db.get_taste_job_dead_letters_container",
+        return_value=dead_letter_container,
+    ):
+        with pytest.raises(RuntimeError):
+            await function_app._process_taste_profile_job("payload")
 
-    mark_completed.assert_not_called()
+        await function_app._process_taste_profile_job_dead_letter({"job_id": "job-transition", "payload": {"kind": "poison"}})
+
+    assert state_transitions == ["in_flight", "failed", "dead_lettered"]
+    dead_letter_container.upsert_item.assert_awaited_once()
+    set_status.assert_any_await("job-transition", "in_flight")
+    set_status.assert_any_await("job-transition", "failed", error=ANY)
+    set_status.assert_any_await("job-transition", "dead_lettered", error=ANY)

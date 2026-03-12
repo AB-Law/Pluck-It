@@ -1,5 +1,6 @@
 azure-functions
 azure-storage-blob>=12.20.0
+azure-storage-queue
 azure-cosmos>=4.7.0
 pillow>=10.0.0
 pillow-heif>=0.16.0
