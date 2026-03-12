@@ -81,8 +81,8 @@ describe('MobileShellComponent', () => {
     fixture.detectChanges();
 
     expect(body.style.position).toBe('fixed');
-    expect(body.style.top).toBe('-0px');
-    expect(body.style.left).toBe('0');
+    expect(['0px', '-0px']).toContain(body.style.top);
+    expect(['0', '0px']).toContain(body.style.left);
     expect(body.style.width).toBe('100%');
     expect(body.style.overflow).toBe('hidden');
     expect(root.style.overflow).toBe('hidden');

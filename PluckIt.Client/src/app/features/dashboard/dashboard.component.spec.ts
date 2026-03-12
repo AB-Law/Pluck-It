@@ -209,10 +209,9 @@ describe('DashboardComponent', () => {
     mobileNavState.openDigest();
     fixture.detectChanges();
 
-    const focusSpy = vi.spyOn(
-      fixture.nativeElement.querySelector('[aria-label="Wardrobe items"]') as HTMLElement,
-      'focus',
-    );
+    const focusTarget = fixture.nativeElement.querySelector('[aria-label="Wardrobe items"]') as HTMLElement | null;
+    expect(focusTarget).not.toBeNull();
+    const focusSpy = vi.spyOn(focusTarget!, 'focus');
 
     (component as any).settingsOpen.set(true);
     (component as any).closeSettingsPanel();
@@ -221,7 +220,6 @@ describe('DashboardComponent', () => {
     await Promise.resolve();
     expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true });
   });
-
   it('resets stale mobile panel state before opening settings', () => {
     Object.defineProperty(globalThis.window, 'innerWidth', { value: 390, configurable: true });
     (component as any).onWindowResize();
