@@ -179,7 +179,8 @@ def _init_otel_providers() -> None:
         return
 
     try:
-        resource = Resource.create({"service.name": service_name, "service.namespace": "pluckit"})
+        env = os.getenv("AZURE_FUNCTIONS_ENVIRONMENT", "Production")
+        resource = Resource.create({"service.name": service_name, "service.namespace": "pluckit", "deployment.environment": env})
 
         tracer_provider = TracerProvider(resource=resource)
         tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, headers=headers)))
