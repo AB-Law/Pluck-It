@@ -66,6 +66,14 @@ body {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+.ios-safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.ios-safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
 .mobile-overlay-shell {
   position: fixed;
   inset: 0;

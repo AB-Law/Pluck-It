@@ -13,6 +13,9 @@ import {
 import { FormsModule } from '@angular/forms';
 import { Subscription } from 'rxjs';
 import { ChatService, ChatMessage, ChatEvent } from '../../core/services/chat.service';
+import { NetworkService } from '../../core/services/network.service';
+import { OfflineQueueService } from '../../core/services/offline-queue.service';
+import { showOfflineBlockMessage } from '../../shared/offline-message';
 
 interface DisplayMessage {
   role: 'assistant' | 'user';
@@ -237,7 +240,11 @@ export class StylistPanelComponent implements OnInit, OnDestroy {
   private streamSub?: Subscription;
   private streamingIndex = -1;
 
-  constructor(private readonly chat: ChatService) {}
+  constructor(
+    private readonly chat: ChatService,
+    private readonly networkService: NetworkService,
+    private readonly offlineQueue: OfflineQueueService,
+  ) {}
 
   ngOnInit(): void {
     this.debugEnabled.set(this.isDebugModeEnabled());
@@ -293,6 +300,20 @@ export class StylistPanelComponent implements OnInit, OnDestroy {
   sendMessage(): void {
     const text = this.inputText.trim();
     if (!text || this.thinking()) return;
+    if (!this.networkService.isCurrentlyOnline()) {
+      this.offlineQueue.enqueue('stylist/send', {
+        text,
+        selectedItemIds: this.selectedItemIds(),
+      });
+      this.inputText = '';
+      this.messages.update(msgs => [
+        ...msgs,
+        { role: 'user', text, time: this.now() },
+        { role: 'assistant', text: showOfflineBlockMessage('Stylist send', 'The message was queued and will send when you reconnect.'), time: this.now() },
+      ]);
+      setTimeout(() => this.scrollToBottom());
+      return;
+    }
 
     this.inputText = '';
     this.messages.update(msgs => [...msgs, { role: 'user', text, time: this.now() }]);

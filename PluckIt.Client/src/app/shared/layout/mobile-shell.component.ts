@@ -24,7 +24,7 @@ interface MobileBodyLockSnapshot {
   standalone: true,
   imports: [RouterOutlet, MobileBottomNavComponent, ProfilePanelComponent, DigestPanelComponent],
   template: `
-    <div class="relative min-h-[100svh] bg-black text-slate-100">
+    <div class="relative h-[100dvh] min-h-[100dvh] bg-black text-slate-100 ios-safe-top ios-safe-bottom">
       <div class="pb-0 md:pb-0">
         <router-outlet />
       </div>
@@ -73,7 +73,7 @@ export class MobileShellComponent implements OnInit {
     const doc = document;
     const body = doc.body;
     const root = doc.documentElement;
-    const isWindow = typeof globalThis.window !== 'undefined';
+    const isWindow = globalThis.window !== undefined;
 
     if (locked) {
       if (this.bodyLockSnapshot) {
@@ -128,7 +128,7 @@ export class MobileShellComponent implements OnInit {
     body.style.touchAction = snapshot.bodyTouchAction;
     root.style.touchAction = snapshot.rootTouchAction;
 
-    if (typeof globalThis.window !== 'undefined') {
+    if (globalThis.window !== undefined) {
       globalThis.window.scrollTo(0, snapshot.scrollY);
     }
   }

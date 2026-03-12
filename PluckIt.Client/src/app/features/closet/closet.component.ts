@@ -1,6 +1,8 @@
-import { Component, computed, DestroyRef, EventEmitter, inject, input, OnInit, Output, signal, ViewChild } from '@angular/core';
+import { Component, computed, DestroyRef, effect, EventEmitter, inject, input, OnInit, Output, signal, ViewChild } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { WardrobeService } from '../../core/services/wardrobe.service';
+import { NetworkService } from '../../core/services/network.service';
+import { OfflineQueuedAction, OfflineQueueService } from '../../core/services/offline-queue.service';
 import { ClothingItem } from '../../core/models/clothing-item.model';
 import type { WardrobeSortField } from '../../core/models/clothing-item.model';
 import { UploadItemComponent } from './upload-item.component';
@@ -10,6 +12,7 @@ import { switchMap, interval } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { matchesItem } from '../../core/utils/search.utils';
 import { resizeImageFile } from '../../core/utils/image-utils';
+import { showOfflineBlockMessage } from '../../shared/offline-message';
 
 /** A single entry in the client-side upload pipeline. */
 interface UploadQueueItem {
@@ -23,6 +26,16 @@ interface UploadQueueItem {
   category?: string;
   /** Human-readable error for failed items. */
   error?: string;
+}
+
+/** Offline upload payload with the original file content preserved. */
+interface OfflineUploadQueuePayload {
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  fileData?: string;
+  blob?: Blob;
+  retryCount?: number;
 }
 
 @Component({
@@ -343,10 +356,14 @@ export class WardrobeComponent implements OnInit {
 
   /** Max concurrent uploads dispatched simultaneously from the client. */
   private readonly _MAX_CONCURRENT = 4;
+  private readonly _MAX_OFFLINE_UPLOAD_RETRIES = 3;
   /** Tracks how many upload+processing tasks are currently in flight. */
   private _activeUploads = 0;
 
   private readonly destroyRef = inject(DestroyRef);
+  protected readonly networkService = inject(NetworkService);
+  protected readonly offlineQueue = inject(OfflineQueueService);
+  private _initialized = false;
 
   readonly sortKey = computed(() => `${this.sortField()}:${this.sortDir()}`);
 
@@ -376,9 +393,21 @@ export class WardrobeComponent implements OnInit {
     private readonly wardrobe: WardrobeService,
     private readonly router: Router,
     private readonly route: ActivatedRoute,
-  ) {}
+  ) {
+    effect(() => {
+      if (!this._initialized || !this.networkService.isCurrentlyOnline()) {
+        return;
+      }
+      queueMicrotask(() => {
+        if (this._initialized && this.networkService.isCurrentlyOnline()) {
+          this._drainOfflineQueue();
+        }
+      });
+    });
+  }
 
   ngOnInit(): void {
+    this._initialized = true;
     const params = this.route.snapshot.queryParamMap;
     const cat    = params.get('category') ?? 'all';
     const sf     = (params.get('sortField') as WardrobeSortField) ?? 'dateAdded';
@@ -386,8 +415,11 @@ export class WardrobeComponent implements OnInit {
     this.selectedCategory.set(cat);
     this.sortField.set(sf);
     this.sortDir.set(sd);
-    this.loadItems();
-    this.refreshDrafts();
+    if (this.networkService.isCurrentlyOnline()) {
+      this.loadItems();
+      this.refreshDrafts();
+    }
+    this._drainOfflineQueue();
 
     // Auto-poll every 5 s while any server-persisted draft or queue item is still Processing.
     interval(5000)
@@ -397,13 +429,21 @@ export class WardrobeComponent implements OnInit {
           this.serverOnlyDrafts().some(d => d.draftStatus === 'Processing') ||
           this.uploadQueue().some(q => q.status === 'processing');
         if (hasProcessing) {
+          if (!this.networkService.isCurrentlyOnline()) {
+            return;
+          }
           this.refreshDrafts();
         }
       });
 
     // Refresh drafts when the user returns to this tab
     const visibilityHandler = () => {
-      if (document.visibilityState === 'visible') this.refreshDrafts();
+      if (
+        document.visibilityState === 'visible' &&
+        this.networkService.isCurrentlyOnline()
+      ) {
+        this.refreshDrafts();
+      }
     };
     document.addEventListener('visibilitychange', visibilityHandler);
     this.destroyRef.onDestroy(() =>
@@ -413,11 +453,15 @@ export class WardrobeComponent implements OnInit {
 
   /** Called by DashboardComponent header Upload button */
   triggerUpload(): void {
+    if (!this.networkService.isCurrentlyOnline()) {
+      this.uploadError.set(showOfflineBlockMessage('Wardrobe upload', 'This change was queued and will run when you reconnect.'));
+      return;
+    }
     this.uploadRef.openFilePicker();
   }
 
   protected openUploadFromEmptyState(): void {
-    this.uploadRef.openFilePicker();
+    this.triggerUpload();
   }
 
   selectCategory(cat: string): void {
@@ -435,6 +479,7 @@ export class WardrobeComponent implements OnInit {
   }
 
   loadMore(): void {
+    if (!this.networkService.isCurrentlyOnline()) return;
     const token = this.nextToken();
     if (!token || this.loadingMore()) return;
     this.loadingMore.set(true);
@@ -451,6 +496,13 @@ export class WardrobeComponent implements OnInit {
 
   /** Handles multi-file selection from the upload component. */
   onFileSelected(files: File[]): void {
+    if (!this.networkService.isCurrentlyOnline()) {
+      for (const file of files) {
+        this.offlineQueue.enqueue('wardrobe/upload', this._buildOfflineUploadPayload(file));
+      }
+      this.uploadError.set(showOfflineBlockMessage('Wardrobe upload', 'This change was queued and will run when you reconnect.'));
+      return;
+    }
     this.uploadError.set(null);
     const newItems: UploadQueueItem[] = files.map(file => ({
       localId: crypto.randomUUID(),
@@ -461,9 +513,169 @@ export class WardrobeComponent implements OnInit {
     this._dispatchPendingUploads();
   }
 
+  /**
+   * Build an offline upload payload that keeps enough file content for replay.
+   */
+  private _buildOfflineUploadPayload(file: File): OfflineUploadQueuePayload {
+    return {
+      fileName: file.name,
+      fileType: file.type,
+      fileSize: file.size,
+      blob: file,
+      retryCount: 0,
+    };
+  }
+
+  /**
+   * Replays queued uploads queued while offline once connectivity returns.
+   */
+  private _drainOfflineQueue(): void {
+    if (!this.networkService.isCurrentlyOnline()) return;
+
+    const actions = this.offlineQueue.drain();
+    if (actions.length === 0) return;
+
+    const nextQueuedActions: OfflineQueuedAction[] = [];
+    const offlineUploads: UploadQueueItem[] = [];
+    const summary: string[] = [];
+    let malformedCount = 0;
+    let retryCount = 0;
+    let droppedCount = 0;
+
+    for (const action of actions) {
+      if (action.type !== 'wardrobe/upload') {
+        nextQueuedActions.push(action);
+        continue;
+      }
+
+      const payload = this._getOfflinePayload(action);
+      if (!payload) {
+        malformedCount += 1;
+        summary.push('Malformed offline upload payload skipped.');
+        continue;
+      }
+
+      const item = this._hydrateOfflineUploadItem(payload);
+      if (!item) {
+        const retryAction = this._retryOrDropOfflineUploadAction(action, payload);
+        if (retryAction) {
+          nextQueuedActions.push(retryAction);
+          retryCount += 1;
+          summary.push('Offline upload item queued for retry.');
+          continue;
+        }
+        droppedCount += 1;
+        summary.push('Offline upload item dropped after retry limit.');
+        continue;
+      }
+
+      offlineUploads.push(item);
+    }
+
+    this.offlineQueue.persistOfflineUploads(nextQueuedActions);
+
+    if (summary.length > 0) {
+      const counts = [
+        malformedCount ? `${malformedCount} malformed item(s)` : null,
+        retryCount ? `${retryCount} retriable item(s)` : null,
+        droppedCount ? `${droppedCount} dropped item(s)` : null,
+      ]
+        .filter((item): item is string => item !== null)
+        .join(', ');
+
+      this.uploadError.set(`Offline upload queue issues: ${counts}`);
+    }
+
+    if (offlineUploads.length === 0) return;
+
+    this.uploadQueue.update(curr => [...curr, ...offlineUploads]);
+    this._dispatchPendingUploads();
+  }
+
+  /**
+   * Rebuild retry state for a queued offline upload or drop once the bound is hit.
+   */
+  private _retryOrDropOfflineUploadAction(
+    action: OfflineQueuedAction,
+    payload: OfflineUploadQueuePayload,
+  ): OfflineQueuedAction | null {
+    const nextRetry = (payload.retryCount ?? 0) + 1;
+    if (nextRetry > this._MAX_OFFLINE_UPLOAD_RETRIES) {
+      return null;
+    }
+    return {
+      ...action,
+      payload: {
+        ...payload,
+        retryCount: nextRetry,
+      },
+      timestamp: Date.now(),
+    };
+  }
+
+  private _getOfflinePayload(action: OfflineQueuedAction): OfflineUploadQueuePayload | null {
+    const payload = action.payload as {
+      fileName?: unknown;
+      fileType?: unknown;
+      fileSize?: unknown;
+      fileData?: unknown;
+      blob?: unknown;
+      retryCount?: unknown;
+    };
+
+    if (
+      typeof payload?.fileName !== 'string' ||
+      typeof payload?.fileType !== 'string' ||
+      typeof payload?.fileSize !== 'number'
+    ) {
+      return null;
+    }
+
+    const fileData = typeof payload.fileData === 'string' ? payload.fileData : undefined;
+    const blob = payload.blob instanceof Blob ? payload.blob : undefined;
+
+    return {
+      fileName: payload.fileName,
+      fileType: payload.fileType,
+      fileSize: payload.fileSize,
+      fileData,
+      blob,
+      retryCount: typeof payload.retryCount === 'number' ? payload.retryCount : 0,
+    };
+  }
+
+  private _hydrateOfflineUploadItem(payload: OfflineUploadQueuePayload): UploadQueueItem | null {
+    const file = this._reconstructFileFromPayload(payload);
+    if (!file) return null;
+    return { localId: crypto.randomUUID(), file, status: 'queued' as const };
+  }
+
+  private _reconstructFileFromPayload(payload: OfflineUploadQueuePayload): File | null {
+    if (payload.blob instanceof File) return payload.blob;
+    if (payload.blob instanceof Blob) return new File([payload.blob], payload.fileName, { type: payload.fileType });
+    if (!payload.fileData) return null;
+
+    try {
+      const base64 = payload.fileData.includes(',')
+        ? payload.fileData.split(',').pop() ?? payload.fileData
+        : payload.fileData;
+      const decoded = atob(base64);
+      const bytes = new Uint8Array(decoded.length);
+      for (let i = 0; i < decoded.length; i += 1) {
+        bytes[i] = decoded.charCodeAt(i);
+      }
+      return new File([bytes], payload.fileName, { type: payload.fileType });
+    } catch {
+      return null;
+    }
+  }
+
   // ── Draft pipeline ─────────────────────────────────────────────────────
 
   private refreshDrafts(): void {
+    if (!this.networkService.isCurrentlyOnline()) {
+      return;
+    }
     this.wardrobe.getDrafts().subscribe({
       next: res => {
         this.drafts.set(res.items);
@@ -728,6 +940,9 @@ export class WardrobeComponent implements OnInit {
   // ── Private helpers ───────────────────────────────────────────────────
 
   private loadItems(): void {
+    if (!this.networkService.isCurrentlyOnline()) {
+      return;
+    }
     this.loading.set(true);
     this.nextToken.set(null);
     this.hasMore.set(false);

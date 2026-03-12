@@ -65,6 +65,20 @@ describe('StylistPanelComponent', () => {
     expect(chatService.streamMessage).not.toHaveBeenCalled();
   });
 
+  it('queues offline style requests and shows warning message', () => {
+    vi.spyOn(component['networkService'], 'isCurrentlyOnline').mockReturnValue(false);
+    const enqueueSpy = vi.spyOn(component['offlineQueue'], 'enqueue');
+    component.inputText = 'Offline outfit request';
+    component.sendMessage();
+
+    expect(chatService.streamMessage).not.toHaveBeenCalled();
+    expect(enqueueSpy).toHaveBeenCalledWith(
+      'stylist/send',
+      expect.objectContaining({ text: 'Offline outfit request' }),
+    );
+    expect(component.messages().some(message => message.text.includes('queued'))).toBe(true);
+  });
+
   it('should render streaming content and tool status events', () => {
     chatService.streamMessage.mockReturnValueOnce(
       of(

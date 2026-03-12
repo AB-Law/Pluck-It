@@ -94,6 +94,47 @@ describe('WardrobeComponent', () => {
     expect(component.serverOnlyDrafts()).toHaveLength(1);
   });
 
+  it('queues uploads and shows a warning when offline', () => {
+    vi.spyOn(component['networkService'], 'isCurrentlyOnline').mockReturnValue(false);
+    const enqueueSpy = vi.spyOn(component['offlineQueue'], 'enqueue');
+    component.uploadError.set(null);
+    component.onFileSelected([new File(['a'], 'shirt.jpg', { type: 'image/jpeg' })]);
+
+    expect(enqueueSpy).toHaveBeenCalledWith(
+      'wardrobe/upload',
+      expect.objectContaining({ fileName: 'shirt.jpg', fileType: 'image/jpeg' }),
+    );
+    expect(component.uploadError()).toContain('queued');
+    expect(component.uploadQueue()).toHaveLength(0);
+  });
+
+  it('retries malformed offline upload queue items and drops them after max attempts', () => {
+    vi.spyOn(component['networkService'], 'isCurrentlyOnline').mockReturnValue(true);
+    const offlineQueue = component['offlineQueue'];
+    offlineQueue.clear();
+    offlineQueue.enqueue('wardrobe/upload', {
+      fileName: 'broken.jpg',
+      fileType: 'image/jpeg',
+      fileSize: 3,
+    } as Record<string, unknown>);
+
+    const dispatchSpy = vi.spyOn(component as any, '_dispatchPendingUploads').mockImplementation(() => undefined);
+
+    (component as any)._drainOfflineQueue();
+    expect(offlineQueue.count()).toBe(1);
+    expect((offlineQueue.drain()[0].payload as any).retryCount).toBe(1);
+    expect(dispatchSpy).not.toHaveBeenCalled();
+
+    (component as any)._drainOfflineQueue();
+    expect((offlineQueue.drain()[0].payload as any).retryCount).toBe(2);
+
+    (component as any)._drainOfflineQueue();
+    expect((offlineQueue.drain()[0].payload as any).retryCount).toBe(3);
+
+    (component as any)._drainOfflineQueue();
+    expect(offlineQueue.count()).toBe(0);
+  });
+
   it('builds upload query via selectCategory and pushes URL updates', () => {
     component.selectCategory('Outerwear');
     expect(component['selectedCategory']()).toBe('Outerwear');
@@ -297,9 +338,8 @@ describe('WardrobeComponent', () => {
 
     const root = fixture.nativeElement as HTMLElement;
     expect(root.textContent).toContain('Upload failed');
-    const dismissBtn = root.querySelector('button[aria-label="Dismiss"]') as HTMLButtonElement | null;
-    expect(dismissBtn).toBeTruthy();
-    dismissBtn?.click();
+    const dismissBtn = root.querySelector('button[aria-label="Dismiss"]');
+    dismissBtn?.dispatchEvent(new MouseEvent('click'));
     fixture.detectChanges();
 
     expect(component.uploadError()).toBeNull();
@@ -324,7 +364,7 @@ describe('WardrobeComponent', () => {
     expect(root.textContent).toContain('check_circle');
     expect(root.textContent).toContain('error');
 
-    const buttons = Array.from(root.querySelectorAll('button')) as HTMLButtonElement[];
+    const buttons = Array.from(root.querySelectorAll('button'));
     expect(buttons.some(b => b.textContent?.trim() === 'Review')).toBe(true);
     expect(buttons.some(b => b.textContent?.trim() === 'Retry')).toBe(true);
     expect(buttons.filter(b => b.textContent?.trim() === '✕').length).toBeGreaterThan(0);
@@ -405,21 +445,23 @@ describe('WardrobeComponent', () => {
     fixture.detectChanges();
 
     const root = fixture.nativeElement as HTMLElement;
-    const reviewBtn = (Array.from(root.querySelectorAll('button')) as HTMLButtonElement[]).find(
+    const reviewBtn = Array.from(root.querySelectorAll('button')).find(
       btn => btn.textContent?.trim() === 'Review',
     );
     reviewBtn?.click();
     expect(component.reviewingDraft()).toBeTruthy();
 
-    const retryBtn = (Array.from(root.querySelectorAll('button')) as HTMLButtonElement[]).find(
+    const retryBtn = Array.from(root.querySelectorAll('button')).find(
       btn => btn.textContent?.trim() === 'Retry',
     );
     retryBtn?.click();
     expect(wardrobeService.retryDraft).toHaveBeenCalledWith('draft-2');
 
-    const dismissButtons = (Array.from(root.querySelectorAll('button[aria-label="Dismiss"]')) as HTMLButtonElement[]);
+    const dismissButtons = Array.from(root.querySelectorAll('button[aria-label="Dismiss"]'));
     expect(dismissButtons.length).toBeGreaterThan(0);
-    dismissButtons.forEach(button => button.click());
+    for (const button of dismissButtons) {
+      button.dispatchEvent(new MouseEvent('click'));
+    }
     expect(wardrobeService.dismissDraft).toHaveBeenCalled();
   });
 
@@ -430,7 +472,7 @@ describe('WardrobeComponent', () => {
     fixture.detectChanges();
 
     const root = fixture.nativeElement as HTMLElement;
-    const saveBtn = (Array.from(root.querySelectorAll('button')) as HTMLButtonElement[]).find(
+    const saveBtn = Array.from(root.querySelectorAll('button')).find(
       btn => btn.textContent?.trim() === 'Save Changes',
     );
     expect(saveBtn).toBeTruthy();
@@ -444,7 +486,7 @@ describe('WardrobeComponent', () => {
     wardrobeService.update.mockReturnValue(of(reviewing));
     fixture.detectChanges();
 
-    const addBtn = (Array.from(root.querySelectorAll('button')) as HTMLButtonElement[]).find(
+    const addBtn = Array.from(root.querySelectorAll('button')).find(
       btn => btn.textContent?.trim() === 'Add to Wardrobe',
     );
     addBtn?.click();
@@ -466,11 +508,12 @@ describe('WardrobeComponent', () => {
     component.onDeleteItem(BASE_ITEM);
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Delete Item?');
-    const cancelBtn = (Array.from(fixture.nativeElement.querySelectorAll('button')) as HTMLButtonElement[]).find(
+    const root = fixture.nativeElement as HTMLElement;
+    const cancelBtn = Array.from(root.querySelectorAll('button')).find(
       btn => btn.textContent?.trim() === 'Cancel',
     );
     expect(cancelBtn).toBeTruthy();
-    cancelBtn?.click();
+    cancelBtn?.dispatchEvent(new MouseEvent('click'));
     fixture.detectChanges();
     expect(component.deletingItem()).toBeNull();
   });
@@ -601,18 +644,22 @@ describe('WardrobeComponent', () => {
     fixture.detectChanges();
 
     const root = fixture.nativeElement as HTMLElement;
-    const reviewButtons = Array.from(root.querySelectorAll('button')).filter(
+    const reviewButton = Array.from(root.querySelectorAll('button')).find(
       button => button.textContent?.trim() === 'Review',
     );
-    reviewButtons[0]?.click();
+    reviewButton?.dispatchEvent(new MouseEvent('click'));
     expect(component.reviewingDraft()?.id).toBe('server-ready');
 
     component.reviewingDraft.set(null);
-    const retryButtons = Array.from(root.querySelectorAll('button')).filter(button => button.textContent?.trim() === 'Retry');
-    retryButtons[0]?.click();
+    const retryButton = Array.from(root.querySelectorAll('button')).find(
+      button => button.textContent?.trim() === 'Retry',
+    );
+    retryButton?.dispatchEvent(new MouseEvent('click'));
     expect(wardrobeService.retryDraft).toHaveBeenCalledWith('server-failed');
 
-    const dismissButtons = Array.from(root.querySelectorAll('button[aria-label=\"Dismiss\"]')) as HTMLButtonElement[];
+    const dismissButtons = Array.from(root.querySelectorAll<HTMLButtonElement>('button')).filter(
+      button => button.getAttribute('aria-label') === 'Dismiss',
+    );
     expect(dismissButtons.length).toBeGreaterThan(0);
     dismissButtons.forEach(button => button.click());
     expect(wardrobeService.dismissDraft).toHaveBeenCalledWith('server-failed');
@@ -636,7 +683,8 @@ describe('WardrobeComponent', () => {
     (component as any).loadItems = loadItemsSpy;
     fixture.detectChanges();
 
-    const buttons = Array.from(fixture.nativeElement.querySelectorAll('button')) as HTMLButtonElement[];
+    const root = fixture.nativeElement as HTMLElement;
+    const buttons = Array.from(root.querySelectorAll('button'));
     buttons.find(button => button.textContent?.trim() === 'Outerwear')?.click();
     buttons.find(button => button.textContent?.trim() === 'Tops')?.click();
     expect(loadItemsSpy).toHaveBeenCalled();
@@ -662,7 +710,7 @@ describe('WardrobeComponent', () => {
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('this item');
 
-    const cancelButton = (Array.from(fixture.nativeElement.querySelectorAll('button')) as HTMLButtonElement[]).find(
+    const cancelButton = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('button')).find(
       button => button.textContent?.trim() === 'Cancel',
     );
     cancelButton?.click();
@@ -673,29 +721,26 @@ describe('WardrobeComponent', () => {
     component.allItems.set([{ ...BASE_ITEM, id: 'i-outer', category: 'Outerwear' }, { ...BASE_ITEM, id: 'i-top', category: 'Tops' }]);
     fixture.detectChanges();
 
-    const buttons = Array.from(fixture.nativeElement.querySelectorAll('button')) as HTMLButtonElement[];
-    const allButton = buttons.find(
-      (button: unknown) => (button as HTMLButtonElement).textContent?.trim() === 'All Items',
-    ) as HTMLButtonElement;
-    const outerButton = buttons.find(
-      (button: unknown) => (button as HTMLButtonElement).textContent?.trim() === 'Outerwear',
-    ) as HTMLButtonElement;
+    const root = fixture.nativeElement as HTMLElement;
+    const buttons = Array.from(root.querySelectorAll('button'));
+    const allButton = buttons.find(button => button.textContent?.trim() === 'All Items')!;
+    const outerButton = buttons.find(button => button.textContent?.trim() === 'Outerwear')!;
     expect(allButton.className).toContain('bg-white');
     expect(outerButton.className).toContain('bg-card-dark');
 
     component['selectedCategory'].set('Outerwear');
     fixture.detectChanges();
     expect(component['selectedCategory']()).toBe('Outerwear');
-    const updatedOuterButton = Array.from(fixture.nativeElement.querySelectorAll('button')).find(
-      (button: unknown) => (button as HTMLButtonElement).textContent?.trim() === 'Outerwear',
-    ) as HTMLButtonElement;
+    const updatedOuterButton = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('button')).find(
+      button => button.textContent?.trim() === 'Outerwear',
+    )!;
     expect(updatedOuterButton.className).toContain('bg-white');
 
     component['selectedCategory'].set('all');
     fixture.detectChanges();
-    const updatedAllButton = Array.from(fixture.nativeElement.querySelectorAll('button')).find(
-      (button: unknown) => (button as HTMLButtonElement).textContent?.trim() === 'All Items',
-    ) as HTMLButtonElement;
+    const updatedAllButton = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('button')).find(
+      button => button.textContent?.trim() === 'All Items',
+    )!;
     expect(updatedAllButton.className).toContain('bg-white');
 
     component['hasMore'].set(false);

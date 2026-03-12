@@ -231,4 +231,14 @@ describe('DashboardComponent', () => {
     expect(closeSpy).toHaveBeenCalled();
     expect(mobileNavState.activePanel()).toBe('profile');
   });
+
+  it('queues upload request when offline', () => {
+    vi.spyOn(component['networkService'], 'isCurrentlyOnline').mockReturnValue(false);
+    const enqueueSpy = vi.spyOn(component['offlineQueue'], 'enqueue');
+
+    component.onUploadRequested();
+
+    expect(enqueueSpy).toHaveBeenCalledWith('dashboard/upload', {});
+    expect((component as any).uploadOfflineNotice()).toContain('queued');
+  });
 });
