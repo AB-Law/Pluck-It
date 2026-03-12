@@ -129,6 +129,9 @@ _TASTE_JOB_QUEUE_MAX_SIZE = _get_int_env("TASTE_JOB_QUEUE_MAX_SIZE", 1024)
 
 logger = logging.getLogger(__name__)
 _otel_configured = False
+_otel_log_handler_installed = False
+_http_request_counter = None
+_http_request_duration_ms = None
 
 
 def _normalize_otel_headers(raw_headers: Optional[str]) -> dict[str, str] | None:
@@ -152,7 +155,7 @@ _otel_providers_initialized = False
 def _init_otel_providers() -> None:
     """Set up TracerProvider and MeterProvider. Called at import time, before Azure Functions
     can override the global providers."""
-    global _otel_providers_initialized
+    global _otel_providers_initialized, _otel_log_handler_installed
     if _otel_providers_initialized:
         return
 
@@ -167,7 +170,11 @@ def _init_otel_providers() -> None:
 
     try:
         from opentelemetry import metrics, trace
+        from opentelemetry import _logs
+        from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+        from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
         from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+        from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
         from opentelemetry.sdk.metrics import MeterProvider
         from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
@@ -194,10 +201,52 @@ def _init_otel_providers() -> None:
             )
             metrics.set_meter_provider(MeterProvider(resource=resource, metric_readers=[metric_reader]))
 
+        logs_endpoint = os.getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT") or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+        if logs_endpoint:
+            logger_provider = LoggerProvider(resource=resource)
+            logger_provider.add_log_record_processor(
+                BatchLogRecordProcessor(OTLPLogExporter(endpoint=logs_endpoint, headers=headers))
+            )
+            _logs.set_logger_provider(logger_provider)
+            if not _otel_log_handler_installed:
+                logging.getLogger().addHandler(
+                    LoggingHandler(level=logging.NOTSET, logger_provider=logger_provider)
+                )
+                _otel_log_handler_installed = True
+
         _otel_providers_initialized = True
         logger.warning("OpenTelemetry providers initialized service=%s endpoint=%s", service_name, endpoint)
     except Exception as exc:
         logger.warning("OpenTelemetry provider initialization failed: %s", exc)
+
+
+def _init_http_metrics() -> None:
+    global _http_request_counter, _http_request_duration_ms
+    if _http_request_counter is not None and _http_request_duration_ms is not None:
+        return
+    if not _otel_providers_initialized:
+        return
+
+    try:
+        from opentelemetry import metrics
+    except Exception as exc:
+        logger.warning("OpenTelemetry metrics library unavailable: %s", exc)
+        return
+
+    try:
+        meter = metrics.get_meter("pluckit.processor.http")
+        _http_request_counter = meter.create_counter(
+            name="http.server.requests",
+            unit="1",
+            description="Count of incoming HTTP requests",
+        )
+        _http_request_duration_ms = meter.create_histogram(
+            name="http.server.duration",
+            unit="ms",
+            description="Duration of HTTP requests in milliseconds",
+        )
+    except Exception as exc:
+        logger.warning("OpenTelemetry HTTP metric setup failed: %s", exc)
 
 
 def _configure_open_telemetry() -> None:
@@ -235,6 +284,7 @@ except Exception as exc:
 
 fastapi_app = FastAPI(title="PluckIt Processor", docs_url=None, redoc_url=None)
 _configure_open_telemetry()
+_init_http_metrics()
 
 _ALLOWED_ORIGINS = [o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()]
 if "*" in _ALLOWED_ORIGINS:
@@ -250,6 +300,30 @@ fastapi_app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+
+@fastapi_app.middleware("http")
+async def _record_http_metrics(request: Request, call_next):
+    if _http_request_counter is None or _http_request_duration_ms is None:
+        return await call_next(request)
+
+    start = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        route = request.scope.get("route")
+        route_path = getattr(route, "path", request.url.path)
+        attrs = {
+            "http.method": request.method,
+            "http.route": route_path,
+            "http.status_code": status_code,
+        }
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        _http_request_counter.add(1, attributes=attrs)
+        _http_request_duration_ms.record(elapsed_ms, attributes=attrs)
 
 # ── Global exception handler — ensures all unhandled errors are logged via
 # Python's logging module, which the Azure Functions worker forwards to
@@ -274,6 +348,7 @@ async def _global_exception_handler(request: Request, exc: Exception) -> JSONRes
 async def _startup_log() -> None:
     _init_otel_providers()
     _configure_open_telemetry()
+    _init_http_metrics()
     env = os.getenv("AZURE_FUNCTIONS_ENVIRONMENT", "Production")
     logger.info("PluckIt Processor started — environment=%s", env)
     _ensure_taste_worker_running()
