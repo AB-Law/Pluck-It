@@ -18,7 +18,11 @@ import { VaultInsightsResponse } from '../../core/models/vault-insights.model';
       } @else {
         <div class="grid gap-2 md:grid-cols-3">
           <div class="rounded border border-border-chrome bg-black/40 p-3 text-xs text-slate-300">
-            You wear {{ topColorLabel() }} {{ fmtPct(insights()!.behavioralInsights.topColorWearShare?.pct) }} of the time.
+            @if (topColorShare(); as topColor) {
+              You wear {{ topColor.color }} {{ fmtPct(topColor.pct) }} of the time.
+            } @else {
+              Top color trend is not available yet. Keep logging wears.
+            }
           </div>
           <div class="rounded border border-border-chrome bg-black/40 p-3 text-xs text-slate-300">
             You haven’t worn {{ fmtPct(insights()!.behavioralInsights.unworn90dPct) }} of wardrobe in 90 days.
@@ -53,7 +57,10 @@ export class VaultInsightsPanelComponent {
   insights = input<VaultInsightsResponse | null>(null);
 
   readonly topCpwRows = computed(() => (this.insights()?.cpwIntel ?? []).slice(0, 4));
-  readonly topColorLabel = computed(() => (this.insights()?.behavioralInsights.topColorWearShare?.color ?? 'N/A'));
+  readonly topColorShare = computed(() => {
+    const topColor = this.insights()?.behavioralInsights.topColorWearShare;
+    return topColor?.color && topColor.pct != null ? topColor : null;
+  });
 
   fmtPct(val?: number | null): string {
     if (val == null) return 'N/A';

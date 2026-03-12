@@ -54,12 +54,13 @@ def _ensure_fx_cache() -> tuple[str, str]:
 
 
 def _convert(amount: float, from_currency: Optional[str], to_currency: str) -> Optional[float]:
-    if amount is None:
-        return None
-    if not from_currency:
-        return None
-    f = from_currency.upper()
     t = to_currency.upper()
+    if not from_currency:
+        if t == "USD":
+            return amount
+        fallback_rate = _FX_CACHE.get(("USD", t))
+        return amount * fallback_rate if fallback_rate is not None else None
+    f = from_currency.upper()
     if f == t:
         return amount
     rate = _FX_CACHE.get((f, t))
@@ -74,6 +75,15 @@ def _parse_iso(iso: Optional[str]) -> Optional[datetime]:
     try:
         return datetime.fromisoformat(iso.replace("Z", "+00:00"))
     except Exception:
+        return None
+
+
+def _to_float(value: object) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
         return None
 
 
@@ -258,7 +268,10 @@ def _normalize_price_dict(price_raw) -> dict:
 
 def _converted_price(item: dict, currency: str) -> Optional[float]:
     price = _normalize_price_dict(item.get("price") or {})
-    return _convert(float(price.get("amount") or 0), price.get("originalCurrency"), currency)
+    amount = _to_float(price.get("amount"))
+    if amount is None:
+        return None
+    return _convert(amount, price.get("originalCurrency"), currency)
 
 
 def _get_unworn_insights(items: list[dict], now: datetime, currency: str) -> tuple[Optional[float], Optional[dict]]:
@@ -275,7 +288,7 @@ def _get_unworn_insights(items: list[dict], now: datetime, currency: str) -> tup
 
         if wear_count == 0:
             converted = _converted_price(item, currency)
-            if converted and converted > max_amount:
+            if converted is not None and converted > max_amount:
                 max_amount = converted
                 most_expensive = {"itemId": item.get("id"), "amount": round(converted, 2), "currency": currency}
 
@@ -285,14 +298,11 @@ def _get_unworn_insights(items: list[dict], now: datetime, currency: str) -> tup
 def _compute_item_intel(item: dict, target_cpw: float, currency: str, window_wears: Counter, now: datetime) -> dict:
     item_id = item.get("id")
     wear_count = int(item.get("wearCount") or 0)
-    price = item.get("price") or {}
-    if not isinstance(price, dict): price = {"amount": price}
-    
-    converted = _convert(float(price.get("amount") or 0), price.get("originalCurrency"), currency) if price.get("amount") else None
-    cpw = round(converted / wear_count, 2) if converted and wear_count > 0 else None
+    converted = _converted_price(item, currency)
+    cpw = round(converted / wear_count, 2) if converted is not None and wear_count > 0 else None
     
     forecast = None
-    if converted and target_cpw > 0:
+    if converted is not None and target_cpw > 0:
         needed = int(math.ceil(converted / target_cpw))
         additional = max(needed - wear_count, 0)
         recent_rate = window_wears.get(item_id, 0) / 3.0
