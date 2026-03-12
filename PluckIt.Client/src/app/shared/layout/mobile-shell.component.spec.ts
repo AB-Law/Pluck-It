@@ -117,4 +117,11 @@ describe('MobileShellComponent', () => {
     expect(body.style.touchAction).toBe('');
     expect(root.style.touchAction).toBe('');
   });
+
+  it('uses dvh and safe-area aware shell classes', () => {
+    const shellContainer = fixture.nativeElement.querySelector('div') as HTMLElement;
+    expect(shellContainer.className).toContain('h-[100dvh]');
+    expect(shellContainer.className).toContain('ios-safe-top');
+    expect(shellContainer.className).toContain('ios-safe-bottom');
+  });
 });

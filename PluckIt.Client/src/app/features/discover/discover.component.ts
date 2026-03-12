@@ -7,6 +7,7 @@ import { SourceSidebarComponent } from './source-sidebar.component';
 import { AppHeaderComponent } from '../../shared/app-header.component';
 import { ProfilePanelComponent } from '../profile/profile-panel.component';
 import { MobileNavState } from '../../shared/layout/mobile-nav.state';
+import { NetworkService } from '../../core/services/network.service';
 
 @Component({
   selector: 'app-discover',
@@ -356,6 +357,7 @@ export class DiscoverComponent implements OnInit, OnDestroy {
   protected settingsOpen = signal(false);
   private readonly preloadedImageUrls = new Set<string>();
   private readonly mobileNavState = inject(MobileNavState);
+  private readonly networkService = inject(NetworkService);
 
   readonly skeletons = Array.from({ length: 15 }, (_, i) => i);
   readonly timeRangeOptions = [
@@ -449,18 +451,28 @@ export class DiscoverComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit() {
-    this.loadSources();
-    this.loadFeed();
+    if (this.networkService.isCurrentlyOnline()) {
+      this.loadSources();
+      this.loadFeed();
+    } else {
+      this.loading.set(false);
+    }
     this.updateLayoutMode();
   }
 
   private loadSources() {
+    if (!this.networkService.isCurrentlyOnline()) return;
     this.discoverService.getSources().subscribe({
       next: sources => this.sources.set(sources),
     });
   }
 
   protected loadFeed(append = false) {
+    if (!this.networkService.isCurrentlyOnline()) {
+      this.loading.set(false);
+      this.loadingMore.set(false);
+      return;
+    }
     if (append === false) {
       this.loading.set(true);
       this.nextToken.set(null);
@@ -499,6 +511,7 @@ export class DiscoverComponent implements OnInit, OnDestroy {
   }
 
   private checkForClientScrape(): void {
+    if (!this.networkService.isCurrentlyOnline()) return;
     const sourceId = this.activeSourceId();
     if (!sourceId) return;
 

@@ -7,6 +7,9 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { UserProfile, UserProfileService } from '../../core/services/user-profile.service';
+import { NetworkService } from '../../core/services/network.service';
+import { OfflineQueueService } from '../../core/services/offline-queue.service';
+import { showOfflineBlockMessage } from '../../shared/offline-message';
 
 const CURRENCIES = [
   { code: 'USD', label: 'USD — US Dollar' },
@@ -283,7 +286,11 @@ export class ProfilePanelComponent implements OnInit {
   readonly sizeSystems  = SIZE_SYSTEMS;
   readonly styleOptions = STYLE_OPTIONS;
 
-  constructor(private readonly profileService: UserProfileService) {}
+  constructor(
+    private readonly profileService: UserProfileService,
+    private readonly networkService: NetworkService,
+    private readonly offlineQueue: OfflineQueueService,
+  ) {}
 
   ngOnInit(): void {
     const current = this.profileService.profile();
@@ -298,6 +305,12 @@ export class ProfilePanelComponent implements OnInit {
   }
 
   save(): void {
+    if (!this.networkService.isCurrentlyOnline()) {
+      this.offlineQueue.enqueue('profile/save', this.draft);
+      this.saveError.set(showOfflineBlockMessage('Profile save', 'Changes were queued and will be sent when you reconnect.'));
+      this.saving.set(false);
+      return;
+    }
     this.saving.set(true);
     this.saveError.set(null);
     this.profileService.update(this.draft).subscribe({

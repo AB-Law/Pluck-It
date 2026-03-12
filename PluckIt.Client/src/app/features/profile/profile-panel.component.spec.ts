@@ -1,9 +1,8 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ProfilePanelComponent } from './profile-panel.component';
-import { UserProfileService } from '../../core/services/user-profile.service';
+import { UserProfileService, UserProfile } from '../../core/services/user-profile.service';
 import { of, throwError } from 'rxjs';
 import { signal } from '@angular/core';
-import { UserProfile } from '../../core/services/user-profile.service';
 import { By } from '@angular/platform-browser';
 
 describe('ProfilePanelComponent', () => {
@@ -90,6 +89,17 @@ describe('ProfilePanelComponent', () => {
     expect(profileService.load).toHaveBeenCalled();
   });
 
+  it('queues profile updates and shows offline warning when offline', () => {
+    vi.spyOn(component['networkService'], 'isCurrentlyOnline').mockReturnValue(false);
+    const enqueueSpy = vi.spyOn(component['offlineQueue'], 'enqueue');
+
+    component.save();
+
+    expect(enqueueSpy).toHaveBeenCalledWith('profile/save', component.draft);
+    expect(profileService.update).not.toHaveBeenCalled();
+    expect(component.saveError()).toContain('queued');
+  });
+
   it('computes button chip and style classes', () => {
     expect(component.styleChipClass('minimalist')).toContain('bg-transparent');
     expect(component.sysClass('US', false)).toContain('bg-white');
@@ -126,13 +136,14 @@ describe('ProfilePanelComponent', () => {
     fixture.detectChanges();
     expect(component.draft.currencyCode).toBe('EUR');
 
-    const buttons = fixture.nativeElement.querySelectorAll('section button');
-    (Array.from(buttons) as HTMLButtonElement[]).find(btn => btn.textContent?.trim() === 'EU')?.click();
+    const root = fixture.nativeElement as HTMLElement;
+    const buttons = Array.from(root.querySelectorAll('section button'));
+    buttons.find(btn => btn.textContent?.trim() === 'EU')?.dispatchEvent(new MouseEvent('click'));
     expect(component.draft.preferredSizeSystem).toBe('EU');
 
-    (Array.from(buttons) as HTMLButtonElement[]).find(btn => btn.textContent?.trim() === 'minimalist')?.click();
+    buttons.find(btn => btn.textContent?.trim() === 'minimalist')?.dispatchEvent(new MouseEvent('click'));
     expect(component.draft.stylePreferences).toContain('minimalist');
-    (Array.from(buttons) as HTMLButtonElement[]).find(btn => btn.textContent?.trim() === 'minimalist')?.click();
+    buttons.find(btn => btn.textContent?.trim() === 'minimalist')?.dispatchEvent(new MouseEvent('click'));
     expect(component.draft.stylePreferences).not.toContain('minimalist');
 
     const numberInputs = fixture.debugElement.queryAll(By.css('input[type="number"]'));

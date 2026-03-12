@@ -3,12 +3,15 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 import { UserProfileService } from '../../core/services/user-profile.service';
 import { WardrobeService } from '../../core/services/wardrobe.service';
+import { NetworkService } from '../../core/services/network.service';
+import { OfflineQueueService } from '../../core/services/offline-queue.service';
 import { WardrobeComponent } from '../closet/closet.component';
 import { StylistPanelComponent } from '../stylist/stylist.component';
 import { ProfilePanelComponent } from '../profile/profile-panel.component';
 import { DigestPanelComponent } from '../digest/digest-panel.component';
 import { AppHeaderComponent } from '../../shared/app-header.component';
 import { MobileNavState } from '../../shared/layout/mobile-nav.state';
+import { showOfflineBlockMessage } from '../../shared/offline-message';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 @Component({
@@ -33,6 +36,11 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
         [showStylistShortcut]="true"
         (stylistRequested)="openStylist()"
       />
+      @if (uploadOfflineNotice()) {
+        <div class="mx-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
+          {{ uploadOfflineNotice() }}
+        </div>
+      }
 
       <!-- ─── Body ─────────────────────────────────────────────────── -->
       <div class="flex flex-1 min-h-0">
@@ -114,8 +122,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
   protected readonly selectedIds = signal<string[]>([]);
   protected readonly dragOver = signal(false);
   protected readonly isMobile = signal(false);
+  protected readonly uploadOfflineNotice = signal<string | null>(null);
   protected readonly mobileNavState = inject(MobileNavState);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly networkService = inject(NetworkService);
+  private readonly offlineQueue = inject(OfflineQueueService);
 
   constructor(
     protected readonly auth: AuthService,
@@ -165,6 +176,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
   protected noop(): void {}
 
   onUploadRequested(): void {
+    if (!this.networkService.isCurrentlyOnline()) {
+      this.offlineQueue.enqueue('dashboard/upload', {});
+      this.uploadOfflineNotice.set(showOfflineBlockMessage('Wardrobe upload', 'This action was queued and will run when you reconnect.'));
+      return;
+    }
+    this.uploadOfflineNotice.set(null);
     this.wardrobeRef?.triggerUpload();
   }
 
