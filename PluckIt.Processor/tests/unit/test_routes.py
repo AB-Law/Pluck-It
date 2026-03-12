@@ -586,7 +586,7 @@ async def test_maybe_enqueue_taste_job_enqueues_new_job_and_creates_state():
 
     with patch("function_app._load_taste_job_doc", AsyncMock(return_value=None)), patch(
         "function_app._upsert_taste_job_doc", AsyncMock()
-    ) as upsert_job, patch("function_app._send_taste_job_message", return_value=None) as send_message:
+    ) as upsert_job, patch("function_app._send_taste_job_message", AsyncMock()) as send_message:
         created = await function_app._maybe_enqueue_taste_job(
             user_id="user-001",
             item_id="item-001",

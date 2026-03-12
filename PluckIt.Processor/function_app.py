@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 import hashlib
 import io
 import json
@@ -573,11 +574,23 @@ def _parse_taste_job(raw_message: Any) -> dict[str, Any]:
         raw_body = str(raw_message)
     try:
         return json.loads(raw_body)
-    except Exception:
+    except json.JSONDecodeError as exc:
+        logger.debug(
+            "Taste job payload was not plain JSON; attempting base64 decode. raw_message_type=%s",
+            type(raw_message).__name__,
+        )
         try:
-            return json.loads(base64.b64decode(raw_body).decode("utf-8"))
-        except Exception as exc:
-            raise ValueError(f"Invalid taste-job payload: {exc}") from exc
+            decoded_body = base64.b64decode(raw_body)
+        except (binascii.Error, UnicodeDecodeError) as decode_exc:
+            raise ValueError(f"Invalid taste-job payload base64 decode failed for raw_body={raw_body!r}: {decode_exc}") from decode_exc
+
+        try:
+            return json.loads(decoded_body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as decode_parse_exc:
+            raise ValueError(f"Invalid taste-job payload JSON parse after decode failed for raw_body={raw_body!r}: {decode_parse_exc}") from decode_parse_exc
+
+    except Exception as exc:
+        raise ValueError(f"Invalid taste-job payload at top-level parse step for raw_message={raw_message!r}, raw_body={raw_body!r}: {exc}") from exc
 
 
 def _get_taste_jobs_queue_client() -> "QueueClient":
@@ -596,10 +609,10 @@ def _get_taste_jobs_queue_client() -> "QueueClient":
     return QueueClient.from_connection_string(queue_conn_str, _TASTE_JOB_QUEUE_NAME)
 
 
-def _send_taste_job_message(job: dict[str, Any]) -> None:
+async def _send_taste_job_message(job: dict[str, Any]) -> None:
     queue_client = _get_taste_jobs_queue_client()
     serialized = _serialize_taste_job(job)
-    queue_client.send_message(serialized)
+    await asyncio.to_thread(queue_client.send_message, serialized)
 
 
 async def _maybe_enqueue_taste_job(
@@ -637,7 +650,7 @@ async def _maybe_enqueue_taste_job(
         return False
 
     try:
-        _send_taste_job_message(job)
+        await _send_taste_job_message(job)
     except Exception as exc:  # noqa: BLE001
         _TASTE_JOB_IN_FLIGHT.pop(job_id, None)
         logger.exception("Failed to enqueue taste job %s: %s", job_id, exc)
@@ -733,10 +746,7 @@ async def _process_taste_profile_job(queue_message) -> None:
         return
 
     existing = await _load_taste_job_doc(job_id)
-    if existing is not None and existing.get("status") == "completed":
-        _mark_taste_job_completed(job_id, now=time.monotonic())
-        return
-    if existing is not None and existing.get("status") == "dead_lettered":
+    if existing is not None and _is_taste_job_doc_final(existing):
         _mark_taste_job_completed(job_id, now=time.monotonic())
         return
 
