@@ -154,10 +154,6 @@ def run_digest_for_user_with_status(user_id: str, force: bool = False) -> tuple[
     current_hash = compute_wardrobe_hash(wardrobe_data["item_ids"])
     if _should_skip_digest(profile, current_hash, force):
         return None, "skipped_by_hash"
-    if not force and not profile.get("recommendationOptIn", True):
-        return None, "skipped_by_opt_out"
-
-    # 4. Analyze wardrobe & feedback
     ranked_items, category_counts, climate_signals = _analyze_wardrobe(wardrobe_data["items"])
     liked, disliked = _load_recent_feedback(user_id)
     
