@@ -160,10 +160,13 @@ def _configure_open_telemetry() -> None:
     service_name = os.getenv("OTEL_SERVICE_NAME", "pluckit-processor-func")
 
     try:
-        from opentelemetry import trace
+        from opentelemetry import metrics, trace
+        from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
         from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+        from opentelemetry.sdk.metrics import MeterProvider
+        from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
         from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -172,18 +175,30 @@ def _configure_open_telemetry() -> None:
         return
 
     try:
-        trace.set_tracer_provider(
-            TracerProvider(
-                resource=Resource.create(
-                    {
-                        "service.name": service_name,
-                        "service.namespace": "pluckit",
-                    }
-                )
-            )
+        resource = Resource.create(
+            {
+                "service.name": service_name,
+                "service.namespace": "pluckit",
+            }
         )
-        tracer = trace.get_tracer_provider()
-        tracer.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, headers=headers)))
+
+        # Traces
+        trace.set_tracer_provider(TracerProvider(resource=resource))
+        tracer_provider = trace.get_tracer_provider()
+        tracer_provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, headers=headers)))
+
+        # Metrics
+        metrics_endpoint = os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+        if metrics_endpoint:
+            metric_reader = PeriodicExportingMetricReader(
+                OTLPMetricExporter(endpoint=metrics_endpoint, headers=headers),
+                export_interval_millis=60_000,
+            )
+            metrics.set_meter_provider(MeterProvider(resource=resource, metric_readers=[metric_reader]))
+            logger.info("OpenTelemetry metrics initialized endpoint=%s", metrics_endpoint)
+        else:
+            logger.warning("OpenTelemetry metrics endpoint missing: set OTEL_EXPORTER_OTLP_METRICS_ENDPOINT.")
+
         HTTPXClientInstrumentor().instrument()
         FastAPIInstrumentor.instrument_app(
             fastapi_app,
