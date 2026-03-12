@@ -4,7 +4,6 @@ azure-storage-queue>=12.0.0
 azure-cosmos>=4.7.0
 pillow>=10.3.0
 pillow-heif>=0.16.0
-urllib3>=2.2.2
 
 # Web framework (ASGI) for SSE streaming
 fastapi
@@ -24,7 +23,6 @@ langchain-core
 
 # Langfuse tracing for LLM calls and tool executions
 langfuse
-aiohttp
 # HTTP client for Open-Meteo weather API (no API key needed)
 httpx
 
@@ -36,4 +34,3 @@ feedparser
 
 # Fashion content scraper
 imagehash>=4.3.1        # perceptual hashing for image deduplication
-playwright>=1.40.0      # headless browser for JS-heavy brand sites (Phase 3)
