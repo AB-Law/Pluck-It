@@ -191,7 +191,7 @@ async def compute_vault_insights(
 
     # 2. Per-item CPW Intel
     cpw_intel = [
-        _compute_item_intel(item, target_cpw, currency, window_wears, now)
+        _compute_item_intel(item, target_cpw, currency, window_wears, now, window_days)
         for item in items
     ]
 
@@ -295,25 +295,60 @@ def _get_unworn_insights(items: list[dict], now: datetime, currency: str) -> tup
     pct = round((unworn_count / len(items)) * 100.0, 1) if items else None
     return pct, most_expensive
 
-def _compute_item_intel(item: dict, target_cpw: float, currency: str, window_wears: Counter, now: datetime) -> dict:
+def _compute_item_intel(
+    item: dict,
+    target_cpw: float,
+    currency: str,
+    window_wears: Counter,
+    now: datetime,
+    window_days: int,
+) -> dict:
     item_id = item.get("id")
     wear_count = int(item.get("wearCount") or 0)
     converted = _converted_price(item, currency)
     cpw = round(converted / wear_count, 2) if converted is not None and wear_count > 0 else None
-    
+
+    window_months = max(window_days / 30.0, 1.0)
+    recent_wear_rate = window_wears.get(item_id, 0) / window_months if window_days > 0 else 0.0
+    historical_wear_rate = wear_count / float(_months_since(item.get("dateAdded"), now))
+    wear_rate_trend = _wear_rate_trend(recent_wear_rate, historical_wear_rate)
+    wear_rate_delta = round(recent_wear_rate - historical_wear_rate, 2)
+    wear_rate_for_forecast = recent_wear_rate if recent_wear_rate > 0 else max(0.3, historical_wear_rate)
+
     forecast = None
     if converted is not None and target_cpw > 0:
-        needed = int(math.ceil(converted / target_cpw))
+        needed = math.ceil(converted / target_cpw)
         additional = max(needed - wear_count, 0)
-        recent_rate = window_wears.get(item_id, 0) / 3.0
-        wear_rate = recent_rate if recent_rate > 0 else max(0.3, wear_count / _months_since(item.get("dateAdded"), now))
-        
-        if wear_rate > 0:
-            projected = _add_months(now, int(math.ceil(additional / wear_rate)))
-            forecast = {"targetCpw": float(target_cpw), "projectedMonth": projected.strftime("%Y-%m"), "projectedWearsNeeded": additional}
+        if wear_rate_for_forecast > 0:
+            projected = _add_months(now, math.ceil(additional / wear_rate_for_forecast))
+            forecast = {
+                "targetCpw": float(target_cpw),
+                "projectedMonth": projected.strftime("%Y-%m"),
+                "projectedWearsNeeded": additional,
+                "recentWearRate": round(recent_wear_rate, 2),
+                "historicalWearRate": round(historical_wear_rate, 2),
+                "wearRateTrend": wear_rate_trend,
+            }
 
     return {
         "itemId": item_id, "cpw": cpw, "badge": _badge(cpw, wear_count, target_cpw),
         "breakEvenReached": cpw is not None and wear_count > 0 and cpw <= target_cpw,
-        "breakEvenTargetCpw": float(target_cpw), "forecast": forecast,
+        "breakEvenTargetCpw": float(target_cpw),
+        "recentWearRate": round(recent_wear_rate, 2),
+        "historicalWearRate": round(historical_wear_rate, 2),
+        "wearRateTrend": wear_rate_trend,
+        "wearRateDelta": wear_rate_delta,
+        "forecast": forecast,
     }
+
+
+def _wear_rate_trend(recent_rate: float, historical_rate: float) -> str:
+    """Return 'up'/'down'/'stable' for recent wear momentum versus history."""
+    if recent_rate <= 0 and historical_rate <= 0:
+        return "stable"
+
+    tolerance = max(0.05, abs(historical_rate) * 0.2)
+    delta = recent_rate - historical_rate
+    if abs(delta) <= tolerance:
+        return "stable"
+    return "up" if delta > 0 else "down"

@@ -21,7 +21,7 @@ import { AddToCollectionModalComponent } from '../collections/add-to-collection-
 import { matchesItem } from '../../core/utils/search.utils';
 import { VaultInsightsService } from '../../core/services/vault-insights.service';
 import { VaultInsightsPanelComponent } from './vault-insights-panel.component';
-import { CpwIntelItem, VaultInsightsResponse } from '../../core/models/vault-insights.model';
+import { CpwIntelItem, CpwIntelPanelItem, VaultInsightsPanelData, VaultInsightsResponse } from '../../core/models/vault-insights.model';
 
 @Component({
   selector: 'app-vault',
@@ -90,24 +90,39 @@ import { CpwIntelItem, VaultInsightsResponse } from '../../core/models/vault-ins
           @if (wearSuggestions().length > 0) {
             <div class="mb-6 space-y-2">
               @for (s of wearSuggestions(); track s.suggestionId) {
-                <div class="flex items-center justify-between gap-3 rounded-lg border border-primary/30 bg-primary/10 p-3">
-                  <p class="text-xs text-primary font-mono">{{ s.message }}</p>
-                  <div class="flex items-center gap-2">
-                    <button
-                      class="rounded border border-primary/40 px-2 py-1 text-[11px] font-bold text-primary hover:bg-primary/20"
-                      (click)="acceptSuggestion(s)"
-                    >Mark Worn</button>
-                    <button
-                      class="rounded border border-border-chrome px-2 py-1 text-[11px] font-bold text-slate-400 hover:text-white"
-                      (click)="dismissSuggestion(s)"
-                    >Dismiss</button>
+                <div class="rounded-lg border border-primary/30 bg-primary/10 p-3">
+                  <div class="flex items-start gap-4">
+                    @if (s.imageUrl; as itemImage) {
+                      <img
+                        [src]="itemImage"
+                        alt="Suggested item"
+                        class="mt-0.5 h-28 w-24 rounded bg-black/30 object-contain border border-primary/25 shrink-0"
+                      />
+                    } @else {
+                      <div class="mt-0.5 h-28 w-24 rounded bg-black/40 border border-primary/25 flex items-center justify-center text-sm text-slate-500 shrink-0">
+                        <span class="material-symbols-outlined text-2xl">image</span>
+                      </div>
+                    }
+                    <div class="min-w-0 flex-1 space-y-3">
+                      <p class="text-sm text-primary font-semibold leading-relaxed flex-1">{{ s.message }}</p>
+                      <div class="flex flex-wrap items-center gap-2">
+                        <button
+                          class="rounded border border-primary/40 px-3 py-1.5 text-sm font-bold text-primary hover:bg-primary/20"
+                          (click)="acceptSuggestion(s)"
+                        >Mark Worn</button>
+                        <button
+                          class="rounded border border-border-chrome px-3 py-1.5 text-sm font-bold text-slate-300 hover:text-white"
+                          (click)="dismissSuggestion(s)"
+                        >Dismiss</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               }
             </div>
           }
 
-          <app-vault-insights-panel [insights]="insights()" />
+          <app-vault-insights-panel [insights]="enrichedInsights()" />
 
           <!-- Loading state -->
           @if (loading()) {
@@ -301,6 +316,21 @@ export class VaultComponent implements OnInit {
   readonly cpwIntelMap = computed(() =>
     new Map((this.insights()?.cpwIntel ?? []).map(row => [row.itemId, row])));
 
+  readonly enrichedInsights = computed<VaultInsightsPanelData | null>(() => {
+    const source = this.insights();
+    if (!source) return null;
+    const itemsById = new Map(this.allItems().map(item => [item.id, item]));
+    const cpwIntel: CpwIntelPanelItem[] = (source.cpwIntel ?? []).map(row => {
+      const item = itemsById.get(row.itemId);
+      return {
+        ...row,
+        itemLabel: this.resolveItemLabel(item, row.itemId),
+        imageUrl: item?.imageUrl ?? null,
+      };
+    });
+    return { ...source, cpwIntel };
+  });
+
   private clientEventCounter = 0;
 
   // ── Actions ───────────────────────────────────────────────────────────────
@@ -357,10 +387,20 @@ export class VaultComponent implements OnInit {
   }
 
   onWearLogged(updated: ClothingItem): void {
-    this.allItems.update(list => list.map(i => i.id === updated.id ? updated : i));
-    this.selectedItem.set(updated);
+    const merged = this.mergeItemImageFromCache(updated);
+    this.allItems.update(list => list.map(i => i.id === merged.id ? merged : i));
+    this.selectedItem.set(merged);
     this.loadInsights();
     this.loadWearSuggestions();
+  }
+
+  private mergeItemImageFromCache(updated: ClothingItem): ClothingItem {
+    const cached = this.allItems().find(i => i.id === updated.id);
+    if (!cached) return updated;
+    return {
+      ...updated,
+      imageUrl: updated.imageUrl || cached.imageUrl,
+    };
   }
 
   acceptSuggestion(s: WearSuggestionItem): void {
@@ -397,6 +437,14 @@ export class VaultComponent implements OnInit {
       return `${prefix}-${Date.now()}-${this.clientEventCounter}-${random}`;
     }
     return `${prefix}-${Date.now()}-${this.clientEventCounter}`;
+  }
+
+  private resolveItemLabel(item: ClothingItem | undefined, itemId: string): string {
+    const brand = item?.brand?.trim();
+    const category = item?.category?.trim();
+    const labelParts = [brand, category].filter(Boolean);
+    if (labelParts.length > 0) return labelParts.join(' · ');
+    return itemId;
   }
 
   cpwBadgeFor(itemId: string): CpwIntelItem['badge'] {

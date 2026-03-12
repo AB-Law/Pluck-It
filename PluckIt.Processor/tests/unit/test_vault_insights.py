@@ -101,6 +101,55 @@ async def test_compute_vault_insights_computes_cpw_badges():
 
 
 @pytest.mark.unit
+async def test_compute_vault_insights_includes_wear_rate_trends():
+    from agents.vault_insights import compute_vault_insights
+
+    wardrobe_items = [
+        {
+            "id": "item-1",
+            "wearCount": 4,
+            "lastWornAt": "2026-03-01T00:00:00Z",
+            "dateAdded": "2024-12-01T00:00:00Z",
+            "price": {"amount": 1000, "originalCurrency": "USD"},
+            "colours": [{"name": "Blue", "hex": "#0000FF"}],
+            "tags": [],
+        }
+    ]
+    window_events = [
+        {"itemId": "item-1", "occurredAt": "2026-03-02T00:00:00Z"},
+        {"itemId": "item-1", "occurredAt": "2026-03-03T00:00:00Z"},
+        {"itemId": "item-1", "occurredAt": "2026-03-04T00:00:00Z"},
+    ]
+
+    wardrobe = AsyncMock()
+    wardrobe.query_items = _async_iter(wardrobe_items)
+
+    events = AsyncMock()
+    events.query_items = _async_iter(window_events)
+
+    profiles = AsyncMock()
+    profiles.read_item = AsyncMock(return_value={"currencyCode": "USD"})
+
+    with (
+        patch("agents.vault_insights.get_wardrobe_container", return_value=wardrobe),
+        patch("agents.vault_insights.get_wear_events_container", return_value=events),
+        patch("agents.vault_insights.get_user_profiles_container", return_value=profiles),
+    ):
+        result = await compute_vault_insights("test-user", target_cpw=100)
+
+    assert result["insufficientData"] is False
+    row = {x["itemId"]: x for x in result["cpwIntel"]}["item-1"]
+    assert row["wearRateTrend"] == "up"
+    assert row["recentWearRate"] is not None
+    assert row["historicalWearRate"] is not None
+    assert row["wearRateDelta"] == pytest.approx(row["recentWearRate"] - row["historicalWearRate"], rel=1e-2)
+    assert row["forecast"] is not None
+    assert row["forecast"]["wearRateTrend"] == "up"
+    assert row["forecast"]["recentWearRate"] == pytest.approx(row["recentWearRate"], rel=1e-2)
+    assert row["forecast"]["historicalWearRate"] == pytest.approx(row["historicalWearRate"], rel=1e-2)
+
+
+@pytest.mark.unit
 async def test_compute_vault_insights_falls_back_missing_original_currency_to_usd_then_converts():
     from agents.vault_insights import compute_vault_insights
 

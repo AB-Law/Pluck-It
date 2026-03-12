@@ -21,6 +21,11 @@ describe('VaultInsightsPanelComponent', () => {
         badge: 'unworn',
         breakEvenReached: false,
         breakEvenTargetCpw: 100,
+        itemLabel: 'White Oversized Tee',
+        recentWearRate: 0.75,
+        historicalWearRate: 0.35,
+        wearRateTrend: 'up',
+        imageUrl: 'https://example.com/tee.png',
         forecast: null,
       },
     ],
@@ -45,6 +50,13 @@ describe('VaultInsightsPanelComponent', () => {
     expect(root.textContent).toContain('You wear black 42% of the time.');
   });
 
+  it('displays the enriched item label and trend line', () => {
+    const root = fixture.nativeElement as HTMLElement;
+    const text = (root.textContent ?? '').replaceAll(/\s+/g, ' ');
+    expect(text).toContain('White Oversized Tee');
+    expect(text).toContain('Usage trend: accelerating usage (0.75 vs 0.35 wears/month).');
+  });
+
   it('shows a clear fallback when top color insight is missing', () => {
     fixture.componentRef.setInput('insights', {
       ...baseInsights,
@@ -65,6 +77,8 @@ describe('VaultInsightsPanelComponent', () => {
           badge: 'unworn',
           breakEvenReached: false,
           breakEvenTargetCpw: 100,
+          recentWearRate: null,
+          historicalWearRate: null,
           forecast: null,
         },
         {
@@ -72,6 +86,11 @@ describe('VaultInsightsPanelComponent', () => {
           badge: 'medium',
           breakEvenReached: false,
           breakEvenTargetCpw: 100,
+          itemLabel: 'Midnight Bomber',
+          recentWearRate: 0.1,
+          historicalWearRate: 0.7,
+          wearRateTrend: 'down',
+          wearRateDelta: -0.6,
           forecast: {
             targetCpw: 100,
             projectedMonth: '2035-12',
@@ -84,8 +103,19 @@ describe('VaultInsightsPanelComponent', () => {
 
     const root = fixture.nativeElement as HTMLElement;
     const text = (root.textContent ?? '').replaceAll(/\s+/g, ' ');
-    expect(text).toContain('upload-f1a8f93a · badge: unworn · Forecast unavailable.');
-    expect(text).toContain('upload-c31ae102 · badge: medium · At current usage, this item can reach 100 CPW by 2035-12.');
+    expect(text).toContain('upload-f1a8f93a');
+    expect(text).toContain('Forecast unavailable.');
+    expect(text).toContain('Usage trend: Trend unavailable.');
+    expect(text).toContain('Midnight Bomber · badge: medium');
+    expect(text).toContain('Usage trend: cooling usage (0.10 vs 0.70 wears/month).');
+    expect(text).toContain('At current usage, this item can reach 100 CPW by 2035-12 with 120 more wears.');
+  });
+
+  it('renders cpw forecast item image when image url is available', () => {
+    fixture.detectChanges();
+    const img = fixture.nativeElement.querySelector('img');
+    expect(img).toBeTruthy();
+    expect(img.getAttribute('src')).toBe('https://example.com/tee.png');
   });
 
   it('renders insufficient data message when insights are missing', () => {

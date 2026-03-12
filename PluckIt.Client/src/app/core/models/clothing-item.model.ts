@@ -77,6 +77,7 @@ export interface WearSuggestionItem {
   message: string;
   activityAt: string;
   expiresAt?: string | null;
+  imageUrl?: string | null;
 }
 
 export interface WearSuggestionsResponse {

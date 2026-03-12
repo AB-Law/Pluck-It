@@ -796,7 +796,8 @@ private static WardrobeFunctions CreateSut(
         var item = MakeItem("sty-1", wearCount: 0);
         var repo = new InMemoryWardrobeRepository().WithItems(item);
         var activityRepo = new InMemoryStylingActivityRepository();
-        var sut = CreateSut(repo: repo, stylingActivityRepo: activityRepo);
+        var sas = new FakeBlobSasService();
+        var sut = CreateSut(repo: repo, stylingActivityRepo: activityRepo, sas: sas);
 
         var body = JsonSerializer.Serialize(new StylingActivityRequest
         {
@@ -822,6 +823,8 @@ private static WardrobeFunctions CreateSut(
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
         suggestions.Suggestions.Count.ShouldBe(1);
         suggestions.Suggestions[0].ItemId.ShouldBe("sty-1");
+        suggestions.Suggestions[0].ImageUrl.ShouldBe($"{item.ImageUrl}?sas=fake");
+        sas.GenerateSasUrlCallCount.ShouldBe(1);
     }
 
     // ── SaveItem ─────────────────────────────────────────────────────────────

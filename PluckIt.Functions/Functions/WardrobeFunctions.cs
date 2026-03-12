@@ -452,6 +452,7 @@ public class WardrobeFunctions(
                     : activity.SuggestionMessage!,
                 ActivityAt = activity.OccurredAt,
                 ExpiresAt = activity.ExpiresAt,
+                ImageUrl = sasService.GenerateSasUrl(item.ImageUrl),
             });
         }
 
