@@ -12,7 +12,12 @@ describe('DashboardComponent', () => {
   let fixture: ComponentFixture<DashboardComponent>;
   let wardrobeService: { [key: string]: ReturnType<typeof vi.fn> };
   let authService: { logout: ReturnType<typeof vi.fn>; user: ReturnType<typeof vi.fn> };
-  let router: { navigate: ReturnType<typeof vi.fn> };
+  let router: {
+    navigate: ReturnType<typeof vi.fn>;
+    createUrlTree: ReturnType<typeof vi.fn>;
+    serializeUrl: ReturnType<typeof vi.fn>;
+    isActive: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(async () => {
     authService = {
@@ -26,7 +31,14 @@ describe('DashboardComponent', () => {
       delete: vi.fn().mockReturnValue(of({})),
       recordStylingActivity: vi.fn().mockReturnValue(of({})),
     };
-    router = { navigate: vi.fn() };
+    router = {
+      navigate: vi.fn(),
+      createUrlTree: vi.fn((commands: unknown) => ({
+        toString: () => (typeof commands === 'string' ? commands : `/${(commands as unknown[]).join('/')}`),
+      })),
+      serializeUrl: vi.fn((tree: { toString: () => string }) => tree.toString()),
+      isActive: vi.fn(() => false),
+    };
 
     await TestBed.configureTestingModule({
       imports: [DashboardComponent],

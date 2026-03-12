@@ -4,6 +4,7 @@ import { DiscoverService } from '../../core/services/discover.service';
 import { ScrapedItem } from '../../core/models/scraped-item.model';
 import { Observable, of, throwError } from 'rxjs';
 import { By } from '@angular/platform-browser';
+import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
 
 describe('DiscoverComponent', () => {
   let component: DiscoverComponent;
@@ -16,6 +17,16 @@ describe('DiscoverComponent', () => {
     sendFeedback: ReturnType<typeof vi.fn>;
     suggestSource: ReturnType<typeof vi.fn>;
     unsubscribe: ReturnType<typeof vi.fn>;
+  };
+  let router: {
+    navigate: ReturnType<typeof vi.fn>;
+    createUrlTree: ReturnType<typeof vi.fn>;
+    serializeUrl: ReturnType<typeof vi.fn>;
+    isActive: ReturnType<typeof vi.fn>;
+  };
+  const route = {
+    snapshot: { queryParamMap: convertToParamMap({}) },
+    queryParamMap: of(convertToParamMap({})),
   };
 
   const SOURCES = [
@@ -57,11 +68,21 @@ describe('DiscoverComponent', () => {
       suggestSource: vi.fn().mockReturnValue(of({})),
       unsubscribe: vi.fn().mockReturnValue(of({})),
     };
+    router = {
+      navigate: vi.fn(),
+      createUrlTree: vi.fn((commands: unknown) => ({
+        toString: () => (typeof commands === 'string' ? commands : `/${(commands as unknown[]).join('/')}`),
+      })),
+      serializeUrl: vi.fn((tree: { toString: () => string }) => tree.toString()),
+      isActive: vi.fn(() => false),
+    };
 
     await TestBed.configureTestingModule({
       imports: [DiscoverComponent],
       providers: [
         { provide: DiscoverService, useValue: discoverService },
+        { provide: Router, useValue: router },
+        { provide: ActivatedRoute, useValue: route },
       ],
     }).compileComponents();
     fixture = TestBed.createComponent(DiscoverComponent);
@@ -317,15 +338,22 @@ describe('DiscoverComponent', () => {
   });
 
   it('drives top controls and source sidebar through template events', () => {
-    const searchInput = fixture.debugElement.query(By.css('input[placeholder=\"Search styles, tags…\"]'));
-    searchInput.triggerEventHandler('ngModelChange', 'soft');
+    const searchInput = fixture.debugElement.query(By.css('input[placeholder="Search styles, tags…"]'));
+    (searchInput.nativeElement as HTMLInputElement).value = 'soft';
+    searchInput.nativeElement.dispatchEvent(new Event('input'));
     fixture.detectChanges();
-    expect((component as any).searchQuery).toBe('soft');
+    expect((component as any).searchQuery()).toBe('soft');
     expect((component as any).filteredItems()).toEqual([ITEM]);
 
-    const buttons = Array.from(fixture.nativeElement.querySelectorAll('header button')) as HTMLButtonElement[];
-    const recentButton = buttons.find(button => button.textContent?.trim() === 'Recent');
-    const allRange = buttons.find(button => button.textContent?.trim() === 'All');
+    const buttons = Array.from(
+      fixture.nativeElement.querySelectorAll('header button') as NodeListOf<HTMLButtonElement>,
+    );
+    const recentButton = buttons.find((button) =>
+      button.textContent?.trim() === 'Recent',
+    );
+    const allRange = buttons.find((button) =>
+      button.textContent?.trim() === 'All',
+    );
     recentButton?.click();
     allRange?.click();
     expect(discoverService.getFeed).toHaveBeenCalled();
@@ -352,8 +380,8 @@ describe('DiscoverComponent', () => {
     component.onCardClick({ ...ITEM, galleryImages: ['/1.jpg', '/2.jpg', '/3.jpg'] });
     fixture.detectChanges();
 
-    const modalElement = fixture.debugElement.query(By.css('div[style*=\"background: rgba(0,0,0,0.75)\"]'));
-    const likeButtons = fixture.debugElement.queryAll(By.css('[title=\"Not for me\"], [title=\"Love it\"]'));
+    const modalElement = fixture.debugElement.query(By.css('div[style*="background: rgba(0,0,0,0.75)"]'));
+    const likeButtons = fixture.debugElement.queryAll(By.css('[title="Not for me"], [title="Love it"]'));
     expect(likeButtons.length).toBeGreaterThan(0);
     const priorSendCalls = (discoverService.sendFeedback as any).mock.calls.length;
     likeButtons[0].triggerEventHandler('click');
@@ -367,42 +395,57 @@ describe('DiscoverComponent', () => {
     component.onCardClick({ ...ITEM, galleryImages: ['/1.jpg', '/2.jpg', '/3.jpg'] });
     fixture.detectChanges();
 
-    const nextButtons = (Array.from(fixture.nativeElement.querySelectorAll('button')) as HTMLButtonElement[]).filter(
+    const nextButtons = Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>).filter(
       button => button.title === 'Not for me' || button.title === 'Love it',
     );
     expect(nextButtons.length).toBeGreaterThanOrEqual(2);
     nextButtons[1].click();
     expect(discoverService.sendFeedback).toHaveBeenCalled();
 
-    const prevNext = (Array.from(fixture.nativeElement.querySelectorAll('button')) as HTMLButtonElement[]).filter(
+    const prevNext = Array.from(fixture.nativeElement.querySelectorAll('button') as NodeListOf<HTMLButtonElement>).filter(
       button => button.className.includes('absolute left-2') || button.className.includes('absolute right-2'),
     );
     expect(prevNext.length).toBe(2);
     prevNext[0].click();
     prevNext[1].click();
 
-    const dotIndicators = Array.from(fixture.nativeElement.querySelectorAll('div.absolute.bottom-2.left-0.right-0 button')) as HTMLButtonElement[];
+    const dotIndicators = Array.from(
+      fixture.nativeElement.querySelectorAll('div.absolute.bottom-2.left-0.right-0 button') as NodeListOf<HTMLButtonElement>,
+    );
     expect(dotIndicators.length).toBe(3);
     dotIndicators[2].click();
     expect((component as any).galleryIndex()).toBe(2);
 
     component.onCardClick({ ...ITEM, galleryImages: [] });
     fixture.detectChanges();
-    const singleModal = fixture.debugElement.query(By.css('div[style*=\"background: rgba(0,0,0,0.75)\"]'));
+    const singleModal = fixture.debugElement.query(By.css('div[style*="background: rgba(0,0,0,0.75)"]'));
     singleModal.triggerEventHandler('click', {});
     fixture.detectChanges();
     expect((component as any).selectedItem()).toBeNull();
   });
 
   it('switches sort and time controls through all button branches', () => {
-    const root = fixture.nativeElement as HTMLElement;
-    const buttons = Array.from(root.querySelectorAll('header button')) as HTMLButtonElement[];
-    const topButton = buttons.find(button => button.textContent?.trim() === 'Top');
-    const recentButton = buttons.find(button => button.textContent?.trim() === 'Recent');
-    const allTime = buttons.find(button => button.textContent?.trim() === 'All');
-    const oneHour = buttons.find(button => button.textContent?.trim() === '1h');
-    const oneDay = buttons.find(button => button.textContent?.trim() === '1d');
-    const sevenDays = buttons.find(button => button.textContent?.trim() === '7d');
+    const buttons = Array.from(fixture.nativeElement.querySelectorAll('header button')).filter(
+      (button): button is HTMLButtonElement => button instanceof HTMLButtonElement,
+    );
+    const topButton = buttons.find((button) =>
+      button.textContent?.trim() === 'Top',
+    );
+    const recentButton = buttons.find((button) =>
+      button.textContent?.trim() === 'Recent',
+    );
+    const allTime = buttons.find((button) =>
+      button.textContent?.trim() === 'All',
+    );
+    const oneHour = buttons.find((button) =>
+      button.textContent?.trim() === '1h',
+    );
+    const oneDay = buttons.find((button) =>
+      button.textContent?.trim() === '1d',
+    );
+    const sevenDays = buttons.find((button) =>
+      button.textContent?.trim() === '7d',
+    );
 
     expect(topButton).toBeTruthy();
     expect(recentButton).toBeTruthy();

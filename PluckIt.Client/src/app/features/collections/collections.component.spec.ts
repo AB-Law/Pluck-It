@@ -12,7 +12,12 @@ import { ClothingItem } from '../../core/models/clothing-item.model';
 describe('CollectionsComponent', () => {
   let component: CollectionsComponent;
   let fixture: ComponentFixture<CollectionsComponent>;
-  let router: { navigate: ReturnType<typeof vi.fn> };
+  let router: {
+    navigate: ReturnType<typeof vi.fn>;
+    createUrlTree: ReturnType<typeof vi.fn>;
+    serializeUrl: ReturnType<typeof vi.fn>;
+    isActive: ReturnType<typeof vi.fn>;
+  };
   let authUser: ReturnType<typeof signal>;
   let collectionService: {
     collections: ReturnType<typeof signal<Collection[]>>,
@@ -70,7 +75,14 @@ describe('CollectionsComponent', () => {
       snapshot: { queryParamMap: convertToParamMap({}) },
       queryParamMap: of(convertToParamMap({})),
     };
-    router = { navigate: vi.fn() };
+    router = {
+      navigate: vi.fn(),
+      createUrlTree: vi.fn((commands: unknown) => ({
+        toString: () => (typeof commands === 'string' ? commands : `/${(commands as unknown[]).join('/')}`),
+      })),
+      serializeUrl: vi.fn((tree: { toString: () => string }) => tree.toString()),
+      isActive: vi.fn(() => false),
+    };
     authUser = signal(null);
 
     await TestBed.configureTestingModule({
@@ -118,7 +130,7 @@ describe('CollectionsComponent', () => {
   it('copies share link with optimistic label updates', async () => {
     vi.useFakeTimers();
     const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(window.navigator, 'clipboard', {
+    Object.defineProperty(globalThis.navigator, 'clipboard', {
       value: { writeText },
       configurable: true,
     });
@@ -131,7 +143,7 @@ describe('CollectionsComponent', () => {
   });
 
   it('prevents destructive actions unless confirmed and removes items when removed from collection', () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    vi.spyOn(globalThis, 'confirm').mockReturnValue(false);
     component.deleteCollection(COLLECTION);
     expect(collectionService.delete).not.toHaveBeenCalled();
 
@@ -196,7 +208,7 @@ describe('CollectionsComponent', () => {
 
   it('confirms destructive operations and clears active collection on leave/delete', () => {
     component.selectCollection(COLLECTION);
-    const confirmSpy = vi.spyOn(window, 'confirm');
+    const confirmSpy = vi.spyOn(globalThis, 'confirm');
     confirmSpy.mockReturnValue(false);
     component.deleteCollection(COLLECTION);
     component.leaveCollection(COLLECTION);
