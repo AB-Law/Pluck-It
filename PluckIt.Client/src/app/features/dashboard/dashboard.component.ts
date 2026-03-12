@@ -1,4 +1,4 @@
-import { Component, ElementRef, HostListener, OnDestroy, OnInit, effect, signal, ViewChild, inject } from '@angular/core';
+import { Component, DestroyRef, ElementRef, HostListener, OnDestroy, OnInit, effect, signal, ViewChild, inject } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 import { UserProfileService } from '../../core/services/user-profile.service';
@@ -9,6 +9,7 @@ import { ProfilePanelComponent } from '../profile/profile-panel.component';
 import { DigestPanelComponent } from '../digest/digest-panel.component';
 import { AppHeaderComponent } from '../../shared/app-header.component';
 import { MobileNavState } from '../../shared/layout/mobile-nav.state';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 @Component({
   selector: 'app-dashboard',
@@ -56,9 +57,13 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
           class="hidden lg:flex w-96 shrink-0 border-l border-border-subtle flex-col relative"
           [class.!flex]="stylistOpen()"
           [class.fixed]="stylistOpen()"
-          [class.inset-y-0]="stylistOpen()"
-          [class.right-0]="stylistOpen()"
-          [class.z-50]="stylistOpen()"
+          [class.inset-y-0]="stylistOpen() && !isMobile()"
+          [class.right-0]="stylistOpen() && !isMobile()"
+          [class.left-0]="stylistOpen() && isMobile()"
+          [class.top-0]="stylistOpen() && isMobile()"
+          [class.bottom-14]="stylistOpen() && isMobile()"
+          [class.z-50]="stylistOpen() && !isMobile()"
+          [class.z-30]="stylistOpen() && isMobile()"
           [class.w-full]="stylistOpen()"
           [class.sm:w-96]="stylistOpen()"
           [class.ring-2]="dragOver()"
@@ -110,6 +115,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   protected readonly dragOver = signal(false);
   protected readonly isMobile = signal(false);
   protected readonly mobileNavState = inject(MobileNavState);
+  private readonly destroyRef = inject(DestroyRef);
 
   constructor(
     protected readonly auth: AuthService,
@@ -137,17 +143,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     // Pre-load the user profile so the review modal currency/size system is available immediately
     this.profileService.load().subscribe();
-    const launchPanel = this.route.snapshot.queryParamMap.get('mobilePanel');
-    if (launchPanel === 'stylist') {
-      this.openStylist();
-      this.router.navigate([], {
-        relativeTo: this.route,
-        queryParams: { mobilePanel: null },
-        queryParamsHandling: 'merge',
-        replaceUrl: true,
-      });
-    }
     this.updateViewportMode();
+
+    this.route.queryParamMap
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(params => this.applyMobilePanelCommand(params.get('mobilePanel')));
   }
 
   @HostListener('window:resize')
@@ -207,6 +207,28 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   protected openStylist(): void {
     this.stylistOpen.set(true);
+  }
+
+  private applyMobilePanelCommand(panel: string | null): void {
+    if (panel === 'stylist') {
+      this.openStylist();
+      this.clearMobilePanelQuery();
+      return;
+    }
+
+    if (panel === 'wardrobe') {
+      this.stylistOpen.set(false);
+      this.clearMobilePanelQuery();
+    }
+  }
+
+  private clearMobilePanelQuery(): void {
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { mobilePanel: null },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
   }
 
   toggleItemSelection(id: string): void {

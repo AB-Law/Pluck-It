@@ -17,6 +17,9 @@ import { MobileNavState } from './mobile-nav.state';
             routerLink="/"
             routerLinkActive="text-primary"
             [routerLinkActiveOptions]="{ exact: true }"
+            [queryParams]="{ mobilePanel: 'wardrobe' }"
+            queryParamsHandling="merge"
+            (click)="navState.closePanel()"
             class="touch-target mx-auto flex h-14 min-h-0 w-full flex-col items-center justify-center gap-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-300 leading-none text-center transition-colors"
           >
             <span class="material-symbols-outlined inline-flex h-5 w-5 items-center justify-center" style="font-size:20px">checkroom</span>
@@ -85,7 +88,7 @@ import { MobileNavState } from './mobile-nav.state';
   `,
 })
 export class MobileBottomNavComponent {
-  private readonly navState = inject(MobileNavState);
+  protected readonly navState = inject(MobileNavState);
   private readonly router = inject(Router);
 
   protected goToStylist(): void {

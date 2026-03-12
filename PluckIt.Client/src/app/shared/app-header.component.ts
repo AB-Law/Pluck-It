@@ -215,6 +215,8 @@ export class AppHeaderComponent {
 
   @Output() searchValueChange = new EventEmitter<string>();
   @Output() uploadRequested = new EventEmitter<void>();
+  /** Backward-compatible event alias for older lowercase templates. */
+  @Output('uploadrequest') readonly uploadrequest = this.uploadRequested;
   @Output() digestRequested = new EventEmitter<void>();
   @Output() notificationsRequested = new EventEmitter<void>();
   @Output() settingsRequested = new EventEmitter<void>();

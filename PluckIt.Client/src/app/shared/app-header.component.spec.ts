@@ -99,8 +99,12 @@ describe('AppHeaderComponent', () => {
   it('emits action outputs for settings and notifications', () => {
     const notificationsSpy = vi.fn();
     const settingsSpy = vi.fn();
+    const uploadSpy = vi.fn();
+    const uploadLegacySpy = vi.fn();
     component.notificationsRequested.subscribe(notificationsSpy);
     component.settingsRequested.subscribe(settingsSpy);
+    component.uploadRequested.subscribe(uploadSpy);
+    component.uploadrequest.subscribe(uploadLegacySpy);
 
     fixture.componentRef.setInput('section', 'dashboard');
     fixture.componentRef.setInput('showUpload', true);
@@ -108,6 +112,7 @@ describe('AppHeaderComponent', () => {
     fixture.componentRef.setInput('showSearch', false);
     fixture.detectChanges();
 
+    const uploadButton = fixture.nativeElement.querySelector('button[aria-label="Upload item"]') as HTMLButtonElement;
     const notificationsButton = fixture.nativeElement.querySelector(
       'button[aria-label="Open notifications"]',
     ) as HTMLButtonElement;
@@ -115,9 +120,12 @@ describe('AppHeaderComponent', () => {
       'button[aria-label="Open settings"]',
     ) as HTMLButtonElement;
 
+    uploadButton?.click();
     notificationsButton?.click();
     settingsButton?.click();
 
+    expect(uploadSpy).toHaveBeenCalledTimes(1);
+    expect(uploadLegacySpy).toHaveBeenCalledTimes(1);
     expect(notificationsSpy).toHaveBeenCalledTimes(1);
     expect(settingsSpy).toHaveBeenCalledTimes(1);
   });
