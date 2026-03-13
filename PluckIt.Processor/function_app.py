@@ -1171,6 +1171,33 @@ async def process_image(request: Request):
 
 # ── Chat endpoint (SSE streaming) ─────────────────────────────────────────────
 
+class MobileTokenExchangeRequest(BaseModel):
+    id_token: str | None = None
+    token: str | None = None
+
+
+@fastapi_app.post("/api/auth/mobile-token", responses={
+    200: {"description": "Google ID token accepted and exchanged for API bearer token."},
+    400: {"description": "Invalid request body or missing id_token."},
+    401: {"description": "Authentication failed."},
+})
+async def mobile_token_exchange(body: MobileTokenExchangeRequest):
+    raw_token = body.id_token or body.token
+    if not raw_token or not raw_token.strip():
+        raise HTTPException(status_code=400, detail="Missing required field: id_token.")
+
+    id_token = raw_token.strip()
+    user_id = await asyncio.to_thread(_verify_google_token, id_token)
+    return {
+        "access_token": id_token,
+        "token": id_token,
+        "session_token": id_token,
+        "app_token": id_token,
+        "id_token": id_token,
+        "user_id": user_id,
+    }
+
+
 class ChatRequest(BaseModel):
     message: str
     recentMessages: list[dict] = []
