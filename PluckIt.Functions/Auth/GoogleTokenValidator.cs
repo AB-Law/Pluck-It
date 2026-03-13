@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Linq;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
@@ -11,7 +13,7 @@ namespace PluckIt.Functions.Auth;
 /// </summary>
 public sealed class GoogleTokenValidator
 {
-    private readonly string _clientId;
+    private readonly HashSet<string> _allowedClientIds;
     private readonly Uri _jwksUri;
     private readonly string _googleIssuerHost;
     private readonly string _googleIssuerWithScheme;
@@ -23,11 +25,26 @@ public sealed class GoogleTokenValidator
 
     public GoogleTokenValidator(IConfiguration configuration, IHttpClientFactory httpClientFactory)
     {
-        _clientId = configuration["GoogleAuth:ClientId"]
+        var primaryClientId = configuration["GoogleAuth:ClientId"]
             ?? configuration["GoogleAuth__ClientId"]
             ?? configuration["GOOGLE_CLIENT_ID"]
-            ?? throw new InvalidOperationException(
-                "Required configuration key 'GoogleAuth:ClientId' (or 'GoogleAuth__ClientId', 'GOOGLE_CLIENT_ID') is not set.");
+            ?? string.Empty;
+        var rawAllowedClientIds = configuration["GoogleAuth:AllowedClientIds"]
+            ?? configuration["GoogleAuth__AllowedClientIds"]
+            ?? configuration["GOOGLE_ALLOWED_CLIENT_IDS"];
+        _allowedClientIds = ParseClientIds(rawAllowedClientIds);
+        if (!string.IsNullOrWhiteSpace(primaryClientId))
+        {
+            _allowedClientIds.Add(primaryClientId);
+        }
+
+        if (_allowedClientIds.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "Required configuration for Google token validation is missing. Set one of: "
+                + "'GoogleAuth:ClientId'/'GoogleAuth__ClientId'/'GOOGLE_CLIENT_ID' or "
+                + "'GoogleAuth:AllowedClientIds'/'GoogleAuth__AllowedClientIds'/'GOOGLE_ALLOWED_CLIENT_IDS'.");
+        }
         var jwksUrl = configuration["GoogleAuth:JwksUrl"]
             ?? configuration["GoogleAuth:JwksUri"]
             ?? configuration["GoogleAuth__JwksUrl"]
@@ -62,7 +79,7 @@ public sealed class GoogleTokenValidator
             var result = await handler.ValidateTokenAsync(idToken, new TokenValidationParameters
             {
                 ValidIssuers = [_googleIssuerHost, _googleIssuerWithScheme],
-                ValidAudience = _clientId,
+                ValidAudiences = _allowedClientIds,
                 IssuerSigningKeys = keySet.Keys,
                 ValidateLifetime = true,
                 RequireExpirationTime = true,
@@ -88,6 +105,18 @@ public sealed class GoogleTokenValidator
             issuerScheme = Uri.UriSchemeHttps;
 
         return new UriBuilder(issuerScheme, issuerHost).Uri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
+    }
+
+    private static HashSet<string> ParseClientIds(string? rawClientIds)
+    {
+        if (string.IsNullOrWhiteSpace(rawClientIds))
+            return [];
+
+        var parsed = rawClientIds
+            .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(id => !string.IsNullOrWhiteSpace(id));
+
+        return new HashSet<string>(parsed, StringComparer.Ordinal);
     }
 
     // ── JWKS caching ─────────────────────────────────────────────────────────

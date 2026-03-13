@@ -44,6 +44,7 @@ public sealed class GoogleTokenValidatorTests
 
     private static IConfiguration CreateValidatorConfig(
         string? clientId = "test-google-client-id",
+        string? allowedClientIds = null,
         string? jwksUrl = "https://www.googleapis.com/oauth2/v3/certs")
     {
         var dict = new Dictionary<string, string?>
@@ -52,6 +53,8 @@ public sealed class GoogleTokenValidatorTests
 
         if (clientId is not null)
             dict["GoogleAuth:ClientId"] = clientId;
+        if (allowedClientIds is not null)
+            dict["GoogleAuth:AllowedClientIds"] = allowedClientIds;
         if (jwksUrl is not null)
             dict["GoogleAuth:JwksUrl"] = jwksUrl;
 
@@ -76,6 +79,18 @@ public sealed class GoogleTokenValidatorTests
         Should.Throw<InvalidOperationException>(() =>
             new GoogleTokenValidator(
                 CreateValidatorConfig(clientId: null),
+                new FakeHttpClientFactory(new HttpClient(handler))));
+    }
+
+    [Fact]
+    public void Constructor_Uses_AllowedClientIds_When_PrimaryClientId_Is_Missing()
+    {
+        var handler = new CountingHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
+        Should.NotThrow(() =>
+            new GoogleTokenValidator(
+                CreateValidatorConfig(
+                    clientId: null,
+                    allowedClientIds: "web-client-id, ios-client-id"),
                 new FakeHttpClientFactory(new HttpClient(handler))));
     }
 

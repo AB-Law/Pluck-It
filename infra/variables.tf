@@ -42,6 +42,12 @@ variable "google_oauth_client_id" {
   type        = string
 }
 
+variable "google_oauth_allowed_client_ids" {
+  description = "Comma- or semicolon-separated Google OAuth 2.0 Client IDs allowed by token validators."
+  type        = string
+  default     = ""
+}
+
 variable "google_oauth_client_secret" {
   description = "Google OAuth 2.0 Client Secret. No longer required for in-process JWT validation; kept for backwards compatibility."
   type        = string

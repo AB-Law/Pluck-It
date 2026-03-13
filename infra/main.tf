@@ -787,8 +787,9 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
     "StorageQueue" = "DefaultEndpointsProtocol=https;AccountName=${azurerm_storage_account.sa_pluckit.name};AccountKey=${azurerm_storage_account.sa_pluckit.primary_access_key};EndpointSuffix=core.windows.net"
     # Google OAuth Client ID — used by GoogleTokenValidator to verify GIS ID tokens.
     # The client secret is NOT needed; verification uses Google's public JWKS only.
-    "GoogleAuth__ClientId"     = var.google_oauth_client_id
-    "FEATURE_WEAR_SUGGESTIONS" = "true"
+    "GoogleAuth__ClientId"         = var.google_oauth_client_id
+    "GoogleAuth__AllowedClientIds" = var.google_oauth_allowed_client_ids
+    "FEATURE_WEAR_SUGGESTIONS"     = "true"
   }
 }
 
@@ -905,6 +906,7 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
     "AZURE_OPENAI_EMBEDDING_DEPLOYMENT" = "text-embedding-3-small"
     # Google OAuth client ID — used to validate bearer tokens from Angular
     "GOOGLE_CLIENT_ID"          = var.google_oauth_client_id
+    "GOOGLE_ALLOWED_CLIENT_IDS" = var.google_oauth_allowed_client_ids
     "ADMIN_USER_IDS"            = var.admin_user_ids
     "CORS_ALLOWED_ORIGINS"      = join(",", var.cors_allowed_origins)
     "FEATURE_VAULT_INSIGHTS"    = "true"

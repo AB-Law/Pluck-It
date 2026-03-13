@@ -10,18 +10,46 @@ In local development (`AZURE_FUNCTIONS_ENVIRONMENT=Development`), if the env var
 This mirrors the behaviour of GoogleTokenValidator.cs in the .NET API.
 """
 
-import os
-import logging
 import asyncio
+import logging
+import os
 from typing import Optional
 
-from fastapi import Request, HTTPException, status
+from fastapi import HTTPException, Request, status
 
 logger = logging.getLogger(__name__)
 
 _IS_DEV = os.getenv("AZURE_FUNCTIONS_ENVIRONMENT", "").lower() == "development"
 _LOCAL_USER_ID = os.getenv("LOCAL_DEV_USER_ID", "dev-user-001")
 _GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+_GOOGLE_ALLOWED_CLIENT_IDS = os.getenv("GOOGLE_ALLOWED_CLIENT_IDS", "")
+
+
+def _parse_allowed_google_client_ids(raw: str) -> list[str]:
+    """Parse comma/semicolon separated Google client IDs into a deduplicated list."""
+    if not raw.strip():
+        return []
+
+    raw_values = raw.replace(";", ",").split(",")
+    seen: set[str] = set()
+    client_ids: list[str] = []
+
+    for value in raw_values:
+        client_id = value.strip()
+        if not client_id or client_id in seen:
+            continue
+        client_ids.append(client_id)
+        seen.add(client_id)
+
+    return client_ids
+
+
+_ALLOWED_GOOGLE_CLIENT_IDS: list[str] = _parse_allowed_google_client_ids(_GOOGLE_ALLOWED_CLIENT_IDS)
+if _GOOGLE_CLIENT_ID and _GOOGLE_CLIENT_ID not in _ALLOWED_GOOGLE_CLIENT_IDS:
+    _ALLOWED_GOOGLE_CLIENT_IDS.insert(0, _GOOGLE_CLIENT_ID)
+
+if not _ALLOWED_GOOGLE_CLIENT_IDS:
+    logger.warning("Google ID token verification has no configured client ids.")
 
 
 def _verify_google_token(token: str) -> str:
@@ -32,19 +60,32 @@ def _verify_google_token(token: str) -> str:
     from google.oauth2 import id_token
     from google.auth.transport import requests as google_requests
 
-    try:
-        idinfo = id_token.verify_oauth2_token(
-            token,
-            google_requests.Request(),
-            _GOOGLE_CLIENT_ID,
-        )
-        return idinfo["sub"]
-    except Exception as exc:
-        logger.warning("Token validation failed: %s", exc)
+    if not _ALLOWED_GOOGLE_CLIENT_IDS:
+        logger.error("Google ID token verification cannot proceed without configured client ids.")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired Google ID token.",
-        ) from exc
+            detail="Google OAuth client ids are not configured.",
+        )
+
+    request = google_requests.Request()
+    last_error: Optional[Exception] = None
+    for client_id in _ALLOWED_GOOGLE_CLIENT_IDS:
+        try:
+            idinfo = id_token.verify_oauth2_token(
+                token,
+                request,
+                client_id,
+            )
+            return idinfo["sub"]
+        except Exception as exc:  # pragma: no cover - external auth failure path
+            logger.warning("Token validation failed for client id %s: %s", client_id, exc)
+            last_error = exc
+
+    logger.warning("Token validation failed for all configured client ids: %s", last_error)
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or expired Google ID token.",
+    ) from last_error
 
 
 async def get_user_id(request: Request) -> str:
