@@ -10,6 +10,16 @@ describe('OfflineQueueService', () => {
     });
     service = TestBed.inject(OfflineQueueService);
   });
+  beforeEach(() => {
+    if (globalThis.localStorage) {
+      globalThis.localStorage.clear();
+    }
+  });
+
+  beforeEach(async () => {
+    await service.initialize();
+    service.clear();
+  });
 
   it('enqueues actions with id, type, payload, and timestamp', () => {
     const id = service.enqueue('wardrobe/upload', { file: 'shirt.jpg' }, 1700000000000);
@@ -53,6 +63,32 @@ describe('OfflineQueueService', () => {
     expect(service.drain()).toEqual([
       { id: '1', type: 'wardrobe/upload', payload: { fileName: 'shirt.jpg' }, timestamp: now },
     ]);
+  });
+
+  it('falls back to localStorage for non-upload actions', async () => {
+    const queueKey = 'pluckit_offline_queue_fallback_v1';
+    const supportsIndexedDb = vi.spyOn(OfflineQueueService.prototype as any, '_supportsIndexedDb').mockReturnValue(false);
+    const fallbackOnly = new OfflineQueueService();
+    await fallbackOnly.initialize();
+    fallbackOnly.enqueue('profile/save', { user: 'abc' }, 1700000000000);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(globalThis.localStorage?.getItem(queueKey)).not.toBeNull();
+    expect(fallbackOnly.drain()).toHaveLength(1);
+    supportsIndexedDb.mockRestore();
+  });
+
+  it('restores queue state from localStorage', async () => {
+    const now = 1700000000000;
+    globalThis.localStorage?.setItem('pluckit_offline_queue_fallback_v1', JSON.stringify([
+      { id: 'q1', type: 'profile/save', payload: { user: 'abc' }, timestamp: now },
+    ]));
+    const supportsIndexedDb = vi.spyOn(OfflineQueueService.prototype as any, '_supportsIndexedDb').mockReturnValue(false);
+    const rehydrated = new OfflineQueueService();
+    await rehydrated.initialize();
+    expect(rehydrated.drain()).toEqual([
+      { id: 'q1', type: 'profile/save', payload: { user: 'abc' }, timestamp: now },
+    ]);
+    supportsIndexedDb.mockRestore();
   });
 
   it('removes offline upload actions by id', () => {
