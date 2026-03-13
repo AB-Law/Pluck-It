@@ -139,10 +139,6 @@ export class OfflineQueueService {
   }
 
   private _requiresIndexedDb(action: OfflineQueuedAction): boolean {
-    if (action.type === 'wardrobe/upload') {
-      return true;
-    }
-
     if (!action.payload || typeof action.payload !== 'object') {
       return false;
     }
