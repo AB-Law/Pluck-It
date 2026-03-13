@@ -497,10 +497,7 @@ export class WardrobeComponent implements OnInit {
   /** Handles multi-file selection from the upload component. */
   onFileSelected(files: File[]): void {
     if (!this.networkService.isCurrentlyOnline()) {
-      for (const file of files) {
-        this.offlineQueue.enqueue('wardrobe/upload', this._buildOfflineUploadPayload(file));
-      }
-      this.uploadError.set(showOfflineBlockMessage('Wardrobe upload', 'This change was queued and will run when you reconnect.'));
+      void this._enqueueOfflineUploads(files);
       return;
     }
     this.uploadError.set(null);
@@ -516,14 +513,51 @@ export class WardrobeComponent implements OnInit {
   /**
    * Build an offline upload payload that keeps enough file content for replay.
    */
-  private _buildOfflineUploadPayload(file: File): OfflineUploadQueuePayload {
+  private async _buildOfflineUploadPayload(file: File): Promise<OfflineUploadQueuePayload> {
     return {
       fileName: file.name,
       fileType: file.type,
       fileSize: file.size,
-      blob: file,
+      fileData: await this._fileToBase64(file),
       retryCount: 0,
     };
+  }
+
+  /**
+   * Serialize a File to a data URL for durable queue persistence.
+   */
+  private async _fileToBase64(file: File): Promise<string> {
+    const arrayBuffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    let binary = '';
+    for (const byte of bytes) {
+      binary += String.fromCodePoint(byte);
+    }
+    return `data:${file.type || 'application/octet-stream'};base64,${btoa(binary)}`;
+  }
+
+  /**
+   * Prepare one or more file payloads to queue while offline.
+   */
+  private async _enqueueOfflineUploads(files: File[]): Promise<void> {
+    const entries = await Promise.all(
+      files.map((file) =>
+        this._buildOfflineUploadPayload(file).catch(() => null),
+      ),
+    );
+    const validEntries = entries.filter(
+      (payload): payload is OfflineUploadQueuePayload => payload !== null,
+    );
+
+    for (const payload of validEntries) {
+      this.offlineQueue.enqueue('wardrobe/upload', payload);
+    }
+
+    if (validEntries.length === files.length) {
+      this.uploadError.set(showOfflineBlockMessage('Wardrobe upload', 'This change was queued and will run when you reconnect.'));
+    } else {
+      this.uploadError.set(showOfflineBlockMessage('Wardrobe upload', 'Some files could not be queued for offline upload.'));
+    }
   }
 
   /**
@@ -535,59 +569,93 @@ export class WardrobeComponent implements OnInit {
     const actions = this.offlineQueue.drain();
     if (actions.length === 0) return;
 
-    const nextQueuedActions: OfflineQueuedAction[] = [];
-    const offlineUploads: UploadQueueItem[] = [];
-    const summary: string[] = [];
-    let malformedCount = 0;
-    let retryCount = 0;
-    let droppedCount = 0;
-
-    for (const action of actions) {
-      if (action.type !== 'wardrobe/upload') {
-        nextQueuedActions.push(action);
-        continue;
-      }
-
-      const payload = this._getOfflinePayload(action);
-      if (!payload) {
-        malformedCount += 1;
-        summary.push('Malformed offline upload payload skipped.');
-        continue;
-      }
-
-      const item = this._hydrateOfflineUploadItem(payload);
-      if (!item) {
-        const retryAction = this._retryOrDropOfflineUploadAction(action, payload);
-        if (retryAction) {
-          nextQueuedActions.push(retryAction);
-          retryCount += 1;
-          summary.push('Offline upload item queued for retry.');
-          continue;
-        }
-        droppedCount += 1;
-        summary.push('Offline upload item dropped after retry limit.');
-        continue;
-      }
-
-      offlineUploads.push(item);
-    }
+    const { nextQueuedActions, offlineUploads, malformedCount, retryCount, droppedCount } =
+      actions.reduce(this._accumulateOfflineUploadAction.bind(this), this._initialOfflineUploadDrainState());
 
     this.offlineQueue.persistOfflineUploads(nextQueuedActions);
+    this._setOfflineQueueSummary(malformedCount, retryCount, droppedCount);
+    this._appendOfflineUploadsToQueue(offlineUploads);
+  }
 
-    if (summary.length > 0) {
-      const counts = [
-        malformedCount ? `${malformedCount} malformed item(s)` : null,
-        retryCount ? `${retryCount} retriable item(s)` : null,
-        droppedCount ? `${droppedCount} dropped item(s)` : null,
-      ]
-        .filter((item): item is string => item !== null)
-        .join(', ');
+  private _initialOfflineUploadDrainState(): {
+    nextQueuedActions: OfflineQueuedAction[];
+    offlineUploads: UploadQueueItem[];
+    malformedCount: number;
+    retryCount: number;
+    droppedCount: number;
+  } {
+    return {
+      nextQueuedActions: [],
+      offlineUploads: [],
+      malformedCount: 0,
+      retryCount: 0,
+      droppedCount: 0,
+    };
+  }
 
-      this.uploadError.set(`Offline upload queue issues: ${counts}`);
+  private _accumulateOfflineUploadAction(
+    state: {
+      nextQueuedActions: OfflineQueuedAction[];
+      offlineUploads: UploadQueueItem[];
+      malformedCount: number;
+      retryCount: number;
+      droppedCount: number;
+    },
+    action: OfflineQueuedAction,
+  ): {
+    nextQueuedActions: OfflineQueuedAction[];
+    offlineUploads: UploadQueueItem[];
+    malformedCount: number;
+    retryCount: number;
+    droppedCount: number;
+  } {
+    if (action.type !== 'wardrobe/upload') {
+      state.nextQueuedActions.push(action);
+      return state;
     }
 
-    if (offlineUploads.length === 0) return;
+    const payload = this._getOfflinePayload(action);
+    if (!payload) {
+      state.malformedCount += 1;
+      return state;
+    }
 
+    const item = this._hydrateOfflineUploadItem(payload);
+    if (!item) {
+      const retryAction = this._retryOrDropOfflineUploadAction(action, payload);
+      if (retryAction) {
+        state.nextQueuedActions.push(retryAction);
+        state.retryCount += 1;
+        return state;
+      }
+      state.droppedCount += 1;
+      return state;
+    }
+
+    state.offlineUploads.push(item);
+    return state;
+  }
+
+  private _setOfflineQueueSummary(
+    malformedCount: number,
+    retryCount: number,
+    droppedCount: number,
+  ): void {
+    const counts = [
+      malformedCount ? `${malformedCount} malformed item(s)` : null,
+      retryCount ? `${retryCount} retriable item(s)` : null,
+      droppedCount ? `${droppedCount} dropped item(s)` : null,
+    ]
+      .filter((item): item is string => item !== null)
+      .join(', ');
+
+    if (counts.length > 0) {
+      this.uploadError.set(`Offline upload queue issues: ${counts}`);
+    }
+  }
+
+  private _appendOfflineUploadsToQueue(offlineUploads: UploadQueueItem[]): void {
+    if (offlineUploads.length === 0) return;
     this.uploadQueue.update(curr => [...curr, ...offlineUploads]);
     this._dispatchPendingUploads();
   }
@@ -662,7 +730,7 @@ export class WardrobeComponent implements OnInit {
       const decoded = atob(base64);
       const bytes = new Uint8Array(decoded.length);
       for (let i = 0; i < decoded.length; i += 1) {
-        bytes[i] = decoded.charCodeAt(i);
+        bytes[i] = decoded.codePointAt(i) ?? 0;
       }
       return new File([bytes], payload.fileName, { type: payload.fileType });
     } catch {

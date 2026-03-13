@@ -94,15 +94,16 @@ describe('WardrobeComponent', () => {
     expect(component.serverOnlyDrafts()).toHaveLength(1);
   });
 
-  it('queues uploads and shows a warning when offline', () => {
+  it('queues uploads and shows a warning when offline', async () => {
     vi.spyOn(component['networkService'], 'isCurrentlyOnline').mockReturnValue(false);
     const enqueueSpy = vi.spyOn(component['offlineQueue'], 'enqueue');
     component.uploadError.set(null);
     component.onFileSelected([new File(['a'], 'shirt.jpg', { type: 'image/jpeg' })]);
+    await new Promise(resolve => setTimeout(resolve, 0));
 
     expect(enqueueSpy).toHaveBeenCalledWith(
       'wardrobe/upload',
-      expect.objectContaining({ fileName: 'shirt.jpg', fileType: 'image/jpeg' }),
+      expect.objectContaining({ fileName: 'shirt.jpg', fileType: 'image/jpeg', fileSize: 1, fileData: expect.any(String) }),
     );
     expect(component.uploadError()).toContain('queued');
     expect(component.uploadQueue()).toHaveLength(0);
