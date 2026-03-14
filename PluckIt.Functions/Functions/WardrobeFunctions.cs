@@ -982,7 +982,7 @@ public class WardrobeFunctions(
 /// AOT-safe multipart/form-data reader. Extracts the first file field's bytes
 /// without using System.Web or ASP.NET Core reflection-based parsers.
 /// </summary>
-internal static class MultipartReader
+internal static partial class MultipartReader
 {
     private const string OctetStream = "application/octet-stream";
 
@@ -999,60 +999,22 @@ internal static class MultipartReader
         var boundary = ExtractBoundary(contentType);
         if (boundary is null) return ([], OctetStream, []);
 
-        using var ms = new MemoryStream();
-        await body.CopyToAsync(ms);
-        var data = ms.ToArray();
+        var data = await ReadBodyAsync(body);
+        if (data.Length == 0) return ([], OctetStream, []);
 
         var delimiter = Encoding.UTF8.GetBytes("--" + boundary);
-        var crlfcrlf = "\r\n\r\n"u8.ToArray();
+        var closingDelimiter = Encoding.UTF8.GetBytes("\r\n--" + boundary);
         var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         byte[] fileBytes = [];
-        string fileMediaType = OctetStream;
-        int searchFrom = 0;
+        var fileMediaType = OctetStream;
+        var searchFrom = 0;
 
-        while (true)
+        while (TryReadNextPart(data, delimiter, closingDelimiter, ref searchFrom, out var contentStart, out var contentEnd, out var headersText))
         {
-            var partStart = IndexOf(data, delimiter, searchFrom);
-            if (partStart < 0) break;
-
-            var headerStart = partStart + delimiter.Length + 2;
-            if (headerStart >= data.Length) break;
-
-            // Check for closing delimiter "--"
-            if (headerStart + 1 < data.Length &&
-                data[headerStart] == '-' && data[headerStart + 1] == '-') break;
-
-            var contentStart = IndexOf(data, crlfcrlf, headerStart);
-            if (contentStart < 0) break;
-            contentStart += 4;
-
-            var headersText = Encoding.UTF8.GetString(data, headerStart, contentStart - headerStart - 4);
-            var closingDelimiter = Encoding.UTF8.GetBytes("\r\n--" + boundary);
-            var contentEnd = IndexOf(data, closingDelimiter, contentStart);
-            if (contentEnd < 0) contentEnd = data.Length;
-
-            // Parse headers
-            string? disposition = null, partMediaType = null, fieldName = null;
-            bool isFile = false;
-            foreach (var line in headersText.Split('\n'))
-            {
-                var trimmed = line.Trim();
-                if (trimmed.StartsWith("Content-Disposition:", StringComparison.OrdinalIgnoreCase))
-                {
-                    disposition = trimmed;
-                    isFile = trimmed.Contains("filename=", StringComparison.OrdinalIgnoreCase);
-                    var nameMatch = MultipartPatterns.NamePattern().Match(trimmed);
-                    if (nameMatch.Success) fieldName = nameMatch.Groups[1].Value;
-                }
-                else if (trimmed.StartsWith("Content-Type:", StringComparison.OrdinalIgnoreCase))
-                {
-                    partMediaType = trimmed[13..].Trim();
-                }
-            }
+            ParsePartHeaders(headersText, out var isFile, out var fieldName, out var partMediaType);
 
             var partBytes = data[contentStart..contentEnd];
-
             if (isFile && fileBytes.Length == 0)
             {
                 fileBytes = partBytes;
@@ -1062,11 +1024,83 @@ internal static class MultipartReader
             {
                 fields[fieldName] = Encoding.UTF8.GetString(partBytes).Trim();
             }
-
-            searchFrom = contentEnd + 2;
         }
 
         return (fileBytes, fileMediaType, fields);
+    }
+
+    private static async Task<byte[]> ReadBodyAsync(Stream body)
+    {
+        using var ms = new MemoryStream();
+        await body.CopyToAsync(ms);
+        return ms.ToArray();
+    }
+
+    private static bool TryReadNextPart(
+        byte[] data,
+        byte[] delimiter,
+        byte[] closingDelimiter,
+        ref int searchFrom,
+        out int contentStart,
+        out int contentEnd,
+        out string headersText)
+    {
+        contentStart = 0;
+        contentEnd = 0;
+        headersText = string.Empty;
+
+        var partStart = IndexOf(data, delimiter, searchFrom);
+        if (partStart < 0) return false;
+
+        var headerStart = partStart + delimiter.Length + 2;
+        if (headerStart >= data.Length || IsFinalBoundary(data, headerStart)) return false;
+
+        var headersEnd = IndexOf(data, "\r\n\r\n"u8.ToArray(), headerStart);
+        if (headersEnd < 0) return false;
+
+        headersText = Encoding.UTF8.GetString(data, headerStart, headersEnd - headerStart - 4);
+        contentStart = headersEnd + 4;
+
+        contentEnd = IndexOf(data, closingDelimiter, contentStart);
+        if (contentEnd < 0) contentEnd = data.Length;
+
+        searchFrom = contentEnd + 2;
+        return true;
+    }
+
+    private static bool IsFinalBoundary(byte[] data, int headerStart)
+        => headerStart + 1 < data.Length
+            && data[headerStart] == '-'
+            && data[headerStart + 1] == '-';
+
+    private static void ParsePartHeaders(
+        string headersText,
+        out bool isFile,
+        out string? fieldName,
+        out string? partMediaType)
+    {
+        isFile = false;
+        fieldName = null;
+        partMediaType = null;
+
+        foreach (var line in headersText.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.Length == 0) continue;
+
+            if (trimmed.StartsWith("Content-Disposition:", StringComparison.OrdinalIgnoreCase))
+            {
+                isFile = trimmed.Contains("filename=", StringComparison.OrdinalIgnoreCase);
+
+                var nameMatch = MultipartPatterns.NamePattern().Match(trimmed);
+                if (nameMatch.Success) fieldName = nameMatch.Groups[1].Value;
+                continue;
+            }
+
+            if (!trimmed.StartsWith("Content-Type:", StringComparison.OrdinalIgnoreCase)) continue;
+
+            partMediaType = trimmed[13..].Trim();
+        }
     }
 
     internal static async Task<(byte[] Bytes, string MediaType)> ReadFirstFileAsync(Stream body, string contentType)

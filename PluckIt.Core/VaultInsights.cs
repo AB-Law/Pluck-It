@@ -66,7 +66,7 @@ public class CpwForecast
 }
 
 /// <summary>Normalized direction values for CPW wear-rate trend signals.</summary>
-[JsonConverter(typeof(JsonStringEnumConverter))]
+[JsonConverter(typeof(JsonStringEnumConverter<WearRateTrendType>))]
 public enum WearRateTrendType
 {
   Up,
