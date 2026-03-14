@@ -124,6 +124,14 @@ def get_vault_insights_cache_container():
     return _async_container("COSMOS_DB_VAULT_INSIGHTS_CACHE_CONTAINER", "VaultInsightsCache")
 
 
+def get_refresh_tokens_container():
+    return _async_container("COSMOS_DB_REFRESH_TOKENS_CONTAINER", "RefreshTokens")
+
+
+def get_refresh_tokens_container_sync():
+    return _sync_container("COSMOS_DB_REFRESH_TOKENS_CONTAINER", "RefreshTokens")
+
+
 def get_digest_feedback_container_sync():
     return _sync_container("COSMOS_DB_DIGEST_FEEDBACK_CONTAINER", "DigestFeedback")
 

@@ -15,6 +15,8 @@ import logging
 import os
 import base64
 import json
+import hashlib
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import HTTPException, Request, status
@@ -135,7 +137,53 @@ async def get_user_id(request: Request) -> str:
         token_audience or "unknown",
         token_prefix,
     )
+    user_id = await _get_user_id_from_session_token(token)
+    if user_id:
+        return user_id
+
     return await asyncio.to_thread(_verify_google_token, token)
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+async def _get_user_id_from_session_token(token: str) -> Optional[str]:
+    token_hash = _hash_token(token)
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    try:
+        from agents.db import get_refresh_tokens_container
+        container = get_refresh_tokens_container()
+    except Exception as exc:  # pragma: no cover - depends on local/runner packages
+        logger.warning("Session token lookup unavailable: %s", exc)
+        return None
+    query = (
+        "SELECT c.userId, c.accessTokenExpiresAt "
+        "FROM c "
+        "WHERE c.accessTokenHash = @tokenHash "
+        "AND (NOT IS_DEFINED(c.revoked) OR c.revoked = false) "
+        "AND c.accessTokenExpiresAt >= @now"
+    )
+    parameters = [
+        {"name": "@tokenHash", "value": token_hash},
+        {"name": "@now", "value": now},
+    ]
+
+    try:
+        async for row in container.query_items(
+            query=query,
+            parameters=parameters,
+            enable_cross_partition_query=True,
+        ):
+            user_id = row.get("userId")
+            if isinstance(user_id, str) and user_id.strip():
+                return user_id.strip()
+    except Exception as exc:  # pragma: no cover - depends on Cosmos availability
+        logger.warning("Session token lookup failed: %s", exc)
+        return None
+
+    return None
 
 
 def _token_prefix(token: str, max_len: int = 20) -> str:

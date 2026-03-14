@@ -37,11 +37,24 @@ public class WardrobeFunctions(
     IImageJobQueue jobQueue,
     WardrobeFunctionsMutationDependencies mutationDependencies,
     WardrobeFunctionsAuthContext authContext,
+    RefreshSessionStore refreshSessionStore,
     ILogger<WardrobeFunctions> logger)
 {
+    public WardrobeFunctions(
+        IWardrobeRepository repo,
+        IBlobSasService sasService,
+        IImageJobQueue jobQueue,
+        WardrobeFunctionsMutationDependencies mutationDependencies,
+        WardrobeFunctionsAuthContext authContext,
+        ILogger<WardrobeFunctions> logger)
+        : this(repo, sasService, jobQueue, mutationDependencies, authContext, refreshSessionStore: null!, logger)
+    {
+    }
+
     private readonly IWearHistoryRepository wearHistoryRepo = mutationDependencies.WearHistoryRepository;
     private readonly IStylingActivityRepository stylingActivityRepo = mutationDependencies.StylingActivityRepository;
     private readonly IUserProfileRepository userProfileRepo = mutationDependencies.UserProfileRepository;
+    private readonly RefreshSessionStore? refreshSessionStore = refreshSessionStore;
 
     private const string ContentTypeHeader = "Content-Type";
     private const string JsonContentType = "application/json; charset=utf-8";
@@ -817,7 +830,9 @@ public class WardrobeFunctions(
     /// In production, validates the Google ID token from the Authorization: Bearer header.
     /// In local development, falls back to Local:DevUserId in configuration.
     /// </summary>
-    private async Task<(bool Authed, string? UserId)> TryGetUserIdAsync(HttpRequestData req)
+    private async Task<(bool Authed, string? UserId)> TryGetUserIdAsync(
+        HttpRequestData req,
+        CancellationToken cancellationToken = default)
     {
         var path = req.Url.PathAndQuery;
         if (req.Headers.TryGetValues("Authorization", out var authHeaders))
@@ -837,6 +852,23 @@ public class WardrobeFunctions(
                 var sub = await authContext.TokenValidator.ValidateAsync(token);
                 if (sub is not null)
                     return (true, sub);
+
+                var appSessionUserId = (string?)null;
+                if (refreshSessionStore is not null)
+                {
+                    try
+                    {
+                        appSessionUserId = await refreshSessionStore.ResolveUserIdFromAccessTokenAsync(token, cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning(
+                            ex,
+                            "WardrobeFunctions auth store lookup failed for provided access token.");
+                    }
+                }
+                if (!string.IsNullOrWhiteSpace(appSessionUserId))
+                    return (true, appSessionUserId);
 
                 logger.LogWarning(
                     "WardrobeFunctions auth failed: path={Path} aud={Audience} tokenPrefix={TokenPrefix}",
@@ -882,11 +914,16 @@ public class WardrobeFunctions(
     private static string TruncateTokenPrefix(string token)
     {
         const int maxPrefixLength = 20;
-        return string.IsNullOrEmpty(token)
-            ? "<empty>"
-            : token.Length <= maxPrefixLength
-                ? token
-                : $"{token[..maxPrefixLength]}...";
+        string tokenPrefix;
+
+        if (string.IsNullOrEmpty(token))
+            tokenPrefix = "<empty>";
+        else if (token.Length <= maxPrefixLength)
+            tokenPrefix = token;
+        else
+            tokenPrefix = $"{token[..maxPrefixLength]}...";
+
+        return tokenPrefix;
     }
 
     private async Task RefreshWardrobeFingerprintAsync(string userId, CancellationToken cancellationToken)
