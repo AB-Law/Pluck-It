@@ -861,7 +861,7 @@ public class WardrobeFunctions(
             return GetLocalDevUser();
         }
 
-        authedUserId = await ResolveUserIdFromAuthorizationTokenAsync(token, cancellationToken);
+        authedUserId = await ResolveUserIdFromAuthorizationTokenAsync(token);
         if (!string.IsNullOrWhiteSpace(authedUserId))
             return (true, authedUserId);
 
@@ -897,7 +897,7 @@ public class WardrobeFunctions(
         return string.IsNullOrEmpty(localDevUserId) ? (false, null) : (true, localDevUserId);
     }
 
-    private async Task<string?> ResolveUserIdFromAuthorizationTokenAsync(string token, CancellationToken cancellationToken)
+    private async Task<string?> ResolveUserIdFromAuthorizationTokenAsync(string token)
     {
         var sub = await authContext.TokenValidator.ValidateAsync(token);
         if (!string.IsNullOrWhiteSpace(sub))

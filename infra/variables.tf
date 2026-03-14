@@ -111,6 +111,12 @@ variable "grafana_cloud_processor_service_name" {
   default     = "pluckit-prod-processor-func"
 }
 
+variable "grafana_cloud_api_service_name" {
+  description = "Service name for the .NET API Function App in Grafana."
+  type        = string
+  default     = "pluckit-prod-api-func"
+}
+
 variable "langfuse_public_key" {
   description = "Langfuse public key for tracing and observability."
   type        = string

@@ -1,4 +1,5 @@
 using System;
+using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure;
@@ -6,20 +7,59 @@ using Azure.AI.OpenAI;
 using Azure.Storage.Queues;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Azure.Functions.Worker;
+using Microsoft.Azure.Functions.Worker.OpenTelemetry;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using PluckIt.Core;
 using PluckIt.Functions.Auth;
 using PluckIt.Functions.Functions;
 using PluckIt.Functions.Queue;
 using PluckIt.Functions.Serialization;
 using PluckIt.Infrastructure;
+using OpenTelemetry;
+using OpenTelemetry.Exporter;
+using OpenTelemetry.Logs;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+using PluckIt.Functions.Observability;
+
+const string OTelSignalTraces = "/v1/traces";
+const string OTelSignalMetrics = "/v1/metrics";
+const string OTelSignalLogs = "/v1/logs";
+const string OTelServiceNameDefault = "pluckit-api-func-local";
+string[] OTelSignalPaths = [OTelSignalTraces, OTelSignalMetrics, OTelSignalLogs];
 
 var host = new HostBuilder()
     .ConfigureFunctionsWebApplication()
+    .ConfigureLogging((ctx, logging) =>
+    {
+        if (!TryGetOpenTelemetryConfig(ctx.Configuration, out var config) || !config.IsLogsEnabled)
+        {
+            return;
+        }
+
+        logging.AddOpenTelemetry(log =>
+        {
+            log.IncludeFormattedMessage = true;
+            log.IncludeScopes = true;
+            log.AddOtlpExporter(otlpOptions =>
+            {
+                otlpOptions.Endpoint = new Uri(config.LogsEndpoint);
+                otlpOptions.Protocol = config.Protocol;
+                if (!string.IsNullOrWhiteSpace(config.Headers))
+                {
+                    otlpOptions.Headers = config.Headers;
+                }
+            });
+        });
+    })
     .ConfigureServices((ctx, services) =>
     {
         var config = ctx.Configuration;
+        ConfigureOpenTelemetry(config, services);
 
         // ── Google ID token validator (GIS auth) ────────────────────────────────
         // IHttpClientFactory is already registered by the AddHttpClient("processor") call below.
@@ -151,3 +191,183 @@ var host = new HostBuilder()
     .Build();
 
 await host.RunAsync();
+
+bool TryGetOpenTelemetryConfig(IConfiguration configuration, out OpenTelemetryConfiguration config)
+{
+    config = default;
+
+    var tracesEnabled = IsOtlpExporterEnabled(configuration["OTEL_TRACES_EXPORTER"]);
+    var metricsEnabled = IsOtlpExporterEnabled(configuration["OTEL_METRICS_EXPORTER"]);
+    var logsEnabled = IsOtlpExporterEnabled(configuration["OTEL_LOGS_EXPORTER"]);
+    if (!tracesEnabled && !metricsEnabled && !logsEnabled)
+    {
+        return false;
+    }
+
+    var rawOtlpEndpoint = configuration["OTEL_EXPORTER_OTLP_ENDPOINT"];
+    var tracesRawEndpoint = configuration["OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"] ?? rawOtlpEndpoint;
+    if (string.IsNullOrWhiteSpace(tracesRawEndpoint))
+    {
+        return false;
+    }
+
+    var protocol = ParseOtlpProtocol(configuration["OTEL_EXPORTER_OTLP_PROTOCOL"]);
+    var headers = NormalizeOtlpHeaders(configuration["OTEL_EXPORTER_OTLP_HEADERS"]);
+    var serviceName = configuration["OTEL_SERVICE_NAME"] ?? OTelServiceNameDefault;
+    var tracesEndpoint = BuildSignalEndpoint(tracesRawEndpoint, OTelSignalTraces, OTelSignalPaths);
+    if (string.IsNullOrWhiteSpace(tracesEndpoint))
+    {
+        return false;
+    }
+
+    var metricsRawEndpoint = configuration["OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"] ?? tracesRawEndpoint;
+    var logsRawEndpoint = configuration["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] ?? tracesRawEndpoint;
+    var metricsEndpoint = BuildSignalEndpoint(metricsRawEndpoint, OTelSignalMetrics, OTelSignalPaths);
+    var logsEndpoint = BuildSignalEndpoint(logsRawEndpoint, OTelSignalLogs, OTelSignalPaths);
+    if (string.IsNullOrWhiteSpace(metricsEndpoint) || string.IsNullOrWhiteSpace(logsEndpoint))
+    {
+        return false;
+    }
+
+    config = new OpenTelemetryConfiguration(
+        tracesEndpoint,
+        tracesEnabled,
+        metricsEndpoint,
+        metricsEnabled,
+        logsEndpoint,
+        logsEnabled,
+        serviceName,
+        headers,
+        protocol);
+    return true;
+}
+
+void ConfigureOpenTelemetry(IConfiguration configuration, IServiceCollection services)
+{
+    if (!TryGetOpenTelemetryConfig(configuration, out var config) || (!config.IsTracesEnabled && !config.IsMetricsEnabled))
+    {
+        return;
+    }
+
+    var resourceBuilder = ResourceBuilder.CreateDefault().AddService(config.ServiceName, serviceNamespace: "pluckit");
+    var telemetry = services.AddOpenTelemetry().UseFunctionsWorkerDefaults();
+
+    if (config.IsTracesEnabled)
+    {
+        telemetry.WithTracing(BuildTracingPipeline(resourceBuilder, config));
+    }
+
+    if (config.IsMetricsEnabled)
+    {
+        telemetry.WithMetrics(BuildMetricsPipeline(resourceBuilder, config));
+    }
+}
+
+static Action<OpenTelemetry.Trace.TracerProviderBuilder> BuildTracingPipeline(
+    ResourceBuilder resourceBuilder,
+    OpenTelemetryConfiguration config)
+{
+    return tracing =>
+    {
+        tracing.SetResourceBuilder(resourceBuilder);
+        tracing.AddHttpClientInstrumentation();
+        tracing.AddOtlpExporter(otlpOptions => ConfigureOtlpExporter(
+            otlpOptions,
+            config.TracesEndpoint,
+            config.Protocol,
+            config.Headers));
+    };
+}
+
+static Action<OpenTelemetry.Metrics.MeterProviderBuilder> BuildMetricsPipeline(
+    ResourceBuilder resourceBuilder,
+    OpenTelemetryConfiguration config)
+{
+    return metrics =>
+    {
+        metrics.SetResourceBuilder(resourceBuilder);
+        metrics.AddOtlpExporter(otlpOptions => ConfigureOtlpExporter(
+            otlpOptions,
+            config.MetricsEndpoint,
+            config.Protocol,
+            config.Headers));
+    };
+}
+
+static void ConfigureOtlpExporter(
+    OtlpExporterOptions otlpOptions,
+    string endpoint,
+    OtlpExportProtocol protocol,
+    string? headers)
+{
+    otlpOptions.Endpoint = new Uri(endpoint);
+    otlpOptions.Protocol = protocol;
+    if (!string.IsNullOrWhiteSpace(headers))
+    {
+        otlpOptions.Headers = headers;
+    }
+}
+
+static string? BuildSignalEndpoint(string? baseOrSignalEndpoint, string signalPath, string[] signalPaths)
+{
+    if (string.IsNullOrWhiteSpace(baseOrSignalEndpoint))
+    {
+        return null;
+    }
+
+    var normalized = baseOrSignalEndpoint.Trim().TrimEnd('/');
+    if (normalized.EndsWith(signalPath, StringComparison.OrdinalIgnoreCase))
+    {
+        return normalized;
+    }
+
+    var matchingSignalPath = signalPaths
+        .Where(knownSignalPath => normalized.EndsWith(knownSignalPath, StringComparison.OrdinalIgnoreCase))
+        .FirstOrDefault();
+
+    if (string.IsNullOrEmpty(matchingSignalPath))
+    {
+        return $"{normalized}{signalPath}";
+    }
+
+    if (matchingSignalPath == signalPath)
+    {
+        return normalized;
+    }
+
+    return $"{normalized[..^matchingSignalPath.Length]}{signalPath}";
+}
+
+static string? NormalizeOtlpHeaders(string? rawHeaders)
+{
+    if (string.IsNullOrWhiteSpace(rawHeaders))
+    {
+        return null;
+    }
+
+    var decoded = WebUtility.UrlDecode(rawHeaders.Trim());
+    return string.IsNullOrWhiteSpace(decoded) ? null : decoded;
+}
+
+static OtlpExportProtocol ParseOtlpProtocol(string? rawProtocol)
+{
+    if (string.Equals(rawProtocol, "grpc", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(rawProtocol, "grpc/protobuf", StringComparison.OrdinalIgnoreCase))
+    {
+        return OtlpExportProtocol.Grpc;
+    }
+
+    return OtlpExportProtocol.HttpProtobuf;
+}
+
+static bool IsOtlpExporterEnabled(string? exporterSetting)
+{
+    if (string.IsNullOrWhiteSpace(exporterSetting))
+    {
+        return true;
+    }
+
+    return string.Equals(exporterSetting, "otlp", StringComparison.OrdinalIgnoreCase);
+}
+
+
