@@ -122,6 +122,13 @@ _WEBP_QUALITY = 85
 _WEBP_METHOD = 6
 _ERR_NO_IMAGE_PROVIDED = "No image provided."
 _ERR_MOOD_NOT_FOUND = "Mood not found."
+_ACCESS_TOKEN_LIFETIME = timedelta(minutes=30)
+_REFRESH_TOKEN_LIFETIME = timedelta(days=30)
+_ACCESS_TOKEN_LIFETIME_SECONDS = int(_ACCESS_TOKEN_LIFETIME.total_seconds())
+_REFRESH_TOKEN_LIFETIME_SECONDS = int(_REFRESH_TOKEN_LIFETIME.total_seconds())
+_ACCESS_TOKEN_TYPE = "Bearer"
+_REFRESH_TOKEN_ROTATION = "single-use"
+_REFRESH_TOKEN_REVOKE_ON_LOGOUT = True
 
 background_tasks = set()
 
@@ -191,6 +198,16 @@ def _normalize_otel_headers(raw_headers: Optional[str]) -> dict[str, str] | None
         if key and value:
             parsed[key] = unquote(value)
     return parsed or None
+
+
+def _utc_now() -> datetime:
+    """Return UTC timestamp helper for auth token contract timestamps."""
+    return datetime.now(timezone.utc)
+
+
+def _to_iso8601_utc(value: datetime) -> str:
+    """Serialize timezone-aware timestamps as compact UTC ISO-8601 with Z suffix."""
+    return value.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 _otel_providers_initialized = False
@@ -1176,8 +1193,181 @@ class MobileTokenExchangeRequest(BaseModel):
     token: str | None = None
 
 
+class MobileTokenExchangeResponse(BaseModel):
+    access_token: str
+    token_type: str
+    expires_in: int
+    access_token_expires_at: str
+    refresh_token: str
+    refresh_token_expires_in: int
+    refresh_token_expires_at: str
+    refresh_token_rotation: str
+    refresh_token_revoke_on_logout: bool
+    token: str
+    session_token: str
+    app_token: str
+    id_token: str
+    user_id: str
+    userId: str
+
+
+class RefreshTokenExchangeRequest(BaseModel):
+    refresh_token: str | None = None
+    token: str | None = None
+
+
+class RefreshTokenRevokeRequest(BaseModel):
+    refresh_token: str | None = None
+    token: str | None = None
+    user_id: str | None = None
+    userId: str | None = None
+
+
+def _normalize_token(value: str | None) -> str | None:
+    if not value:
+        return None
+    value = value.strip()
+    return value or None
+
+
+def _build_session_tokens() -> tuple[str, str]:
+    return (f"at-{uuid.uuid4().hex}", f"rt-{uuid.uuid4().hex}")
+
+
+def _hash_token(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _build_refresh_session_record(
+    user_id: str,
+    access_token: str,
+    refresh_token: str,
+    issued_at: datetime,
+    access_token_expires_at: datetime,
+    refresh_token_expires_at: datetime,
+    previous_refresh_token_hash: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": str(uuid.uuid4()),
+        "userId": user_id,
+        "accessToken": access_token,
+        "accessTokenHash": _hash_token(access_token),
+        "accessTokenExpiresAt": _to_iso8601_utc(access_token_expires_at),
+        "refreshToken": refresh_token,
+        "refreshTokenHash": _hash_token(refresh_token),
+        "refreshTokenExpiresAt": _to_iso8601_utc(refresh_token_expires_at),
+        "issuedAt": _to_iso8601_utc(issued_at),
+        "previousRefreshTokenHash": previous_refresh_token_hash,
+        "revoked": False,
+        "revokedOnLogout": _REFRESH_TOKEN_REVOKE_ON_LOGOUT,
+        "tokenRotation": _REFRESH_TOKEN_ROTATION,
+    }
+
+
+def _resolve_refresh_token(body: RefreshTokenExchangeRequest | RefreshTokenRevokeRequest) -> str | None:
+    return _normalize_token(body.refresh_token) or _normalize_token(body.token)
+
+
+def _resolve_user_id(body: RefreshTokenRevokeRequest) -> str | None:
+    return _normalize_token(body.user_id) or _normalize_token(body.userId)
+
+
+def _to_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        text = value.replace("Z", "+00:00") if value.endswith("Z") else value
+        parsed = datetime.fromisoformat(text)
+        return parsed.astimezone(timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_session_expired(expires_at: Any, now: datetime) -> bool:
+    parsed = _to_datetime(expires_at)
+    if parsed is None:
+        return True
+    return parsed <= now
+
+
+def _get_refresh_tokens_container():
+    from agents.db import get_refresh_tokens_container
+
+    return get_refresh_tokens_container()
+
+
+async def _query_refresh_session_by_hash(field: str, token_hash: str) -> dict[str, Any] | None:
+    container = _get_refresh_tokens_container()
+    query = f"SELECT * FROM c WHERE c.{field} = @tokenHash"
+    params = [{"name": "@tokenHash", "value": token_hash}]
+    async for item in container.query_items(
+        query=query,
+        parameters=params,
+        enable_cross_partition_query=True,
+    ):
+        return item
+    return None
+
+
+async def _query_refresh_session_by_refresh_token(token: str) -> dict[str, Any] | None:
+    return await _query_refresh_session_by_hash("refreshTokenHash", _hash_token(token))
+
+
+async def _query_refresh_session_by_access_token(token: str) -> dict[str, Any] | None:
+    return await _query_refresh_session_by_hash("accessTokenHash", _hash_token(token))
+
+
+async def _query_refresh_sessions_for_user(user_id: str) -> list[dict[str, Any]]:
+    container = _get_refresh_tokens_container()
+    query = (
+        "SELECT * FROM c "
+        "WHERE c.userId = @userId "
+        "AND (NOT IS_DEFINED(c.revoked) OR c.revoked = false)"
+    )
+    params = [{"name": "@userId", "value": user_id}]
+    sessions: list[dict[str, Any]] = []
+    async for item in container.query_items(
+        query=query,
+        parameters=params,
+        enable_cross_partition_query=True,
+    ):
+        sessions.append(item)
+    return sessions
+
+
+async def _upsert_refresh_session(document: dict[str, Any]) -> None:
+    container = _get_refresh_tokens_container()
+    await container.upsert_item(document)
+
+
+def _auth_session_response(
+    access_token: str,
+    access_token_expires_at: datetime,
+    refresh_token: str,
+    refresh_token_expires_at: datetime,
+    user_id: str,
+) -> dict[str, object]:
+    return {
+        "access_token": access_token,
+        "token_type": _ACCESS_TOKEN_TYPE,
+        "expires_in": _ACCESS_TOKEN_LIFETIME_SECONDS,
+        "access_token_expires_at": _to_iso8601_utc(access_token_expires_at),
+        "refresh_token": refresh_token,
+        "refresh_token_expires_in": _REFRESH_TOKEN_LIFETIME_SECONDS,
+        "refresh_token_expires_at": _to_iso8601_utc(refresh_token_expires_at),
+        "refresh_token_rotation": _REFRESH_TOKEN_ROTATION,
+        "refresh_token_revoke_on_logout": _REFRESH_TOKEN_REVOKE_ON_LOGOUT,
+        "token": access_token,
+        "session_token": access_token,
+        "app_token": access_token,
+        "id_token": access_token,
+        "user_id": user_id,
+        "userId": user_id,
+    }
+
+
 @fastapi_app.post("/api/auth/mobile-token", responses={
-    200: {"description": "Google ID token accepted and exchanged for API bearer token."},
+    200: {"description": "Google ID token accepted and exchanged for API bearer token + refresh contract."},
     400: {"description": "Invalid request body or missing id_token."},
     401: {"description": "Authentication failed."},
 })
@@ -1188,14 +1378,125 @@ async def mobile_token_exchange(body: MobileTokenExchangeRequest):
 
     id_token = raw_token.strip()
     user_id = await asyncio.to_thread(_verify_google_token, id_token)
-    return {
-        "access_token": id_token,
-        "token": id_token,
-        "session_token": id_token,
-        "app_token": id_token,
-        "id_token": id_token,
-        "user_id": user_id,
-    }
+    issued_at = _utc_now()
+    access_token_expires_at = issued_at + _ACCESS_TOKEN_LIFETIME
+    refresh_token_expires_at = issued_at + _REFRESH_TOKEN_LIFETIME
+    access_token, refresh_token = _build_session_tokens()
+    session_doc = _build_refresh_session_record(
+        user_id=user_id,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        issued_at=issued_at,
+        access_token_expires_at=access_token_expires_at,
+        refresh_token_expires_at=refresh_token_expires_at,
+    )
+    await _upsert_refresh_session(session_doc)
+    return _auth_session_response(
+        access_token,
+        access_token_expires_at,
+        refresh_token,
+        refresh_token_expires_at,
+        user_id,
+    )
+
+
+@fastapi_app.post(
+    "/api/auth/refresh",
+    responses={
+        200: {"description": "Refresh token accepted and session rotated."},
+        400: {"description": "Invalid request body or missing refresh token."},
+        401: {"description": "Authentication failed."},
+    },
+)
+async def refresh_session(body: RefreshTokenExchangeRequest):
+    refresh_token = _resolve_refresh_token(body)
+    if not refresh_token:
+        raise HTTPException(status_code=400, detail="Missing required field: refresh_token.")
+
+    existing_session = await _query_refresh_session_by_refresh_token(refresh_token)
+    if existing_session is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token.")
+
+    if existing_session.get("revoked"):
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token.")
+
+    now = _utc_now()
+    if _is_session_expired(existing_session.get("refreshTokenExpiresAt"), now):
+        existing_session["revoked"] = True
+        existing_session["revokedAt"] = _to_iso8601_utc(now)
+        await _upsert_refresh_session(existing_session)
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token.")
+
+    user_id = existing_session.get("userId")
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token.")
+
+    new_access_token, new_refresh_token = _build_session_tokens()
+    new_access_token_expires_at = now + _ACCESS_TOKEN_LIFETIME
+    new_refresh_token_expires_at = now + _REFRESH_TOKEN_LIFETIME
+    new_session = _build_refresh_session_record(
+        user_id=user_id,
+        access_token=new_access_token,
+        refresh_token=new_refresh_token,
+        issued_at=now,
+        access_token_expires_at=new_access_token_expires_at,
+        refresh_token_expires_at=new_refresh_token_expires_at,
+        previous_refresh_token_hash=existing_session.get("refreshTokenHash"),
+    )
+
+    existing_session["revoked"] = True
+    existing_session["revokedAt"] = _to_iso8601_utc(now)
+    existing_session["replacedWithRefreshTokenHash"] = new_session["refreshTokenHash"]
+    await _upsert_refresh_session(existing_session)
+    await _upsert_refresh_session(new_session)
+
+    return _auth_session_response(
+        new_access_token,
+        new_access_token_expires_at,
+        new_refresh_token,
+        new_refresh_token_expires_at,
+        user_id,
+    )
+
+
+@fastapi_app.post(
+    "/api/auth/revoke",
+    responses={
+        200: {"description": "Refresh token(s) revoked."},
+        400: {"description": "Missing refresh_token and user_id."},
+    },
+)
+async def revoke_session(body: RefreshTokenRevokeRequest):
+    refresh_token = _resolve_refresh_token(body)
+    user_id = _resolve_user_id(body)
+
+    if not refresh_token and not user_id:
+        raise HTTPException(status_code=400, detail="Missing refresh_token or user_id.")
+
+    now = _utc_now()
+
+    if refresh_token:
+        existing_session = await _query_refresh_session_by_refresh_token(refresh_token)
+        if existing_session:
+            resolved_user_id = existing_session.get("userId")
+            if isinstance(resolved_user_id, str) and resolved_user_id.strip():
+                user_id = resolved_user_id
+            existing_session["revoked"] = True
+            existing_session["revokedAt"] = _to_iso8601_utc(now)
+            await _upsert_refresh_session(existing_session)
+
+    if not user_id:
+        return {"revoked": False}
+
+    sessions = await _query_refresh_sessions_for_user(user_id)
+    for session in sessions:
+        if session.get("revoked"):
+            continue
+        session["revoked"] = True
+        session["revokedAt"] = _to_iso8601_utc(now)
+        await _upsert_refresh_session(session)
+
+    return {"revoked": True}
 
 
 class ChatRequest(BaseModel):

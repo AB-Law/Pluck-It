@@ -55,6 +55,7 @@ var host = new HostBuilder()
         {
             Serializer = new AotCosmosSerializer(cosmosSerializerOptions)
         }));
+        services.AddSingleton<RefreshSessionStore>();
         services.AddSingleton<IWardrobeRepository>(sp =>
             new WardrobeRepository(
                 sp.GetRequiredService<CosmosClient>(),
