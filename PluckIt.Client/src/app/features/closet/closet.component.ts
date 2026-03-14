@@ -229,9 +229,10 @@ interface OfflineUploadQueuePayload {
       <!-- Items grid -->
       @if (!loading() && filteredItems().length > 0) {
         <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6 pb-10">
-          @for (item of filteredItems(); track item.id) {
+          @for (item of filteredItems(); track item.id; let i = $index) {
             <app-clothing-card
               [item]="item"
+              [priority]="i < 8"
               [selected]="selectedIds().includes(item.id)"
               (selectToggled)="itemToggled.emit($event)"
               (editRequested)="onEditItem($event)"

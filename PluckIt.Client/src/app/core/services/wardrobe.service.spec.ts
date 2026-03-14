@@ -146,11 +146,39 @@ describe('WardrobeService', () => {
     req.flush(MOCK_ITEM);
   });
 
+  it('save() invalidates the wardrobe cache', () => {
+    service.getAll().subscribe();
+    const firstListReq = http.expectOne(r => r.url.includes('/api/wardrobe') && !r.url.includes('/api/wardrobe/'));
+    firstListReq.flush({ items: [MOCK_ITEM], nextContinuationToken: null });
+
+    service.save(MOCK_ITEM).subscribe();
+    const saveReq = http.expectOne(r => r.url.includes('/api/wardrobe') && r.method === 'POST');
+    saveReq.flush(MOCK_ITEM);
+
+    service.getAll().subscribe();
+    const secondListReq = http.expectOne(r => r.url.includes('/api/wardrobe') && !r.url.includes('/api/wardrobe/'));
+    secondListReq.flush({ items: [MOCK_ITEM], nextContinuationToken: null });
+  });
+
   it('update() sends PUT to /api/wardrobe/:id', () => {
     service.update(MOCK_ITEM).subscribe();
     const req = http.expectOne(r => r.url.includes('/api/wardrobe/item-001') && r.method === 'PUT');
     expect(req.request.body).toEqual(MOCK_ITEM);
     req.flush(null);
+  });
+
+  it('update() invalidates the wardrobe cache', () => {
+    service.getAll().subscribe();
+    const firstListReq = http.expectOne(r => r.url.includes('/api/wardrobe') && !r.url.includes('/api/wardrobe/'));
+    firstListReq.flush({ items: [MOCK_ITEM], nextContinuationToken: null });
+
+    service.update(MOCK_ITEM).subscribe();
+    const updateReq = http.expectOne(r => r.url.includes('/api/wardrobe/item-001') && r.method === 'PUT');
+    updateReq.flush(null);
+
+    service.getAll().subscribe();
+    const secondListReq = http.expectOne(r => r.url.includes('/api/wardrobe') && !r.url.includes('/api/wardrobe/'));
+    secondListReq.flush({ items: [MOCK_ITEM], nextContinuationToken: null });
   });
 
   it('delete() sends DELETE to /api/wardrobe/:id', () => {
@@ -159,6 +187,20 @@ describe('WardrobeService', () => {
     const req = http.expectOne(r => r.url.includes('/api/wardrobe/item-001') && r.method === 'DELETE');
     req.flush(null);
     expect(called).toBe(true);
+  });
+
+  it('delete() invalidates the wardrobe cache', () => {
+    service.getAll().subscribe();
+    const firstListReq = http.expectOne(r => r.url.includes('/api/wardrobe') && !r.url.includes('/api/wardrobe/'));
+    firstListReq.flush({ items: [MOCK_ITEM], nextContinuationToken: null });
+
+    service.delete('item-001').subscribe();
+    const deleteReq = http.expectOne(r => r.url.includes('/api/wardrobe/item-001') && r.method === 'DELETE');
+    deleteReq.flush(null);
+
+    service.getAll().subscribe();
+    const secondListReq = http.expectOne(r => r.url.includes('/api/wardrobe') && !r.url.includes('/api/wardrobe/'));
+    secondListReq.flush({ items: [], nextContinuationToken: null });
   });
 
   it('logWear() sends PATCH to /api/wardrobe/:id/wear', () => {
@@ -172,6 +214,36 @@ describe('WardrobeService', () => {
     const req = http.expectOne(r => r.url.includes('/api/wardrobe/item-001/wear') && r.method === 'PATCH');
     expect(req.request.body.clientEventId).toBe('evt-1');
     req.flush({ ...MOCK_ITEM, wearCount: 1 });
+  });
+
+  it('logWear() invalidates the wardrobe cache', () => {
+    service.getAll().subscribe();
+    const firstListReq = http.expectOne(r => r.url.includes('/api/wardrobe') && !r.url.includes('/api/wardrobe/'));
+    firstListReq.flush({ items: [MOCK_ITEM], nextContinuationToken: null });
+
+    service.logWear('item-001').subscribe();
+    const wearReq = http.expectOne(r => r.url.includes('/api/wardrobe/item-001/wear') && r.method === 'PATCH');
+    wearReq.flush({ ...MOCK_ITEM, wearCount: 1 });
+
+    service.getAll().subscribe();
+    const secondListReq = http.expectOne(r => r.url.includes('/api/wardrobe') && !r.url.includes('/api/wardrobe/'));
+    secondListReq.flush({ items: [{ ...MOCK_ITEM, wearCount: 1 }], nextContinuationToken: null });
+  });
+
+  it('acceptDraft() invalidates the wardrobe cache', () => {
+    service.getAll().subscribe();
+    const firstListReq = http.expectOne(r => r.url.includes('/api/wardrobe') && !r.url.includes('/api/wardrobe/'));
+    firstListReq.flush({ items: [MOCK_ITEM], nextContinuationToken: null });
+
+    service.acceptDraft('draft-1').subscribe();
+    const acceptReq = http.expectOne(
+      r => r.url.includes('/api/wardrobe/drafts/draft-1/accept') && r.method === 'PATCH',
+    );
+    acceptReq.flush({ ...MOCK_ITEM, id: 'draft-item-001' });
+
+    service.getAll().subscribe();
+    const secondListReq = http.expectOne(r => r.url.includes('/api/wardrobe') && !r.url.includes('/api/wardrobe/'));
+    secondListReq.flush({ items: [{ ...MOCK_ITEM, id: 'draft-item-001' }], nextContinuationToken: null });
   });
 
   it('getWearHistory() hits /wear-history with date params', () => {

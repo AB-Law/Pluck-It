@@ -130,9 +130,8 @@ public class ImageProcessingWorker(
                 message.ItemId,
                 message.UserId,
                 imageBytes,
-                // Raw uploads from clients are always JPEG after resizeImageFile in Angular.
-                // The processor normalizes before segmentation, so JPEG is correct here.
                 "image/jpeg",
+                message.SkipSegmentation,
                 CancellationToken.None);
         }
         catch (Exception ex)
@@ -167,78 +166,107 @@ public class ImageProcessingWorker(
         string userId,
         byte[] imageBytes,
         string mediaType,
+        bool skipSegmentation,
         CancellationToken ct)
     {
-        // ── Forward image to Python processor ──────────────────────────────────
-        using var form = new MultipartFormDataContent();
-        var streamContent = new StreamContent(new MemoryStream(imageBytes));
-        streamContent.Headers.ContentType =
-            new System.Net.Http.Headers.MediaTypeHeaderValue(mediaType);
-        form.Add(streamContent, "image", "upload.jpeg");
-        form.Add(new StringContent(itemId), "item_id");
+        string archiveImageUrl;
+        string processedMediaType;
 
-        var processorClient = httpClientFactory.CreateClient("processor");
-        HttpResponseMessage processorResponse;
-        try
+        if (skipSegmentation)
         {
-            // Hard cap at 125 s — the processor/Modal BiRefNet has an 85 s internal timeout.
-            using var processorCts = new CancellationTokenSource(TimeSpan.FromSeconds(125));
-            processorResponse = await processorClient.PostAsync(
-                "/api/process-image", form, processorCts.Token);
+            // ── Pre-segmented path: store image directly, skip BiRefNet ──────────
+            // The mobile client already ran on-device segmentation; just convert to
+            // WebP and store as the archive blob so OpenAI can analyse it.
+            logger.LogInformation(
+                "ProcessImageJob: skipping segmentation for pre-segmented item {ItemId}.", itemId);
+            try
+            {
+                archiveImageUrl = await sasService.UploadArchiveAsync(
+                    $"{userId}/{itemId}", imageBytes, mediaType, ct);
+                processedMediaType = "image/jpeg";
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex,
+                    "ProcessImageJob: failed to store pre-segmented image for item {ItemId}.", itemId);
+                await repo.SetDraftTerminalAsync(itemId, userId, DraftStatus.Failed, null, null,
+                    "Failed to store pre-segmented image.", CancellationToken.None);
+                return;
+            }
         }
-        catch (Exception ex)
+        else
         {
-            logger.LogError(ex,
-                "ProcessImageJob: processor unreachable for item {ItemId}.", itemId);
-            await repo.SetDraftTerminalAsync(itemId, userId, DraftStatus.Failed, null, null,
-                "Image processor is unavailable.", CancellationToken.None);
-            return;
-        }
+            // ── Standard path: forward image to Python processor (BiRefNet) ──────
+            using var form = new MultipartFormDataContent();
+            var streamContent = new StreamContent(new MemoryStream(imageBytes));
+            streamContent.Headers.ContentType =
+                new System.Net.Http.Headers.MediaTypeHeaderValue(mediaType);
+            form.Add(streamContent, "image", "upload.jpeg");
+            form.Add(new StringContent(itemId), "item_id");
 
-        if (!processorResponse.IsSuccessStatusCode)
-        {
-            var body = await processorResponse.Content.ReadAsStringAsync(ct);
-            logger.LogError(
-                "ProcessImageJob: processor returned {Status} for item {ItemId}: {Body}",
-                (int)processorResponse.StatusCode, itemId, body);
-            await repo.SetDraftTerminalAsync(itemId, userId, DraftStatus.Failed, null, null,
-                $"Processor returned {(int)processorResponse.StatusCode}.",
-                CancellationToken.None);
-            return;
-        }
+            var processorClient = httpClientFactory.CreateClient("processor");
+            HttpResponseMessage processorResponse;
+            try
+            {
+                // Hard cap at 125 s — the processor/Modal BiRefNet has an 85 s internal timeout.
+                using var processorCts = new CancellationTokenSource(TimeSpan.FromSeconds(125));
+                processorResponse = await processorClient.PostAsync(
+                    "/api/process-image", form, processorCts.Token);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex,
+                    "ProcessImageJob: processor unreachable for item {ItemId}.", itemId);
+                await repo.SetDraftTerminalAsync(itemId, userId, DraftStatus.Failed, null, null,
+                    "Image processor is unavailable.", CancellationToken.None);
+                return;
+            }
 
-        ProcessorResult? processed;
-        try
-        {
-            processed = await processorResponse.Content
-                .ReadFromJsonAsync(PluckItJsonContext.Default.ProcessorResult, CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex,
-                "ProcessImageJob: failed to deserialize processor response for item {ItemId}.", itemId);
-            await repo.SetDraftTerminalAsync(itemId, userId, DraftStatus.Failed, null, null,
-                "Processor response was not valid JSON.",
-                CancellationToken.None);
-            return;
-        }
+            if (!processorResponse.IsSuccessStatusCode)
+            {
+                var body = await processorResponse.Content.ReadAsStringAsync(ct);
+                logger.LogError(
+                    "ProcessImageJob: processor returned {Status} for item {ItemId}: {Body}",
+                    (int)processorResponse.StatusCode, itemId, body);
+                await repo.SetDraftTerminalAsync(itemId, userId, DraftStatus.Failed, null, null,
+                    $"Processor returned {(int)processorResponse.StatusCode}.",
+                    CancellationToken.None);
+                return;
+            }
 
-        if (processed is null || string.IsNullOrEmpty(processed.ImageUrl))
-        {
-            await repo.SetDraftTerminalAsync(itemId, userId, DraftStatus.Failed, null, null,
-                "Processor returned an unexpected response.",
-                CancellationToken.None);
-            return;
-        }
+            ProcessorResult? processed;
+            try
+            {
+                processed = await processorResponse.Content
+                    .ReadFromJsonAsync(PluckItJsonContext.Default.ProcessorResult, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex,
+                    "ProcessImageJob: failed to deserialize processor response for item {ItemId}.", itemId);
+                await repo.SetDraftTerminalAsync(itemId, userId, DraftStatus.Failed, null, null,
+                    "Processor response was not valid JSON.",
+                    CancellationToken.None);
+                return;
+            }
 
-        // MediaType is now returned by the processor (image/webp); fall back gracefully.
-        var processedMediaType = processed.MediaType ?? "image/webp";
+            if (processed is null || string.IsNullOrEmpty(processed.ImageUrl))
+            {
+                await repo.SetDraftTerminalAsync(itemId, userId, DraftStatus.Failed, null, null,
+                    "Processor returned an unexpected response.",
+                    CancellationToken.None);
+                return;
+            }
+
+            archiveImageUrl = processed.ImageUrl;
+            processedMediaType = processed.MediaType ?? "image/webp";
+        }
 
         // ── Extract AI clothing metadata from the processed image ──────────────
         ClothingMetadata? metadata = null;
         try
         {
-            var processedSasUrl = sasService.GenerateSasUrl(processed.ImageUrl, validForMinutes: 5);
+            var processedSasUrl = sasService.GenerateSasUrl(archiveImageUrl, validForMinutes: 5);
             using var sasClient = httpClientFactory.CreateClient();
             var processedBytes = await sasClient.GetByteArrayAsync(processedSasUrl, CancellationToken.None);
             var imageData = BinaryData.FromBytes(processedBytes);
@@ -255,7 +283,7 @@ public class ImageProcessingWorker(
         // ── Write terminal Ready state ─────────────────────────────────────────
         await repo.SetDraftTerminalAsync(
             itemId, userId, DraftStatus.Ready,
-            processed.ImageUrl, metadata, null,
+            archiveImageUrl, metadata, null,
             CancellationToken.None);
 
         logger.LogInformation(

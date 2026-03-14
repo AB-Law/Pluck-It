@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, signal } from '@angular/core';
+import { Component, EventEmitter, Input, Output, input, signal } from '@angular/core';
 import { ClothingItem } from '../../core/models/clothing-item.model';
 
 @Component({
@@ -22,6 +22,8 @@ import { ClothingItem } from '../../core/models/clothing-item.model';
           [src]="item.imageUrl"
           [alt]="item.category ?? 'Clothing item'"
           class="object-contain h-full w-full drop-shadow-2xl group-hover:scale-105 transition-transform duration-500"
+          [attr.loading]="priority() ? 'eager' : 'lazy'"
+          [attr.fetchpriority]="priority() ? 'high' : 'auto'"
         />
 
         <!-- Selected checkmark -->
@@ -127,6 +129,7 @@ import { ClothingItem } from '../../core/models/clothing-item.model';
 export class ClothingCardComponent {
   @Input({ required: true }) item!: ClothingItem;
   @Input() selected = false;
+  readonly priority = input<boolean>(false);
   @Output() editRequested   = new EventEmitter<ClothingItem>();
   @Output() deleteRequested = new EventEmitter<ClothingItem>();
   @Output() selectToggled   = new EventEmitter<string>();

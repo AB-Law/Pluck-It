@@ -139,4 +139,10 @@ public class ClothingItem
 
   /// <summary>UTC timestamp of the most recent draft state transition. Used as staleness clock.</summary>
   public DateTimeOffset? DraftUpdatedAt { get; set; }
+
+  /// <summary>
+  /// When true, this item is a wishlist item (not yet owned).
+  /// Uploaded via the Wishlist tab; excluded from vault/wardrobe views.
+  /// </summary>
+  public bool IsWishlisted { get; set; } = false;
 }

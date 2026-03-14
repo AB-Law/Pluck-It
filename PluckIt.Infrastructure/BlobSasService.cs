@@ -113,6 +113,21 @@ public class BlobSasService : IBlobSasService
     }
   }
 
+  public async Task<string> UploadArchiveAsync(string blobName, byte[] bytes, string contentType,
+      CancellationToken cancellationToken = default)
+  {
+    var blobClient = ArchiveContainer.GetBlobClient(blobName);
+    using var stream = new System.IO.MemoryStream(bytes);
+    await blobClient.UploadAsync(stream,
+        new Azure.Storage.Blobs.Models.BlobUploadOptions
+        {
+            HttpHeaders = new Azure.Storage.Blobs.Models.BlobHttpHeaders
+            { ContentType = contentType }
+        },
+        cancellationToken);
+    return blobClient.Uri.ToString();
+  }
+
   public async Task<string> UploadRawAsync(string blobName, byte[] bytes, string contentType,
       CancellationToken cancellationToken = default)
   {

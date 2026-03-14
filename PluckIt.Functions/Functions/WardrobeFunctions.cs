@@ -50,6 +50,7 @@ public class WardrobeFunctions(
     private const string NoImageProvidedMessage = "No image provided.";
     private const string RetryDraftConflictMessage = "Only Failed drafts can be retried.";
     private const string ContentTypeErrorMessage = "Could not store image. Please try again.";
+
     // ── GET /api/wardrobe ───────────────────────────────────────────────────
 
     [Function(nameof(GetWardrobe))]
@@ -540,11 +541,18 @@ public class WardrobeFunctions(
         byte[] imageBytes;
         string mediaType;
 
+        bool skipSegmentation = false;
+        bool isWishlisted = false;
         if (contentType.Contains("multipart/form-data", StringComparison.OrdinalIgnoreCase))
         {
-            (imageBytes, mediaType) = await MultipartReader.ReadFirstFileAsync(req.Body, contentType);
+            Dictionary<string, string> formFields;
+            (imageBytes, mediaType, formFields) = await MultipartReader.ReadAllPartsAsync(req.Body, contentType);
             if (imageBytes.Length == 0)
                 return await JsonError(req, HttpStatusCode.BadRequest, NoImageProvidedMessage);
+            skipSegmentation = formFields.TryGetValue("skip_segmentation", out var skipVal)
+                && skipVal.Equals("true", StringComparison.OrdinalIgnoreCase);
+            isWishlisted = formFields.TryGetValue("is_wishlisted", out var wishVal)
+                && wishVal.Equals("true", StringComparison.OrdinalIgnoreCase);
         }
         else
         {
@@ -581,6 +589,7 @@ public class WardrobeFunctions(
             DraftStatus = DraftStatus.Processing,
             DraftCreatedAt = now,
             DraftUpdatedAt = now,
+            IsWishlisted = isWishlisted,
         };
         await repo.UpsertAsync(draftDoc, CancellationToken.None);
         await RefreshWardrobeFingerprintAsync(userId!, CancellationToken.None);
@@ -595,10 +604,11 @@ public class WardrobeFunctions(
                 UserId: userId!,
                 RawImageBlobUrl: rawBlobUrl,
                 Attempt: 1,
-                EnqueuedAt: now),
+                EnqueuedAt: now,
+                SkipSegmentation: skipSegmentation),
             CancellationToken.None);
         if (logger.IsEnabled(LogLevel.Information))
-            logger.LogInformation("Draft {ItemId} enqueued for async processing.", itemId);
+            logger.LogInformation("Draft {ItemId} enqueued for async processing (skipSegmentation={Skip}).", itemId, skipSegmentation);
 
         // Return 202 Accepted with the Processing draft for immediate UI feedback.
         var response = req.CreateResponse(HttpStatusCode.Accepted);
@@ -975,6 +985,89 @@ public class WardrobeFunctions(
 internal static class MultipartReader
 {
     private const string OctetStream = "application/octet-stream";
+
+    private static partial class MultipartPatterns
+    {
+        [System.Text.RegularExpressions.GeneratedRegex(@"name=""([^""]+)""", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
+        public static partial System.Text.RegularExpressions.Regex NamePattern();
+    }
+
+    /// <summary>Reads all multipart parts and returns the first file plus any text fields.</summary>
+    internal static async Task<(byte[] Bytes, string MediaType, Dictionary<string, string> Fields)> ReadAllPartsAsync(
+        Stream body, string contentType)
+    {
+        var boundary = ExtractBoundary(contentType);
+        if (boundary is null) return ([], OctetStream, []);
+
+        using var ms = new MemoryStream();
+        await body.CopyToAsync(ms);
+        var data = ms.ToArray();
+
+        var delimiter = Encoding.UTF8.GetBytes("--" + boundary);
+        var crlfcrlf = "\r\n\r\n"u8.ToArray();
+        var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        byte[] fileBytes = [];
+        string fileMediaType = OctetStream;
+        int searchFrom = 0;
+
+        while (true)
+        {
+            var partStart = IndexOf(data, delimiter, searchFrom);
+            if (partStart < 0) break;
+
+            var headerStart = partStart + delimiter.Length + 2;
+            if (headerStart >= data.Length) break;
+
+            // Check for closing delimiter "--"
+            if (headerStart + 1 < data.Length &&
+                data[headerStart] == '-' && data[headerStart + 1] == '-') break;
+
+            var contentStart = IndexOf(data, crlfcrlf, headerStart);
+            if (contentStart < 0) break;
+            contentStart += 4;
+
+            var headersText = Encoding.UTF8.GetString(data, headerStart, contentStart - headerStart - 4);
+            var closingDelimiter = Encoding.UTF8.GetBytes("\r\n--" + boundary);
+            var contentEnd = IndexOf(data, closingDelimiter, contentStart);
+            if (contentEnd < 0) contentEnd = data.Length;
+
+            // Parse headers
+            string? disposition = null, partMediaType = null, fieldName = null;
+            bool isFile = false;
+            foreach (var line in headersText.Split('\n'))
+            {
+                var trimmed = line.Trim();
+                if (trimmed.StartsWith("Content-Disposition:", StringComparison.OrdinalIgnoreCase))
+                {
+                    disposition = trimmed;
+                    isFile = trimmed.Contains("filename=", StringComparison.OrdinalIgnoreCase);
+                    var nameMatch = MultipartPatterns.NamePattern().Match(trimmed);
+                    if (nameMatch.Success) fieldName = nameMatch.Groups[1].Value;
+                }
+                else if (trimmed.StartsWith("Content-Type:", StringComparison.OrdinalIgnoreCase))
+                {
+                    partMediaType = trimmed[13..].Trim();
+                }
+            }
+
+            var partBytes = data[contentStart..contentEnd];
+
+            if (isFile && fileBytes.Length == 0)
+            {
+                fileBytes = partBytes;
+                fileMediaType = partMediaType ?? OctetStream;
+            }
+            else if (!isFile && fieldName is not null)
+            {
+                fields[fieldName] = Encoding.UTF8.GetString(partBytes).Trim();
+            }
+
+            searchFrom = contentEnd + 2;
+        }
+
+        return (fileBytes, fileMediaType, fields);
+    }
 
     internal static async Task<(byte[] Bytes, string MediaType)> ReadFirstFileAsync(Stream body, string contentType)
     {

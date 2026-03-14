@@ -31,6 +31,13 @@ public interface IBlobSasService
   Task DeleteBlobAsync(string blobUrl, CancellationToken cancellationToken = default);
 
   /// <summary>
+  /// Uploads raw bytes to the archive container under <paramref name="blobName"/>.
+  /// Returns the plain (non-SAS) blob URL.
+  /// </summary>
+  Task<string> UploadArchiveAsync(string blobName, byte[] bytes, string contentType,
+      CancellationToken cancellationToken = default);
+
+  /// <summary>
   /// Lists all blob names in the archive container.
   /// Used by the cleanup Function to identify orphaned blobs.
   /// </summary>

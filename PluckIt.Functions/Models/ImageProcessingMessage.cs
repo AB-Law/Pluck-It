@@ -12,4 +12,5 @@ public record ImageProcessingMessage(
     string UserId,
     string RawImageBlobUrl,
     int Attempt,
-    DateTimeOffset EnqueuedAt);
+    DateTimeOffset EnqueuedAt,
+    bool SkipSegmentation = false);

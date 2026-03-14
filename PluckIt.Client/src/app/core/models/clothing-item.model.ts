@@ -175,6 +175,8 @@ export interface ClothingItem {
   draftCreatedAt?: string | null;
   /** Last time the draft status was updated. */
   draftUpdatedAt?: string | null;
+  /** When true, this item is a wishlist item (not yet owned). */
+  isWishlisted?: boolean | null;
 }
 
 // ─── Wardrobe query / paging types ───────────────────────────────────────────

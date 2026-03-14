@@ -163,9 +163,10 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
 
           <!-- Grid -->
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            @for (item of filteredItems(); track item.id) {
+            @for (item of filteredItems(); track item.id; let i = $index) {
               <app-vault-card
                 [item]="item"
+                [priority]="i < 8"
                 [currency]="currency()"
                 [isSelected]="selectedItem()?.id === item.id"
                 [cpwBadge]="cpwBadgeFor(item.id)"
@@ -376,7 +377,9 @@ export class VaultComponent implements OnInit, OnDestroy {
       if (group === 'favorites')
         return item.tags.includes('favorite') || item.aestheticTags?.includes('Favorite');
       if (group === 'recent') return (item.wearCount ?? 0) > 0;
-      return true;
+      if (group === 'wishlist') return !!item.isWishlisted;
+      // Default: exclude wishlist items from the main vault views
+      return !item.isWishlisted;
     });
   });
 

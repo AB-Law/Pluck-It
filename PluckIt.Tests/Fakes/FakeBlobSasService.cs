@@ -35,6 +35,12 @@ public sealed class FakeBlobSasService : IBlobSasService
     /// <summary>Blob name → uploaded bytes. Seed or inspect during tests.</summary>
     public Dictionary<string, byte[]> UploadedBlobs { get; } = [];
 
+    public Task<string> UploadArchiveAsync(string blobName, byte[] bytes, string contentType, CancellationToken cancellationToken = default)
+    {
+        UploadedBlobs[blobName] = bytes;
+        return Task.FromResult($"https://fake.archive/{blobName}");
+    }
+
     public Task<string> UploadRawAsync(string blobName, byte[] bytes, string contentType, CancellationToken cancellationToken = default)
     {
         UploadedBlobs[blobName] = bytes;
