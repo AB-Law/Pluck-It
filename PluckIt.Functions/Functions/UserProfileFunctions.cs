@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Net;
 using System.Text.Json;
 using System.Threading;
@@ -14,7 +15,8 @@ namespace PluckIt.Functions.Functions;
 public class UserProfileFunctions(
     IUserProfileRepository profileRepo,
     IConfiguration config,
-    GoogleTokenValidator tokenValidator)
+    GoogleTokenValidator tokenValidator,
+    RefreshSessionStore? refreshSessionStore = null)
 {
     // ── GET /api/profile ───────────────────────────────────────────────────
 
@@ -86,24 +88,52 @@ public class UserProfileFunctions(
 
     // ── Helpers ─────────────────────────────────────────────────────────────
 
-    private async Task<(bool Authed, string? UserId)> TryGetUserIdAsync(HttpRequestData req)
+    private async Task<(bool Authed, string? UserId)> TryGetUserIdAsync(
+        HttpRequestData req,
+        CancellationToken cancellationToken = default)
     {
-        if (req.Headers.TryGetValues("Authorization", out var authHeaders))
+        if (TryGetBearerToken(req, out var token))
         {
-            var header = authHeaders is System.Collections.Generic.IEnumerable<string> headers
-                ? System.Linq.Enumerable.FirstOrDefault(headers)
-                : null;
-            if (header?.StartsWith("Bearer ", System.StringComparison.OrdinalIgnoreCase) == true)
-            {
-                var token = header["Bearer ".Length..];
-                var sub = await tokenValidator.ValidateAsync(token);
-                if (sub is not null) return (true, sub);
-            }
+            var sub = await tokenValidator.ValidateAsync(token);
+            if (sub is not null) return (true, sub);
+
+            var sessionUserId = await ResolveUserIdFromSessionTokenAsync(token, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(sessionUserId))
+                return (true, sessionUserId);
         }
 
         var devId = config["Local:DevUserId"];
         if (!string.IsNullOrEmpty(devId)) return (true, devId);
 
         return (false, null);
+    }
+
+    private static bool TryGetBearerToken(HttpRequestData req, out string token)
+    {
+        token = string.Empty;
+        if (!req.Headers.TryGetValues("Authorization", out var authHeaders))
+            return false;
+
+        var header = authHeaders.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(header) || !header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        token = header["Bearer ".Length..].Trim();
+        return !string.IsNullOrWhiteSpace(token);
+    }
+
+    private async Task<string?> ResolveUserIdFromSessionTokenAsync(string token, CancellationToken cancellationToken)
+    {
+        if (refreshSessionStore is null)
+            return null;
+
+        try
+        {
+            return await refreshSessionStore.ResolveUserIdFromAccessTokenAsync(token, cancellationToken);
+        }
+        catch
+        {
+            return null;
+        }
     }
 }
