@@ -264,7 +264,6 @@ def run_global_scrapers() -> None:
     try:
         sources = list(sources_container.query_items(
             query=query,
-            enable_cross_partition_query=True,
         ))
     except Exception as exc:  # noqa: BLE001
         logger.error("Could not load scraper sources: %s", exc)
@@ -292,7 +291,6 @@ def run_for_source(source_id: str) -> int:
         results = list(sources_container.query_items(
             query="SELECT * FROM c WHERE c.id = @id AND c.isActive = true",
             parameters=[{"name": "@id", "value": source_id}],
-            enable_cross_partition_query=True,
         ))
         if not results:
             logger.warning("Source %s not found or inactive", source_id)

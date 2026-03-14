@@ -136,6 +136,9 @@ _REFRESH_TOKEN_LIFETIME_SECONDS = int(_REFRESH_TOKEN_LIFETIME.total_seconds())
 _ACCESS_TOKEN_TYPE = "Bearer"
 _REFRESH_TOKEN_ROTATION = "single-use"
 _REFRESH_TOKEN_REVOKE_ON_LOGOUT = True
+_DB_USER_ID_QUERY_PARAM = "@userId"
+_ERR_INVALID_REFRESH_TOKEN = "Invalid or expired refresh token."
+_ERR_UNAUTHORIZED_REVOKE_USER = "Unauthorized to revoke this user."
 
 background_tasks = set()
 
@@ -1064,7 +1067,6 @@ def _run_scraper_job() -> None:
         sources_container = get_scraper_sources_container_sync()
         sources = list(sources_container.query_items(
             query="SELECT * FROM c WHERE c.isActive = true AND c.isGlobal = true",
-            enable_cross_partition_query=True,
         ))
     except Exception as exc:  # noqa: BLE001
         logger.error("Could not load scraper sources for PluckItScraper: %s", exc)
@@ -1308,7 +1310,6 @@ async def _query_refresh_session_by_hash(field: str, token_hash: str) -> dict[st
     async for item in container.query_items(
         query=query,
         parameters=params,
-        enable_cross_partition_query=True,
     ):
         return item
     return None
@@ -1326,18 +1327,55 @@ async def _query_refresh_sessions_for_user(user_id: str) -> list[dict[str, Any]]
     container = _get_refresh_tokens_container()
     query = (
         "SELECT * FROM c "
-        "WHERE c.userId = @userId "
+        f"WHERE c.userId = {_DB_USER_ID_QUERY_PARAM} "
         "AND (NOT IS_DEFINED(c.revoked) OR c.revoked = false)"
     )
-    params = [{"name": "@userId", "value": user_id}]
+    params = [{"name": _DB_USER_ID_QUERY_PARAM, "value": user_id}]
     sessions: list[dict[str, Any]] = []
     async for item in container.query_items(
         query=query,
         parameters=params,
-        enable_cross_partition_query=True,
     ):
         sessions.append(item)
     return sessions
+
+
+async def _revoke_session_by_refresh_token(
+    refresh_token: str,
+    now: datetime,
+) -> str | None:
+    """Revoke one refresh session by token and return the resolved user ID if present."""
+    existing_session = await _query_refresh_session_by_refresh_token(refresh_token)
+    if not existing_session:
+        return None
+
+    existing_session["revoked"] = True
+    existing_session["revokedAt"] = _to_iso8601_utc(now)
+    await _upsert_refresh_session(existing_session)
+
+    existing_user_id = existing_session.get("userId")
+    if isinstance(existing_user_id, str):
+        existing_user_id = existing_user_id.strip()
+    if existing_user_id:
+        return existing_user_id
+    return None
+
+
+async def _revoke_all_sessions_for_user(user_id: str, now: datetime) -> None:
+    """Revoke all active refresh sessions for a user."""
+    sessions = await _query_refresh_sessions_for_user(user_id)
+    for session in sessions:
+        if session.get("revoked"):
+            continue
+        session["revoked"] = True
+        session["revokedAt"] = _to_iso8601_utc(now)
+        await _upsert_refresh_session(session)
+
+
+async def _ensure_can_revoke_user(caller_user_id: str | None, target_user_id: str) -> None:
+    """Validate caller is authorized to revoke tokens for the target user."""
+    if caller_user_id != target_user_id:
+        raise HTTPException(status_code=403, detail=_ERR_UNAUTHORIZED_REVOKE_USER)
 
 
 async def _upsert_refresh_session(document: dict[str, Any]) -> None:
@@ -1420,21 +1458,21 @@ async def refresh_session(body: RefreshTokenExchangeRequest):
 
     existing_session = await _query_refresh_session_by_refresh_token(refresh_token)
     if existing_session is None:
-        raise HTTPException(status_code=401, detail="Invalid or expired refresh token.")
+        raise HTTPException(status_code=401, detail=_ERR_INVALID_REFRESH_TOKEN)
 
     if existing_session.get("revoked"):
-        raise HTTPException(status_code=401, detail="Invalid or expired refresh token.")
+        raise HTTPException(status_code=401, detail=_ERR_INVALID_REFRESH_TOKEN)
 
     now = _utc_now()
     if _is_session_expired(existing_session.get("refreshTokenExpiresAt"), now):
         existing_session["revoked"] = True
         existing_session["revokedAt"] = _to_iso8601_utc(now)
         await _upsert_refresh_session(existing_session)
-        raise HTTPException(status_code=401, detail="Invalid or expired refresh token.")
+        raise HTTPException(status_code=401, detail=_ERR_INVALID_REFRESH_TOKEN)
 
     user_id = existing_session.get("userId")
     if not isinstance(user_id, str) or not user_id.strip():
-        raise HTTPException(status_code=401, detail="Invalid or expired refresh token.")
+        raise HTTPException(status_code=401, detail=_ERR_INVALID_REFRESH_TOKEN)
 
     new_access_token, new_refresh_token = _build_session_tokens()
     new_access_token_expires_at = now + _ACCESS_TOKEN_LIFETIME
@@ -1451,7 +1489,7 @@ async def refresh_session(body: RefreshTokenExchangeRequest):
 
     replaced = await _replace_refresh_session_if_match(existing_session, new_session, now)
     if not replaced:
-        raise HTTPException(status_code=401, detail="Invalid or expired refresh token.")
+        raise HTTPException(status_code=401, detail=_ERR_INVALID_REFRESH_TOKEN)
 
     await _upsert_refresh_session(new_session)
 
@@ -1469,6 +1507,8 @@ async def refresh_session(body: RefreshTokenExchangeRequest):
     responses={
         200: {"description": "Refresh token(s) revoked."},
         400: {"description": "Missing refresh_token and user_id."},
+        401: {"description": "Authentication failed."},
+        403: {"description": _ERR_UNAUTHORIZED_REVOKE_USER},
     },
 )
 async def revoke_session(body: RefreshTokenRevokeRequest, request: Request):
@@ -1482,30 +1522,18 @@ async def revoke_session(body: RefreshTokenRevokeRequest, request: Request):
     now = _utc_now()
 
     if refresh_token:
-        existing_session = await _query_refresh_session_by_refresh_token(refresh_token)
-        if existing_session:
-            resolved_user_id = existing_session.get("userId")
-            if isinstance(resolved_user_id, str) and resolved_user_id.strip():
-                user_id = resolved_user_id
-            existing_session["revoked"] = True
-            existing_session["revokedAt"] = _to_iso8601_utc(now)
-            await _upsert_refresh_session(existing_session)
+        resolved_user_id = await _revoke_session_by_refresh_token(refresh_token, now)
+        if resolved_user_id:
+            user_id = resolved_user_id
 
     if not user_id:
         return {"revoked": False}
 
     if not revoke_by_refresh_token:
         caller_user_id = await _resolve_request_user_id(request)
-        if caller_user_id is None or caller_user_id != user_id:
-            raise HTTPException(status_code=403, detail="Unauthorized to revoke this user.")
+        await _ensure_can_revoke_user(caller_user_id, user_id)
 
-    sessions = await _query_refresh_sessions_for_user(user_id)
-    for session in sessions:
-        if session.get("revoked"):
-            continue
-        session["revoked"] = True
-        session["revokedAt"] = _to_iso8601_utc(now)
-        await _upsert_refresh_session(session)
+    await _revoke_all_sessions_for_user(user_id, now)
 
     return {"revoked": True}
 
@@ -1725,10 +1753,11 @@ async def get_latest_digest(request: Request, user_id: Annotated[str, Depends(ge
         results = []
         async for item in container.query_items(
             query=(
-                "SELECT * FROM c WHERE c.userId = @userId "
+                "SELECT * FROM c WHERE c.userId = "
+                f"{_DB_USER_ID_QUERY_PARAM} "
                 "ORDER BY c.generatedAt DESC OFFSET 0 LIMIT 1"
             ),
-            parameters=[{"name": "@userId", "value": user_id}],
+            parameters=[{"name": _DB_USER_ID_QUERY_PARAM, "value": user_id}],
         ):
             results.append(item)
 
@@ -1802,10 +1831,10 @@ async def get_digest_feedback(
         async for item in container.query_items(
             query=(
                 "SELECT c.suggestionIndex, c.signal FROM c "
-                "WHERE c.userId = @userId AND c.digestId = @digest_id"
+                f"WHERE c.userId = {_DB_USER_ID_QUERY_PARAM} AND c.digestId = @digest_id"
             ),
             parameters=[
-                {"name": "@userId",   "value": user_id},
+                {"name": _DB_USER_ID_QUERY_PARAM,   "value": user_id},
                 {"name": "@digest_id", "value": digest_id},
             ],
         ):

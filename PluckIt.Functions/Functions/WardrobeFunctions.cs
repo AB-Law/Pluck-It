@@ -846,7 +846,22 @@ public class WardrobeFunctions(
             tokenAudience ?? "unknown",
             tokenPrefix);
 
-        var authedUserId = await ResolveUserIdFromAuthorizationTokenAsync(token, cancellationToken);
+        var authedUserId = await ResolveUserIdFromSessionTokenAsync(token, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(authedUserId))
+            return (true, authedUserId);
+
+        if (!LooksLikeJwt(token))
+        {
+            logger.LogWarning(
+                "WardrobeFunctions auth failed: path={Path} aud={Audience} tokenPrefix={TokenPrefix}",
+                path,
+                tokenAudience ?? "unknown",
+                tokenPrefix);
+
+            return GetLocalDevUser();
+        }
+
+        authedUserId = await ResolveUserIdFromAuthorizationTokenAsync(token, cancellationToken);
         if (!string.IsNullOrWhiteSpace(authedUserId))
             return (true, authedUserId);
 
@@ -887,7 +902,11 @@ public class WardrobeFunctions(
         var sub = await authContext.TokenValidator.ValidateAsync(token);
         if (!string.IsNullOrWhiteSpace(sub))
             return sub;
+        return null;
+    }
 
+    private async Task<string?> ResolveUserIdFromSessionTokenAsync(string token, CancellationToken cancellationToken)
+    {
         if (refreshSessionStore is null)
             return null;
 
@@ -900,6 +919,14 @@ public class WardrobeFunctions(
             logger.LogWarning(ex, "WardrobeFunctions auth store lookup failed for provided access token.");
             return null;
         }
+    }
+
+    private static bool LooksLikeJwt(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+            return false;
+
+        return token.Count(ch => ch == '.') >= 2;
     }
 
     private static string? ReadJwtAudience(string token)

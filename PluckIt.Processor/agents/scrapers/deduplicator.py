@@ -54,13 +54,11 @@ class RunDeduplicator:
                     query=query,
                     parameters=params,
                     partition_key=partition_key,
-                    enable_cross_partition_query=False,
                 ))
             except Exception:
                 items = list(container.query_items(
                     query=query,
                     parameters=params,
-                    enable_cross_partition_query=True,
                 ))
             for doc in items:
                 if doc.get("productUrl"):

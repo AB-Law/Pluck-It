@@ -174,7 +174,6 @@ async def _get_user_id_from_session_token(token: str) -> Optional[str]:
         async for row in container.query_items(
             query=query,
             parameters=parameters,
-            enable_cross_partition_query=True,
         ):
             user_id = row.get("userId")
             if isinstance(user_id, str) and user_id.strip():
