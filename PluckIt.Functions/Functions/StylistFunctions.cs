@@ -15,7 +15,8 @@ public class StylistFunctions(
     IStylistService stylist,
     IConfiguration config,
     GoogleTokenValidator tokenValidator,
-    ILogger<StylistFunctions> logger)
+    ILogger<StylistFunctions> logger,
+    RefreshSessionStore? refreshSessionStore = null)
 {
     [Function(nameof(GetRecommendations))]
     public async Task<HttpResponseData> GetRecommendations(
@@ -88,38 +89,68 @@ public class StylistFunctions(
         return response;
     }
 
-    private async Task<(bool Authed, string? UserId)> TryGetUserIdAsync(HttpRequestData req)
+    private async Task<(bool Authed, string? UserId)> TryGetUserIdAsync(
+        HttpRequestData req,
+        CancellationToken cancellationToken = default)
     {
         var path = req.Url.PathAndQuery;
-        if (req.Headers.TryGetValues("Authorization", out var authHeaders))
+        if (TryGetBearerToken(req, out var token))
         {
-            var header = authHeaders.FirstOrDefault();
-            if (header?.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) == true)
-            {
-                var token = header["Bearer ".Length..];
-                var tokenPrefix = TruncateTokenPrefix(token);
-                var tokenAudience = ReadJwtAudience(token);
-                logger.LogDebug(
-                    "StylistFunctions auth attempt: path={Path} aud={Audience} tokenPrefix={TokenPrefix}",
-                    path,
-                    tokenAudience ?? "unknown",
-                    tokenPrefix);
+            var tokenPrefix = TruncateTokenPrefix(token);
+            var tokenAudience = ReadJwtAudience(token);
+            logger.LogDebug(
+                "StylistFunctions auth attempt: path={Path} aud={Audience} tokenPrefix={TokenPrefix}",
+                path,
+                tokenAudience ?? "unknown",
+                tokenPrefix);
 
-                var sub = await tokenValidator.ValidateAsync(token);
-                if (sub is not null) return (true, sub);
+            var sub = await tokenValidator.ValidateAsync(token);
+            if (sub is not null) return (true, sub);
 
-                logger.LogWarning(
-                    "StylistFunctions auth failed: path={Path} aud={Audience} tokenPrefix={TokenPrefix}",
-                    path,
-                    tokenAudience ?? "unknown",
-                    tokenPrefix);
-            }
+            var sessionUserId = await ResolveUserIdFromSessionTokenAsync(token, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(sessionUserId))
+                return (true, sessionUserId);
+
+            logger.LogWarning(
+                "StylistFunctions auth failed: path={Path} aud={Audience} tokenPrefix={TokenPrefix}",
+                path,
+                tokenAudience ?? "unknown",
+                tokenPrefix);
         }
 
         var devId = config["Local:DevUserId"];
         if (!string.IsNullOrEmpty(devId)) return (true, devId);
 
         return (false, null);
+    }
+
+    private static bool TryGetBearerToken(HttpRequestData req, out string token)
+    {
+        token = string.Empty;
+        if (!req.Headers.TryGetValues("Authorization", out var authHeaders))
+            return false;
+
+        var header = authHeaders.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(header) || !header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        token = header["Bearer ".Length..].Trim();
+        return !string.IsNullOrWhiteSpace(token);
+    }
+
+    private async Task<string?> ResolveUserIdFromSessionTokenAsync(string token, CancellationToken cancellationToken)
+    {
+        if (refreshSessionStore is null)
+            return null;
+
+        try
+        {
+            return await refreshSessionStore.ResolveUserIdFromAccessTokenAsync(token, cancellationToken);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string? ReadJwtAudience(string token)
