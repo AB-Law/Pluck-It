@@ -46,6 +46,8 @@ from urllib.parse import unquote
 import random
 import time
 import uuid
+from azure.cosmos.exceptions import CosmosHttpResponseError
+from azure.core import MatchConditions
 from datetime import datetime, timedelta, timezone
 from importlib import import_module
 from typing import Any, Optional, Annotated
@@ -101,12 +103,17 @@ from pydantic import BaseModel
 from PIL import Image
 from pillow_heif import register_heif_opener
 
+import agents.auth as _agent_auth
 from agents.auth import get_user_id
 from agents.memory import load_memory, save_memory, maybe_summarize
 from agents.stylist_agent import stream_stylist_response
 from agents.mood_processor import PRIMARY_MOODS
 from agents.models import RedditIngestBatch, RedditPost
 from agents.scrapers.reddit_scraper import RedditScraper
+
+
+def _verify_google_token(token: str) -> str:
+    return _agent_auth._verify_google_token(token)
 
 register_heif_opener()
 
@@ -1250,10 +1257,8 @@ def _build_refresh_session_record(
     return {
         "id": str(uuid.uuid4()),
         "userId": user_id,
-        "accessToken": access_token,
         "accessTokenHash": _hash_token(access_token),
         "accessTokenExpiresAt": _to_iso8601_utc(access_token_expires_at),
-        "refreshToken": refresh_token,
         "refreshTokenHash": _hash_token(refresh_token),
         "refreshTokenExpiresAt": _to_iso8601_utc(refresh_token_expires_at),
         "issuedAt": _to_iso8601_utc(issued_at),
@@ -1444,10 +1449,10 @@ async def refresh_session(body: RefreshTokenExchangeRequest):
         previous_refresh_token_hash=existing_session.get("refreshTokenHash"),
     )
 
-    existing_session["revoked"] = True
-    existing_session["revokedAt"] = _to_iso8601_utc(now)
-    existing_session["replacedWithRefreshTokenHash"] = new_session["refreshTokenHash"]
-    await _upsert_refresh_session(existing_session)
+    replaced = await _replace_refresh_session_if_match(existing_session, new_session, now)
+    if not replaced:
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token.")
+
     await _upsert_refresh_session(new_session)
 
     return _auth_session_response(
@@ -1466,9 +1471,10 @@ async def refresh_session(body: RefreshTokenExchangeRequest):
         400: {"description": "Missing refresh_token and user_id."},
     },
 )
-async def revoke_session(body: RefreshTokenRevokeRequest):
+async def revoke_session(body: RefreshTokenRevokeRequest, request: Request):
     refresh_token = _resolve_refresh_token(body)
     user_id = _resolve_user_id(body)
+    revoke_by_refresh_token = bool(refresh_token)
 
     if not refresh_token and not user_id:
         raise HTTPException(status_code=400, detail="Missing refresh_token or user_id.")
@@ -1488,6 +1494,11 @@ async def revoke_session(body: RefreshTokenRevokeRequest):
     if not user_id:
         return {"revoked": False}
 
+    if not revoke_by_refresh_token:
+        caller_user_id = await _resolve_request_user_id(request)
+        if caller_user_id is None or caller_user_id != user_id:
+            raise HTTPException(status_code=403, detail="Unauthorized to revoke this user.")
+
     sessions = await _query_refresh_sessions_for_user(user_id)
     for session in sessions:
         if session.get("revoked"):
@@ -1497,6 +1508,47 @@ async def revoke_session(body: RefreshTokenRevokeRequest):
         await _upsert_refresh_session(session)
 
     return {"revoked": True}
+
+
+async def _replace_refresh_session_if_match(
+    existing_session: dict[str, Any],
+    new_session: dict[str, Any],
+    now: datetime,
+) -> bool:
+    etag = existing_session.get("_etag")
+    new_session_hash = new_session.get("refreshTokenHash")
+
+    if not isinstance(etag, str) or not etag.strip():
+        return False
+    if not isinstance(existing_session.get("id"), str) or not existing_session["id"].strip():
+        return False
+    if not isinstance(new_session_hash, str) or not new_session_hash:
+        return False
+
+    container = _get_refresh_tokens_container()
+    replacement = dict(existing_session)
+    replacement["revoked"] = True
+    replacement["revokedAt"] = _to_iso8601_utc(now)
+    replacement["replacedWithRefreshTokenHash"] = new_session_hash
+
+    try:
+        await container.replace_item(
+            replacement["id"],
+            replacement,
+            etag=etag,
+            match_condition=MatchConditions.IfNotModified,
+        )
+    except CosmosHttpResponseError:
+        return False
+
+    return True
+
+
+async def _resolve_request_user_id(request: Request) -> str | None:
+    try:
+        return await get_user_id(request)
+    except Exception:
+        return None
 
 
 class ChatRequest(BaseModel):

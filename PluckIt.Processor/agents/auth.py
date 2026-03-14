@@ -154,10 +154,10 @@ async def _get_user_id_from_session_token(token: str) -> Optional[str]:
 
     try:
         from agents.db import get_refresh_tokens_container
-    except ImportError:
+        container = get_refresh_tokens_container()
+    except Exception as exc:  # pragma: no cover - depends on local/runner packages
+        logger.warning("Session token lookup unavailable: %s", exc)
         return None
-
-    container = get_refresh_tokens_container()
     query = (
         "SELECT c.userId, c.accessTokenExpiresAt "
         "FROM c "

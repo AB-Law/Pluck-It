@@ -64,8 +64,10 @@ async def test_mobile_token_exchange_returns_session_tokens(async_client):
 
     stored = container.upsert_item.await_args.args[0]
     assert stored["userId"] == "google-user-001"
-    assert stored["accessToken"].startswith("at-")
-    assert stored["refreshToken"].startswith("rt-")
+    assert "accessToken" not in stored
+    assert "refreshToken" not in stored
+    assert isinstance(stored.get("accessTokenHash"), str) and len(stored["accessTokenHash"]) == 64
+    assert isinstance(stored.get("refreshTokenHash"), str) and len(stored["refreshTokenHash"]) == 64
 
 
 @pytest.mark.unit
@@ -76,6 +78,7 @@ async def test_refresh_session_rotates_tokens_and_replaces_previous(async_client
     existing_session = {
         "id": "session-old",
         "userId": "test-user-001",
+        "_etag": "etag-old",
         "accessToken": old_access_token,
         "accessTokenHash": _hash_token(old_access_token),
         "accessTokenExpiresAt": _iso(now + timedelta(minutes=30)),
@@ -90,6 +93,7 @@ async def test_refresh_session_rotates_tokens_and_replaces_previous(async_client
 
     container = AsyncMock()
     container.query_items = _query_items_for({"by_refresh": [existing_session]})
+    container.replace_item = AsyncMock(return_value={})
     container.upsert_item = AsyncMock(return_value={})
 
     with patch("agents.db.get_refresh_tokens_container", return_value=container):
@@ -104,14 +108,19 @@ async def test_refresh_session_rotates_tokens_and_replaces_previous(async_client
     assert payload["access_token"] != old_access_token
     assert payload["refresh_token"] != old_refresh_token
 
-    assert container.upsert_item.await_count == 2
-    old_persisted = container.upsert_item.await_args_list[0].args[0]
-    new_persisted = container.upsert_item.await_args_list[1].args[0]
+    assert container.replace_item.await_count == 1
+    assert container.upsert_item.await_count == 1
+    old_replace_args = container.replace_item.await_args_list[0].args
+    assert len(old_replace_args) >= 2
+    assert old_replace_args[0] == existing_session["id"]
+    old_persisted = old_replace_args[1]
+    new_persisted = container.upsert_item.await_args_list[0].args[0]
 
     assert old_persisted["revoked"] is True
     assert old_persisted["replacedWithRefreshTokenHash"] == new_persisted["refreshTokenHash"]
     assert new_persisted["previousRefreshTokenHash"] == _hash_token(old_refresh_token)
-    assert payload["access_token"] == new_persisted["accessToken"]
+    assert _hash_token(payload["access_token"]) == new_persisted["accessTokenHash"]
+    assert _hash_token(payload["refresh_token"]) == new_persisted["refreshTokenHash"]
 
 
 @pytest.mark.unit
@@ -133,6 +142,7 @@ async def test_refresh_session_rejects_expired_refresh_token(async_client):
     existing_session = {
         "id": "session-expired",
         "userId": "test-user-001",
+        "_etag": "etag-expired",
         "accessToken": old_access_token,
         "accessTokenHash": _hash_token(old_access_token),
         "accessTokenExpiresAt": _iso(now - timedelta(hours=1)),
@@ -147,6 +157,7 @@ async def test_refresh_session_rejects_expired_refresh_token(async_client):
 
     container = AsyncMock()
     container.query_items = _query_items_for({"by_refresh": [existing_session]})
+    container.replace_item = AsyncMock(return_value={})
     container.upsert_item = AsyncMock(return_value={})
 
     with patch("agents.db.get_refresh_tokens_container", return_value=container):
@@ -161,7 +172,8 @@ async def test_refresh_session_rejects_expired_refresh_token(async_client):
 
     revoked_session = container.upsert_item.await_args_list[0].args[0]
     assert revoked_session["revoked"] is True
-    assert revoked_session["refreshToken"] == old_refresh_token
+    assert revoked_session["accessTokenHash"] == _hash_token(old_access_token)
+    assert revoked_session["refreshTokenHash"] == _hash_token(old_refresh_token)
 
 
 @pytest.mark.unit
@@ -228,5 +240,97 @@ async def test_revoke_session_requires_identifier(async_client):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Missing refresh_token or user_id."
+
+
+@pytest.mark.unit
+async def test_revoke_session_by_user_id_requires_authenticated_user(async_client):
+    container = AsyncMock()
+    container.query_items = _query_items_for(
+        {
+            "by_user": [
+                {
+                    "id": "session-main",
+                    "userId": "test-user-002",
+                    "accessToken": "at-main",
+                    "accessTokenHash": _hash_token("at-main"),
+                    "accessTokenExpiresAt": _iso(
+                        datetime(2026, 3, 14, 12, 0, 0, tzinfo=timezone.utc) + timedelta(hours=1)
+                    ),
+                    "refreshToken": "rt-main",
+                    "refreshTokenHash": _hash_token("rt-main"),
+                    "refreshTokenExpiresAt": _iso(
+                        datetime(2026, 3, 14, 12, 0, 0, tzinfo=timezone.utc) + timedelta(days=10)
+                    ),
+                    "issuedAt": _iso(
+                        datetime(2026, 3, 14, 12, 0, 0, tzinfo=timezone.utc)
+                    ),
+                    "revoked": False,
+                    "revokedOnLogout": True,
+                    "tokenRotation": "single-use",
+                    "_etag": "etag-main",
+                }
+            ]
+        }
+    )
+    container.upsert_item = AsyncMock(return_value={})
+
+    with (
+        patch("function_app.get_user_id", AsyncMock(return_value="test-user-001")),
+        patch("agents.db.get_refresh_tokens_container", return_value=container),
+    ):
+        response = await async_client.post(
+            "/api/auth/revoke",
+            json={"user_id": "test-user-002"},
+            headers={"Authorization": "Bearer any-token"},
+        )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.unit
+async def test_revoke_session_by_user_id_revokes_user_sessions_when_authenticated(async_client):
+    container = AsyncMock()
+    container.query_items = _query_items_for(
+        {
+            "by_user": [
+                {
+                    "id": "session-main",
+                    "userId": "test-user-002",
+                    "accessToken": "at-main",
+                    "accessTokenHash": _hash_token("at-main"),
+                    "accessTokenExpiresAt": _iso(
+                        datetime(2026, 3, 14, 12, 0, 0, tzinfo=timezone.utc) + timedelta(hours=1)
+                    ),
+                    "refreshToken": "rt-main",
+                    "refreshTokenHash": _hash_token("rt-main"),
+                    "refreshTokenExpiresAt": _iso(
+                        datetime(2026, 3, 14, 12, 0, 0, tzinfo=timezone.utc) + timedelta(days=10)
+                    ),
+                    "issuedAt": _iso(
+                        datetime(2026, 3, 14, 12, 0, 0, tzinfo=timezone.utc)
+                    ),
+                    "revoked": False,
+                    "revokedOnLogout": True,
+                    "tokenRotation": "single-use",
+                    "_etag": "etag-main",
+                }
+            ]
+        }
+    )
+    container.upsert_item = AsyncMock(return_value={})
+
+    with (
+        patch("function_app.get_user_id", AsyncMock(return_value="test-user-002")),
+        patch("agents.db.get_refresh_tokens_container", return_value=container),
+    ):
+        response = await async_client.post(
+            "/api/auth/revoke",
+            json={"user_id": "test-user-002"},
+            headers={"Authorization": "Bearer any-token"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"revoked": True}
+    assert container.upsert_item.await_count == 1
 
 

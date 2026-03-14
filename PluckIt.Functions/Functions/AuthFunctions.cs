@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using System.Linq;
 using System.Threading;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -172,6 +173,10 @@ public class AuthFunctions(WardrobeFunctionsAuthContext authContext, RefreshSess
 
             if (!string.IsNullOrWhiteSpace(userId))
             {
+                var authenticatedUserId = await GetAuthenticatedUserIdFromRequestAsync(req, cancellationToken);
+                if (!string.Equals(authenticatedUserId, userId, StringComparison.Ordinal))
+                    return await BuildJsonErrorResponse(req, HttpStatusCode.Forbidden, "Forbidden.");
+
                 await refreshSessionStore.RevokeAllByUserIdAsync(userId, cancellationToken);
                 var response = req.CreateResponse(HttpStatusCode.OK);
                 response.Headers.Add(ContentTypeHeader, JsonContentType);
@@ -250,6 +255,44 @@ public class AuthFunctions(WardrobeFunctionsAuthContext authContext, RefreshSess
         }
 
         return null;
+    }
+
+    private async Task<string?> GetAuthenticatedUserIdFromRequestAsync(HttpRequestData req, CancellationToken cancellationToken)
+    {
+        if (!req.Headers.TryGetValues("Authorization", out var authHeaders))
+            return null;
+
+        var header = authHeaders.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(header) || !header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var token = header["Bearer ".Length..].Trim();
+        if (string.IsNullOrWhiteSpace(token))
+            return null;
+
+        string? googleUserId = null;
+        try
+        {
+            googleUserId = await authContext.TokenValidator.ValidateAsync(token);
+        }
+        catch (Exception)
+        {
+        }
+
+        if (!string.IsNullOrWhiteSpace(googleUserId))
+            return googleUserId;
+
+        if (refreshSessionStore is null)
+            return null;
+
+        try
+        {
+            return await refreshSessionStore.ResolveUserIdFromAccessTokenAsync(token, cancellationToken);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string? ResolveIdToken(JsonElement root)

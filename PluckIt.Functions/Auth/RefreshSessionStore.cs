@@ -4,6 +4,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -73,13 +74,16 @@ public sealed class RefreshSessionStore(CosmosClient cosmosClient, IConfiguratio
             return null;
 
         var now = DateTimeOffset.UtcNow;
-        if (existing.Revoked || existing.RefreshTokenExpiresAt <= now)
+        if (existing.Revoked)
         {
-            if (!existing.Revoked)
-            {
-                existing.Revoked = true;
-                await PersistSessionAsync(existing, cancellationToken);
-            }
+            return null;
+        }
+
+        if (existing.RefreshTokenExpiresAt <= now)
+        {
+            existing.Revoked = true;
+            existing.RevokedAt = now;
+            await PersistSessionAsync(existing, cancellationToken);
             return null;
         }
 
@@ -93,11 +97,10 @@ public sealed class RefreshSessionStore(CosmosClient cosmosClient, IConfiguratio
             now + AccessTokenLifetime,
             now + RefreshTokenLifetime,
             previousRefreshTokenHash: HashToken(refreshToken));
-        existing.Revoked = true;
-        existing.ReplacedByRefreshTokenHash = newSession.RefreshTokenHash;
 
-        await PersistSessionAsync(existing, cancellationToken);
-        await PersistSessionAsync(newSession, cancellationToken);
+        var rotated = await TryRotateRefreshSessionAsync(existing, newSession, now, cancellationToken);
+        if (!rotated)
+            return null;
 
         return new SessionTokens(newAccessToken, newRefreshToken, newSession.AccessTokenExpiresAt, newSession.RefreshTokenExpiresAt, existing.UserId);
     }
@@ -108,15 +111,11 @@ public sealed class RefreshSessionStore(CosmosClient cosmosClient, IConfiguratio
         if (session is null)
             return null;
 
-        if (session.Revoked || session.AccessTokenExpiresAt <= DateTimeOffset.UtcNow)
-        {
-            if (!session.Revoked)
-            {
-                session.Revoked = true;
-                await PersistSessionAsync(session, cancellationToken);
-            }
+        if (session.Revoked)
             return null;
-        }
+
+        if (session.AccessTokenExpiresAt <= DateTimeOffset.UtcNow)
+            return null;
 
         return session.UserId;
     }
@@ -155,6 +154,51 @@ public sealed class RefreshSessionStore(CosmosClient cosmosClient, IConfiguratio
         return revokedCount;
     }
 
+    private async Task<bool> TryRotateRefreshSessionAsync(
+        RefreshSessionRecord existingSession,
+        RefreshSessionRecord newSession,
+        DateTimeOffset revokedAt,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(existingSession.ETag))
+            return false;
+
+        existingSession.Revoked = true;
+        existingSession.RevokedAt = revokedAt;
+        existingSession.ReplacedByRefreshTokenHash = newSession.RefreshTokenHash;
+
+        var batch = _container.CreateTransactionalBatch(new PartitionKey(existingSession.UserId))
+            .ReplaceItem(
+                existingSession.Id,
+                existingSession,
+                new TransactionalBatchItemRequestOptions
+                {
+                    IfMatchEtag = existingSession.ETag,
+                })
+            .CreateItem(newSession);
+
+        try
+        {
+            var response = await batch.ExecuteAsync(cancellationToken);
+            if (response.IsSuccessStatusCode)
+                return true;
+
+            _logger.LogWarning(
+                "Atomic refresh session rotation failed for userId={UserId}. StatusCode={StatusCode}",
+                existingSession.UserId,
+                response.StatusCode);
+            return false;
+        }
+        catch (CosmosException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Atomic refresh session rotation failed for userId={UserId}.",
+                existingSession.UserId);
+            return false;
+        }
+    }
+
     private static string GenerateAccessToken()
     {
         return $"{AccessTokenPrefix}{Guid.NewGuid():N}";
@@ -183,10 +227,8 @@ public sealed class RefreshSessionStore(CosmosClient cosmosClient, IConfiguratio
         {
             Id = Guid.NewGuid().ToString("N"),
             UserId = userId,
-            AccessToken = accessToken,
             AccessTokenHash = HashToken(accessToken),
             AccessTokenExpiresAt = accessTokenExpiresAt,
-            RefreshToken = refreshToken,
             RefreshTokenHash = HashToken(refreshToken),
             RefreshTokenExpiresAt = refreshTokenExpiresAt,
             IssuedAt = issuedAt,
@@ -266,10 +308,11 @@ public sealed class RefreshSessionStore(CosmosClient cosmosClient, IConfiguratio
     {
         public string Id { get; set; } = string.Empty;
         public string UserId { get; set; } = string.Empty;
-        public string AccessToken { get; set; } = string.Empty;
+        [JsonPropertyName("_etag")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ETag { get; set; }
         public string AccessTokenHash { get; set; } = string.Empty;
         public DateTimeOffset AccessTokenExpiresAt { get; set; }
-        public string RefreshToken { get; set; } = string.Empty;
         public string RefreshTokenHash { get; set; } = string.Empty;
         public DateTimeOffset RefreshTokenExpiresAt { get; set; }
         public DateTimeOffset IssuedAt { get; set; }

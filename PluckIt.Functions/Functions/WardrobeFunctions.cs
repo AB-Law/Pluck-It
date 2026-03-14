@@ -853,9 +853,20 @@ public class WardrobeFunctions(
                 if (sub is not null)
                     return (true, sub);
 
-                var appSessionUserId = refreshSessionStore is null
-                    ? null
-                    : await refreshSessionStore.ResolveUserIdFromAccessTokenAsync(token, cancellationToken);
+                var appSessionUserId = (string?)null;
+                if (refreshSessionStore is not null)
+                {
+                    try
+                    {
+                        appSessionUserId = await refreshSessionStore.ResolveUserIdFromAccessTokenAsync(token, cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning(
+                            ex,
+                            "WardrobeFunctions auth store lookup failed for provided access token.");
+                    }
+                }
                 if (!string.IsNullOrWhiteSpace(appSessionUserId))
                     return (true, appSessionUserId);
 
