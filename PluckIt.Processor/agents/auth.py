@@ -13,6 +13,8 @@ This mirrors the behaviour of GoogleTokenValidator.cs in the .NET API.
 import asyncio
 import logging
 import os
+import base64
+import json
 from typing import Optional
 
 from fastapi import HTTPException, Request, status
@@ -57,6 +59,11 @@ def _verify_google_token(token: str) -> str:
     Verify a Google ID token and return the `sub` (userId).
     Uses google-auth which validates signature, expiry, and audience.
     """
+    token_audience = _read_token_audience(token)
+    token_prefix = _token_prefix(token)
+    logger.warning(
+        "Google token validation start: aud=%s prefix=%s", token_audience or "unknown", token_prefix
+    )
     from google.oauth2 import id_token
     from google.auth.transport import requests as google_requests
 
@@ -78,7 +85,13 @@ def _verify_google_token(token: str) -> str:
             )
             return idinfo["sub"]
         except Exception as exc:  # pragma: no cover - external auth failure path
-            logger.warning("Token validation failed for client id %s: %s", client_id, exc)
+            logger.warning(
+                "Token validation failed for client id %s and aud=%s prefix=%s: %s",
+                client_id,
+                token_audience or "unknown",
+                token_prefix,
+                exc,
+            )
             last_error = exc
 
     logger.warning("Token validation failed for all configured client ids: %s", last_error)
@@ -102,10 +115,52 @@ async def get_user_id(request: Request) -> str:
 
     auth_header: Optional[str] = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
+        logger.warning(
+            "Auth header missing for %s %s",
+            request.method,
+            request.url.path,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing Authorization header.",
         )
 
     token = auth_header.removeprefix("Bearer ").strip()
+    token_audience = _read_token_audience(token)
+    token_prefix = _token_prefix(token)
+    logger.warning(
+        "Auth dependency validating request path=%s method=%s aud=%s prefix=%s",
+        request.url.path,
+        request.method,
+        token_audience or "unknown",
+        token_prefix,
+    )
     return await asyncio.to_thread(_verify_google_token, token)
+
+
+def _token_prefix(token: str, max_len: int = 20) -> str:
+    return token[:max_len] if len(token) <= max_len else f"{token[:max_len]}..."
+
+
+def _read_token_audience(token: str) -> Optional[str]:
+    """
+    Extract aud from JWT payload without verifying the token.
+    Useful for diagnostics only.
+    """
+    parts = token.split(".")
+    if len(parts) < 2 or not parts[1]:
+        return None
+
+    try:
+        padded = parts[1] + "=" * ((4 - len(parts[1]) % 4) % 4)
+        payload_bytes = base64.urlsafe_b64decode(padded.encode("ascii"))
+        payload = json.loads(payload_bytes.decode("utf-8"))
+        aud = payload.get("aud")
+        if isinstance(aud, str):
+            return aud
+        if isinstance(aud, list):
+            return ",".join([str(x) for x in aud if x])
+    except Exception:
+        return None
+
+    return None

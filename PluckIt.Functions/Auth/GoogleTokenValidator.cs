@@ -1,6 +1,10 @@
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 
@@ -18,12 +22,21 @@ public sealed class GoogleTokenValidator
     private readonly string _googleIssuerHost;
     private readonly string _googleIssuerWithScheme;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ILogger<GoogleTokenValidator> _logger;
 
     private JsonWebKeySet? _cachedKeySet;
     private DateTime _keySetExpiresAt = DateTime.MinValue;
     private readonly SemaphoreSlim _lock = new(1, 1);
 
     public GoogleTokenValidator(IConfiguration configuration, IHttpClientFactory httpClientFactory)
+        : this(configuration, httpClientFactory, NullLogger<GoogleTokenValidator>.Instance)
+    {
+    }
+
+    public GoogleTokenValidator(
+        IConfiguration configuration,
+        IHttpClientFactory httpClientFactory,
+        ILogger<GoogleTokenValidator> logger)
     {
         var primaryClientId = configuration["GoogleAuth:ClientId"]
             ?? configuration["GoogleAuth__ClientId"]
@@ -62,6 +75,7 @@ public sealed class GoogleTokenValidator
         var issuerScheme = configuration["GoogleAuth:IssuerScheme"] ?? Uri.UriSchemeHttps;
         _googleIssuerWithScheme = BuildIssuerWithScheme(_googleIssuerHost, issuerScheme);
         _httpClientFactory = httpClientFactory;
+        _logger = logger;
     }
 
     /// <summary>
@@ -71,6 +85,14 @@ public sealed class GoogleTokenValidator
     /// </summary>
     public async Task<string?> ValidateAsync(string idToken)
     {
+        var tokenAudience = ReadJwtAudience(idToken);
+        var tokenPrefix = TruncateTokenPrefix(idToken);
+        var allowedAudiences = string.Join(", ", _allowedClientIds);
+        _logger.LogDebug(
+            "Google token validation attempt: aud={Audience} prefix={TokenPrefix} allowed={AllowedAudiences}",
+            tokenAudience ?? "unknown",
+            tokenPrefix,
+            allowedAudiences);
         try
         {
             var keySet = await GetSigningKeysAsync();
@@ -85,13 +107,28 @@ public sealed class GoogleTokenValidator
                 RequireExpirationTime = true,
             });
 
-            if (!result.IsValid) return null;
+            if (!result.IsValid)
+            {
+                _logger.LogWarning(
+                    "Google token validation failed: aud={Audience} prefix={TokenPrefix} allowed={AllowedAudiences} error={Error}",
+                    tokenAudience ?? "unknown",
+                    tokenPrefix,
+                    allowedAudiences,
+                    result.Exception?.Message ?? "validation failed");
+                return null;
+            }
 
             result.Claims.TryGetValue("sub", out var sub);
             return sub?.ToString();
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(
+                ex,
+                "Google token validation error: aud={Audience} prefix={TokenPrefix} allowed={AllowedAudiences}",
+                tokenAudience ?? "unknown",
+                tokenPrefix,
+                allowedAudiences);
             return null;
         }
     }
@@ -117,6 +154,47 @@ public sealed class GoogleTokenValidator
             .Where(id => !string.IsNullOrWhiteSpace(id));
 
         return new HashSet<string>(parsed, StringComparer.Ordinal);
+    }
+
+    private static string? ReadJwtAudience(string token)
+    {
+        var parts = token.Split('.');
+        if (parts.Length < 2 || string.IsNullOrWhiteSpace(parts[1]))
+            return null;
+
+        try
+        {
+            var payloadJson = Base64UrlEncoder.Decode(parts[1]);
+            using var doc = JsonDocument.Parse(payloadJson);
+            if (!doc.RootElement.TryGetProperty("aud", out var aud))
+                return null;
+
+            return aud.ValueKind switch
+            {
+                JsonValueKind.String => aud.GetString(),
+                JsonValueKind.Array => string.Join(
+                    ",",
+                    aud.EnumerateArray()
+                        .Where(x => x.ValueKind == JsonValueKind.String)
+                        .Select(x => x.GetString())
+                        .Where(x => !string.IsNullOrWhiteSpace(x))),
+                _ => null
+            };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string TruncateTokenPrefix(string token)
+    {
+        const int maxPrefixLength = 20;
+        return string.IsNullOrEmpty(token)
+            ? "<empty>"
+            : token.Length <= maxPrefixLength
+                ? token
+                : $"{token[..maxPrefixLength]}...";
     }
 
     // ── JWKS caching ─────────────────────────────────────────────────────────

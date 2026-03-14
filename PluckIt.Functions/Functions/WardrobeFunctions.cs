@@ -817,14 +817,30 @@ public class WardrobeFunctions(
     /// </summary>
     private async Task<(bool Authed, string? UserId)> TryGetUserIdAsync(HttpRequestData req)
     {
+        var path = req.Url.PathAndQuery;
         if (req.Headers.TryGetValues("Authorization", out var authHeaders))
         {
             var header = authHeaders.FirstOrDefault();
             if (header?.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) == true)
             {
                 var token = header["Bearer ".Length..];
+                var tokenPrefix = TruncateTokenPrefix(token);
+                var tokenAudience = ReadJwtAudience(token);
+                logger.LogDebug(
+                    "WardrobeFunctions auth attempt: path={Path} aud={Audience} tokenPrefix={TokenPrefix}",
+                    path,
+                    tokenAudience ?? "unknown",
+                    tokenPrefix);
+
                 var sub = await authContext.TokenValidator.ValidateAsync(token);
-                if (sub is not null) return (true, sub);
+                if (sub is not null)
+                    return (true, sub);
+
+                logger.LogWarning(
+                    "WardrobeFunctions auth failed: path={Path} aud={Audience} tokenPrefix={TokenPrefix}",
+                    path,
+                    tokenAudience ?? "unknown",
+                    tokenPrefix);
             }
         }
 
@@ -832,6 +848,43 @@ public class WardrobeFunctions(
         if (!string.IsNullOrEmpty(devId)) return (true, devId);
 
         return (false, null);
+    }
+
+    private static string? ReadJwtAudience(string token)
+    {
+        var parts = token.Split('.');
+        if (parts.Length < 2 || string.IsNullOrWhiteSpace(parts[1]))
+            return null;
+
+        try
+        {
+            var payload = Convert.FromBase64String(
+                parts[1]
+                    .Replace('-', '+')
+                    .Replace('_', '/')
+                    .PadRight(parts[1].Length + (4 - parts[1].Length % 4) % 4, '='));
+            using var doc = JsonDocument.Parse(payload);
+            if (!doc.RootElement.TryGetProperty("aud", out var aud))
+                return null;
+
+            return aud.ValueKind == JsonValueKind.String
+                ? aud.GetString()
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string TruncateTokenPrefix(string token)
+    {
+        const int maxPrefixLength = 20;
+        return string.IsNullOrEmpty(token)
+            ? "<empty>"
+            : token.Length <= maxPrefixLength
+                ? token
+                : $"{token[..maxPrefixLength]}...";
     }
 
     private async Task RefreshWardrobeFingerprintAsync(string userId, CancellationToken cancellationToken)
