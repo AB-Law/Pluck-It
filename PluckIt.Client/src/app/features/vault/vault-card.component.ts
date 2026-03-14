@@ -22,7 +22,8 @@ import { CpwBadgeLevel } from '../../core/models/vault-insights.model';
           [alt]="item().brand || item().category || 'Clothing item'"
           class="h-full w-full object-contain p-4"
           style="mix-blend-mode: lighten"
-          loading="lazy"
+          [attr.loading]="priority() ? 'eager' : 'lazy'"
+          [attr.fetchpriority]="priority() ? 'high' : 'auto'"
         />
 
         <!-- CPW Badge or SELECTED badge -->
@@ -76,6 +77,7 @@ export class VaultCardComponent {
   isSelected = input<boolean>(false);
   cpwBadge   = input<CpwBadgeLevel>('unknown');
   breakEvenReached = input<boolean>(false);
+  priority         = input<boolean>(false);
 
   selectToggled = output<string>();
   wearIncrementRequested = output<ClothingItem>();

@@ -6,7 +6,7 @@ import { RangeSliderComponent } from '../../shared/range-slider.component';
 import { ItemCondition } from '../../core/models/clothing-item.model';
 import type { WardrobeSortField } from '../../core/models/clothing-item.model';
 
-export type SmartGroup = 'all' | 'favorites' | 'recent' | 'collections';
+export type SmartGroup = 'all' | 'favorites' | 'recent' | 'collections' | 'wishlist';
 
 export interface VaultFilters {
   group:       SmartGroup;
@@ -234,9 +234,10 @@ export class VaultSidebarComponent implements OnInit {
   readonly conditions  = CONDITIONS;
 
   readonly groups = [
-    { id: 'all'       as SmartGroup, icon: 'grid_view', label: 'All Items'     },
-    { id: 'favorites' as SmartGroup, icon: 'star',      label: 'Favorites'     },
-    { id: 'recent'    as SmartGroup, icon: 'schedule',  label: 'Worn Recently' },
+    { id: 'all'       as SmartGroup, icon: 'grid_view',    label: 'All Items'     },
+    { id: 'favorites' as SmartGroup, icon: 'star',         label: 'Favorites'     },
+    { id: 'recent'    as SmartGroup, icon: 'schedule',     label: 'Worn Recently' },
+    { id: 'wishlist'  as SmartGroup, icon: 'favorite',     label: 'Wishlist'      },
   ];
 
   readonly sortKey = computed(() => `${this.sortField()}:${this.sortDir()}`);
