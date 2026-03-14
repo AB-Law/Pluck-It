@@ -64,6 +64,34 @@ public sealed class InMemoryWardrobeRepositoryTests
     }
 
     [Fact]
+    public async Task GetAllAsync_ExcludesWishlistedItemsByDefault()
+    {
+        var regular = Item("regular");
+        var wishlisted = Item("wishlist");
+        wishlisted.IsWishlisted = true;
+        var repo = new InMemoryWardrobeRepository()
+            .WithItems(regular, wishlisted);
+
+        var result = await repo.GetAllAsync(User1, new WardrobeQuery { PageSize = 100 });
+
+        result.Items.ShouldHaveSingleItem().Id.ShouldBe("regular");
+    }
+
+    [Fact]
+    public async Task GetAllAsync_IncludesWishlistedWhenRequested()
+    {
+        var regular = Item("regular");
+        var wishlisted = Item("wishlist");
+        wishlisted.IsWishlisted = true;
+        var repo = new InMemoryWardrobeRepository()
+            .WithItems(regular, wishlisted);
+
+        var result = await repo.GetAllAsync(User1, new WardrobeQuery { PageSize = 100, IncludeWishlisted = true });
+
+        result.Items.Select(i => i.Id).ShouldBe(new[] { "regular", "wishlist" }, ignoreOrder: true);
+    }
+
+    [Fact]
     public async Task GetAllAsync_PaginatesWithContinuationTokens()
     {
         var repo = new InMemoryWardrobeRepository()

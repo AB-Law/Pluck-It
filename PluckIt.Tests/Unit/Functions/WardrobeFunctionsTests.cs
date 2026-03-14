@@ -191,6 +191,39 @@ public sealed class WardrobeFunctionsTests
     }
 
     [Fact]
+    public async Task GetWardrobe_ExcludesWishlistedItemsByDefault()
+    {
+        var wishlisted = MakeItem("wishlist");
+        wishlisted.IsWishlisted = true;
+        var sut = CreateSut(
+            new InMemoryWardrobeRepository()
+                .WithItems(MakeItem("regular"), wishlisted));
+
+        var result = await sut.GetWardrobe(TestRequest.Get("http://localhost/api/wardrobe"), CancellationToken.None) as Helpers.TestHttpResponseData;
+
+        var (items, _) = ParseEnvelope(result!.ReadBodyAsString());
+        items.ShouldHaveSingleItem().Id.ShouldBe("regular");
+    }
+
+    [Fact]
+    public async Task GetWardrobe_IncludesWishlistedItemsWhenFlagIsEnabled()
+    {
+        var wishlisted = MakeItem("wishlist");
+        wishlisted.IsWishlisted = true;
+        var sut = CreateSut(
+            new InMemoryWardrobeRepository()
+                .WithItems(MakeItem("regular"), wishlisted));
+
+        var result = await sut.GetWardrobe(
+            TestRequest.Get("http://localhost/api/wardrobe?includeWishlisted=true"),
+            CancellationToken.None) as Helpers.TestHttpResponseData;
+
+        var (items, _) = ParseEnvelope(result!.ReadBodyAsString());
+        items.ShouldContain(i => i.Id == "regular");
+        items.ShouldContain(i => i.Id == "wishlist");
+    }
+
+    [Fact]
     public async Task GetWardrobe_Returns401WhenNotAuthenticated()
     {
         var sut = new WardrobeFunctions(

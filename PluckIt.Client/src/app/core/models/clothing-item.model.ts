@@ -200,6 +200,7 @@ export interface WardrobeQuery {
   maxWears?:          number | null;
   sortField?:         WardrobeSortField | null;
   sortDir?:           'asc' | 'desc' | null;
+  includeWishlisted?:  boolean | null;
   pageSize?:          number | null;
   continuationToken?: string | null;
 }

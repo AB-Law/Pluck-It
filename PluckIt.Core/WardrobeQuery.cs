@@ -48,6 +48,12 @@ public record WardrobeQuery
     /// <summary>Maximum wear count (inclusive).</summary>
     public int?                          MaxWears          { get; init; }
 
+    /// <summary>
+    /// When <see langword="true"/>, includes items marked as wishlisted in the result set.
+    /// When <see langword="false"/>, filters wishlist items out of results.
+    /// </summary>
+    public bool IncludeWishlisted { get; init; }
+
     // ── Sort ─────────────────────────────────────────────────────────────────
 
     /// <summary>

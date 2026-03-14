@@ -436,6 +436,7 @@ describe('VaultComponent', () => {
       priceMin: 20,
       priceMax: 500,
       minWears: 2,
+      includeWishlisted: false,
       pageSize: 24,
       sortField: 'dateAdded',
       sortDir: 'desc',
@@ -446,6 +447,7 @@ describe('VaultComponent', () => {
       priceMin: undefined,
       priceMax: undefined,
       minWears: undefined,
+      includeWishlisted: false,
       pageSize: 24,
     }));
 
@@ -463,6 +465,14 @@ describe('VaultComponent', () => {
       },
       replaceUrl: true,
     }));
+  });
+
+  it('buildQuery includes wishlisted items only for the wishlist group', () => {
+    const wishlistQuery = (component as any).buildQuery({
+      ...QUERY_FILTER,
+      group: 'wishlist',
+    });
+    expect(wishlistQuery.includeWishlisted).toBe(true);
   });
 
   it('handles wear suggestions load failure without breaking state', () => {

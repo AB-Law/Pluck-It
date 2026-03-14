@@ -9,7 +9,8 @@ public interface IWardrobeRepository
   /// <summary>
   /// Returns a single page of clothing items for a user, applying all filters,
   /// sort, and pagination specified in <paramref name="query"/>.
-  /// Excludes draft items (draftStatus is non-null).
+  /// Excludes draft items (draftStatus is non-null) and, by default, excludes
+  /// wishlisted items unless <see cref="WardrobeQuery.IncludeWishlisted"/> is true.
   /// </summary>
   Task<WardrobePagedResult> GetAllAsync(
     string userId,

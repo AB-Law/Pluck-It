@@ -99,6 +99,13 @@ describe('WardrobeService', () => {
     req.flush({ items: [], nextContinuationToken: null });
   });
 
+  it('getAll() maps includeWishlisted into request parameters', () => {
+    service.getAll({ includeWishlisted: true }).subscribe();
+    const req = http.expectOne(r => r.url.includes('/api/wardrobe') && !r.url.includes('/api/wardrobe/'));
+    expect(req.request.params.get('includeWishlisted')).toBe('true');
+    req.flush({ items: [], nextContinuationToken: null });
+  });
+
   it('uploadForDraft() posts image data using FormData', () => {
     const blob = new Blob(['image'], { type: 'image/jpeg' });
     const file = new File([blob], 'shirt.jpg', { type: 'image/jpeg' });

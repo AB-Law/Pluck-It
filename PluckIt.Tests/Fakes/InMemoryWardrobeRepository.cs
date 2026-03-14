@@ -53,6 +53,8 @@ public sealed class InMemoryWardrobeRepository : IWardrobeRepository
         q = ApplyPriceFilter(q, query.PriceMax, (i, max) => i.Price is not null && i.Price.Amount <= max);
         q = ApplyRangeFilter(q, query.MinWears, (i, min) => i.WearCount >= min);
         q = ApplyRangeFilter(q, query.MaxWears, (i, max) => i.WearCount <= max);
+        if (!query.IncludeWishlisted)
+            q = q.Where(i => !i.IsWishlisted);
         return q;
     }
 

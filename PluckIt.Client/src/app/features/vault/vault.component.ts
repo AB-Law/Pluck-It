@@ -586,6 +586,7 @@ export class VaultComponent implements OnInit, OnDestroy {
 
   private buildQuery(filters: VaultFilters, continuationToken?: string | null): WardrobeQuery {
     const [priceMin, priceMax] = filters.priceRange;
+    const includeWishlisted = filters.group === 'wishlist';
     return {
       brand: filters.brand || undefined,
       condition: filters.condition ? filters.condition : undefined,
@@ -594,6 +595,7 @@ export class VaultComponent implements OnInit, OnDestroy {
       minWears: filters.minWears > 0 ? filters.minWears : undefined,
       sortField: filters.sortField,
       sortDir: filters.sortDir,
+      includeWishlisted,
       pageSize: 24,
       continuationToken: continuationToken ?? undefined,
     };

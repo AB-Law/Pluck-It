@@ -112,6 +112,7 @@ public sealed class WardrobeRepositoryTests
         query.QueryText.ShouldContain("LOWER(c.brand) = LOWER(@brand)");
         query.QueryText.ShouldContain("ARRAY_LENGTH(ARRAY_INTERSECT(c.tags, @tags)) > 0");
         query.QueryText.ShouldContain("c.wearCount >= @minWears");
+        query.QueryText.ShouldContain("(NOT IS_DEFINED(c.isWishlisted) OR IS_NULL(c.isWishlisted) OR c.isWishlisted = false)");
         query.QueryText.ShouldContain("ORDER BY c.wearCount ASC");
         queryOptions.ShouldNotBeNull();
         queryOptions!.MaxItemCount.ShouldBe(100);

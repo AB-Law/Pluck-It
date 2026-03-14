@@ -45,6 +45,7 @@ export class WardrobeService {
     if (query?.aestheticTags?.length)qp = qp.set('aestheticTags',     query.aestheticTags.join(','));
     if (query?.priceMin  != null)    qp = qp.set('priceMin',          String(query.priceMin));
     if (query?.priceMax  != null)    qp = qp.set('priceMax',          String(query.priceMax));
+    if (query?.includeWishlisted != null) qp = qp.set('includeWishlisted', String(query.includeWishlisted));
     if (query?.minWears  != null)    qp = qp.set('minWears',          String(query.minWears));
     if (query?.maxWears  != null)    qp = qp.set('maxWears',          String(query.maxWears));
     if (query?.sortField)            qp = qp.set('sortField',         query.sortField);

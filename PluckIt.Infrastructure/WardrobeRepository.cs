@@ -99,6 +99,12 @@ public class WardrobeRepository : IWardrobeRepository
       parameters.Add("@maxWears", query.MaxWears.Value);
     }
 
+    if (!query.IncludeWishlisted)
+    {
+      // Default API behavior should hide wishlist items unless caller explicitly opts in.
+      conditions.Add("(NOT IS_DEFINED(c.isWishlisted) OR IS_NULL(c.isWishlisted) OR c.isWishlisted = false)");
+    }
+
     // Exclude upload drafts — items where draftStatus is defined and non-null
     conditions.Add("(NOT IS_DEFINED(c.draftStatus) OR IS_NULL(c.draftStatus))");
 

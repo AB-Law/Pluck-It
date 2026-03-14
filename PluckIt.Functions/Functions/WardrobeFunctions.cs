@@ -86,6 +86,7 @@ public class WardrobeFunctions(
         var priceMax = ParseOptionalDecimal(qs.GetValueOrDefault("priceMax"));
         var minWears = ParseOptionalIntOrNull(qs.GetValueOrDefault("minWears"));
         var maxWears = ParseOptionalIntOrNull(qs.GetValueOrDefault("maxWears"));
+        bool.TryParse(qs.GetValueOrDefault("includeWishlisted"), out var includeWishlisted);
 
         if (priceMin.HasValue && priceMax.HasValue && priceMin.Value > priceMax.Value)
         {
@@ -112,6 +113,7 @@ public class WardrobeFunctions(
             PriceMax          = priceMax,
             MinWears          = minWears,
             MaxWears          = maxWears,
+            IncludeWishlisted  = includeWishlisted,
             SortField         = ParseSortField(qs.GetValueOrDefault("sortField")),
             SortDir           = ParseSortDirection(qs.GetValueOrDefault("sortDir")),
             PageSize          = pageSize,
