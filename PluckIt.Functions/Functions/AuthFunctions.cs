@@ -277,6 +277,7 @@ public class AuthFunctions(WardrobeFunctionsAuthContext authContext, RefreshSess
         }
         catch (Exception)
         {
+            // Ignore token validation failures here; callers can still resolve the user via refresh session fallback.
         }
 
         if (!string.IsNullOrWhiteSpace(googleUserId))

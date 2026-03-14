@@ -835,53 +835,71 @@ public class WardrobeFunctions(
         CancellationToken cancellationToken = default)
     {
         var path = req.Url.PathAndQuery;
-        if (req.Headers.TryGetValues("Authorization", out var authHeaders))
+        if (!TryGetBearerToken(req, out var token))
+            return GetLocalDevUser();
+
+        var tokenPrefix = TruncateTokenPrefix(token);
+        var tokenAudience = ReadJwtAudience(token);
+        logger.LogDebug(
+            "WardrobeFunctions auth attempt: path={Path} aud={Audience} tokenPrefix={TokenPrefix}",
+            path,
+            tokenAudience ?? "unknown",
+            tokenPrefix);
+
+        var authedUserId = await ResolveUserIdFromAuthorizationTokenAsync(token, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(authedUserId))
+            return (true, authedUserId);
+
+        logger.LogWarning(
+            "WardrobeFunctions auth failed: path={Path} aud={Audience} tokenPrefix={TokenPrefix}",
+            path,
+            tokenAudience ?? "unknown",
+            tokenPrefix);
+
+        return GetLocalDevUser();
+    }
+
+    private static bool TryGetBearerToken(HttpRequestData req, out string token)
+    {
+        token = string.Empty;
+        if (!req.Headers.TryGetValues("Authorization", out var authHeaders))
+            return false;
+
+        var header = authHeaders.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(header) ||
+            !header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
         {
-            var header = authHeaders.FirstOrDefault();
-            if (header?.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) == true)
-            {
-                var token = header["Bearer ".Length..];
-                var tokenPrefix = TruncateTokenPrefix(token);
-                var tokenAudience = ReadJwtAudience(token);
-                logger.LogDebug(
-                    "WardrobeFunctions auth attempt: path={Path} aud={Audience} tokenPrefix={TokenPrefix}",
-                    path,
-                    tokenAudience ?? "unknown",
-                    tokenPrefix);
-
-                var sub = await authContext.TokenValidator.ValidateAsync(token);
-                if (sub is not null)
-                    return (true, sub);
-
-                var appSessionUserId = (string?)null;
-                if (refreshSessionStore is not null)
-                {
-                    try
-                    {
-                        appSessionUserId = await refreshSessionStore.ResolveUserIdFromAccessTokenAsync(token, cancellationToken);
-                    }
-                    catch (Exception ex)
-                    {
-                        logger.LogWarning(
-                            ex,
-                            "WardrobeFunctions auth store lookup failed for provided access token.");
-                    }
-                }
-                if (!string.IsNullOrWhiteSpace(appSessionUserId))
-                    return (true, appSessionUserId);
-
-                logger.LogWarning(
-                    "WardrobeFunctions auth failed: path={Path} aud={Audience} tokenPrefix={TokenPrefix}",
-                    path,
-                    tokenAudience ?? "unknown",
-                    tokenPrefix);
-            }
+            return false;
         }
 
-        var devId = authContext.LocalDevUserId;
-        if (!string.IsNullOrEmpty(devId)) return (true, devId);
+        token = header["Bearer ".Length..].Trim();
+        return true;
+    }
 
-        return (false, null);
+    private (bool Authed, string? UserId) GetLocalDevUser()
+    {
+        var localDevUserId = authContext.LocalDevUserId;
+        return string.IsNullOrEmpty(localDevUserId) ? (false, null) : (true, localDevUserId);
+    }
+
+    private async Task<string?> ResolveUserIdFromAuthorizationTokenAsync(string token, CancellationToken cancellationToken)
+    {
+        var sub = await authContext.TokenValidator.ValidateAsync(token);
+        if (!string.IsNullOrWhiteSpace(sub))
+            return sub;
+
+        if (refreshSessionStore is null)
+            return null;
+
+        try
+        {
+            return await refreshSessionStore.ResolveUserIdFromAccessTokenAsync(token, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "WardrobeFunctions auth store lookup failed for provided access token.");
+            return null;
+        }
     }
 
     private static string? ReadJwtAudience(string token)

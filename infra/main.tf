@@ -233,6 +233,24 @@ resource "azurerm_cosmosdb_sql_container" "wardrobe" {
   }
 }
 
+# Stores refresh/access/ID tokens used for mobile auth session exchange.
+resource "azurerm_cosmosdb_sql_container" "refresh_tokens" {
+  name                  = "RefreshTokens"
+  resource_group_name   = azurerm_resource_group.rg_pluckit_archive.name
+  account_name          = azurerm_cosmosdb_account.pluckit.name
+  database_name         = azurerm_cosmosdb_sql_database.pluckit.name
+  partition_key_paths   = ["/userId"]
+  partition_key_version = 1
+
+  indexing_policy {
+    indexing_mode = "consistent"
+
+    included_path {
+      path = "/*"
+    }
+  }
+}
+
 # Full wear-event history (append-only). Partitioned by user for cheap
 # per-user history scans and per-item timeline queries.
 resource "azurerm_cosmosdb_sql_container" "wear_events" {
@@ -771,6 +789,7 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
     "Cosmos__Key"                           = azurerm_cosmosdb_account.pluckit.primary_key
     "Cosmos__Database"                      = azurerm_cosmosdb_sql_database.pluckit.name
     "Cosmos__Container"                     = azurerm_cosmosdb_sql_container.wardrobe.name
+    "Cosmos__RefreshTokensContainer"        = azurerm_cosmosdb_sql_container.refresh_tokens.name
     "Cosmos__WearEventsContainer"           = azurerm_cosmosdb_sql_container.wear_events.name
     "Cosmos__StylingActivityContainer"      = azurerm_cosmosdb_sql_container.styling_activity.name
     "Cosmos__UserProfilesContainer"         = azurerm_cosmosdb_sql_container.user_profiles.name
@@ -880,6 +899,7 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
     "COSMOS_DB_KEY"                                 = azurerm_cosmosdb_account.pluckit.primary_key
     "COSMOS_DB_DATABASE"                            = azurerm_cosmosdb_sql_database.pluckit.name
     "COSMOS_DB_CONTAINER"                           = azurerm_cosmosdb_sql_container.wardrobe.name
+    "COSMOS_DB_REFRESH_TOKENS_CONTAINER"            = azurerm_cosmosdb_sql_container.refresh_tokens.name
     "COSMOS_DB_WEAR_EVENTS_CONTAINER"               = azurerm_cosmosdb_sql_container.wear_events.name
     "COSMOS_DB_STYLING_ACTIVITY_CONTAINER"          = azurerm_cosmosdb_sql_container.styling_activity.name
     "COSMOS_DB_USER_PROFILES_CONTAINER"             = azurerm_cosmosdb_sql_container.user_profiles.name
