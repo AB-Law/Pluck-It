@@ -211,10 +211,7 @@ public sealed class RefreshSessionStore(CosmosClient cosmosClient, IConfiguratio
     {
         var queryDefinition = new QueryDefinition($"SELECT * FROM c WHERE c.{hashField} = @tokenHash")
             .WithParameter("@tokenHash", tokenHash);
-        var iterator = _container.GetItemQueryIterator<RefreshSessionRecord>(queryDefinition, requestOptions: new QueryRequestOptions
-        {
-            EnableCrossPartitionQuery = true,
-        });
+        var iterator = _container.GetItemQueryIterator<RefreshSessionRecord>(queryDefinition);
 
         while (iterator.HasMoreResults)
         {
@@ -234,11 +231,7 @@ public sealed class RefreshSessionStore(CosmosClient cosmosClient, IConfiguratio
         ).WithParameter("@userId", userId);
 
         var iterator = _container.GetItemQueryIterator<RefreshSessionRecord>(
-            queryDefinition,
-            requestOptions: new QueryRequestOptions
-            {
-                EnableCrossPartitionQuery = true,
-            });
+            queryDefinition);
 
         var results = new List<RefreshSessionRecord>();
         while (iterator.HasMoreResults)

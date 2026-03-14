@@ -40,10 +40,21 @@ public class WardrobeFunctions(
     RefreshSessionStore refreshSessionStore,
     ILogger<WardrobeFunctions> logger)
 {
+    public WardrobeFunctions(
+        IWardrobeRepository repo,
+        IBlobSasService sasService,
+        IImageJobQueue jobQueue,
+        WardrobeFunctionsMutationDependencies mutationDependencies,
+        WardrobeFunctionsAuthContext authContext,
+        ILogger<WardrobeFunctions> logger)
+        : this(repo, sasService, jobQueue, mutationDependencies, authContext, refreshSessionStore: null!, logger)
+    {
+    }
+
     private readonly IWearHistoryRepository wearHistoryRepo = mutationDependencies.WearHistoryRepository;
     private readonly IStylingActivityRepository stylingActivityRepo = mutationDependencies.StylingActivityRepository;
     private readonly IUserProfileRepository userProfileRepo = mutationDependencies.UserProfileRepository;
-    private readonly RefreshSessionStore refreshSessionStore = refreshSessionStore;
+    private readonly RefreshSessionStore? refreshSessionStore = refreshSessionStore;
 
     private const string ContentTypeHeader = "Content-Type";
     private const string JsonContentType = "application/json; charset=utf-8";
@@ -842,7 +853,9 @@ public class WardrobeFunctions(
                 if (sub is not null)
                     return (true, sub);
 
-                var appSessionUserId = await refreshSessionStore.ResolveUserIdFromAccessTokenAsync(token, cancellationToken);
+                var appSessionUserId = refreshSessionStore is null
+                    ? null
+                    : await refreshSessionStore.ResolveUserIdFromAccessTokenAsync(token, cancellationToken);
                 if (!string.IsNullOrWhiteSpace(appSessionUserId))
                     return (true, appSessionUserId);
 
