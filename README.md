@@ -252,10 +252,18 @@ Add these to `PluckIt.Functions/local.settings.json` and `PluckIt.Processor/loca
 - `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` — Langfuse tracing credentials
 - `LANGFUSE_HOST` (optional) — Langfuse API host (defaults to `https://us.cloud.langfuse.com`)  
   You can also use `LANGFUSE_BASE_URL` in place of `LANGFUSE_HOST`.
+- `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` / `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` / `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` — Grafana OTLP endpoints
+- `OTEL_EXPORTER_OTLP_HEADERS` — URL-encoded `Authorization` header for Grafana OTLP
+- `OTEL_EXPORTER_OTLP_PROTOCOL` — usually `http/protobuf`
+- `OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER`, `OTEL_LOGS_EXPORTER` — set each to `otlp` to send all signal types
+- `OTEL_SERVICE_NAME`  
+  - `PluckIt.Functions`: `pluckit-api-func-local` (local) or `pluckit-prod-api-func` (Terraform default)
+  - `PluckIt.Processor`: `pluckit-prod-processor-func`
 - `COSMOS_DB_VAULT_INSIGHTS_CACHE_CONTAINER` / `COSMOS_DB_VAULT_INSIGHTS_CACHE_TTL_MS` — optional processor cache container and TTL (ms) for vault insights
 
 For Codespaces, add the same names as **Codespaces secrets** (not Actions secrets — they are separate namespaces).
 For CI, set `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and optional `LANGFUSE_HOST` in GitHub Action secrets so `terraform-infra.yml` can pass them into `terraform.auto.tfvars`.
+For the API observability service name override, set repository variable `GRAFANA_CLOUD_OTEL_SERVICE_NAME_API` (optional). If unset, Terraform uses `grafana_cloud_api_service_name`'s default (`pluckit-prod-api-func`).
 
 ---
 

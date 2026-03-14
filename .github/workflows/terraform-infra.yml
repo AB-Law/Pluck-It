@@ -53,6 +53,7 @@ jobs:
           GRAFANA_CLOUD_OTLP_ENDPOINT: ${{ secrets.GRAFANA_CLOUD_OTLP_ENDPOINT }}
           GRAFANA_CLOUD_OTLP_HEADERS: ${{ secrets.GRAFANA_CLOUD_OTLP_HEADERS }}
           GRAFANA_CLOUD_OTEL_SERVICE_NAME_PROCESSOR: ${{ vars.GRAFANA_CLOUD_OTEL_SERVICE_NAME_PROCESSOR }}
+          GRAFANA_CLOUD_OTEL_SERVICE_NAME_API: ${{ vars.GRAFANA_CLOUD_OTEL_SERVICE_NAME_API }}
           LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
           LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
           LANGFUSE_HOST: ${{ secrets.LANGFUSE_HOST }}
@@ -86,6 +87,9 @@ jobs:
           fi
           if [ -n "$GRAFANA_CLOUD_OTEL_SERVICE_NAME_PROCESSOR" ]; then
             echo "grafana_cloud_processor_service_name = \"$GRAFANA_CLOUD_OTEL_SERVICE_NAME_PROCESSOR\"" >> terraform.auto.tfvars
+          fi
+          if [ -n "$GRAFANA_CLOUD_OTEL_SERVICE_NAME_API" ]; then
+            echo "grafana_cloud_api_service_name = \"$GRAFANA_CLOUD_OTEL_SERVICE_NAME_API\"" >> terraform.auto.tfvars
           fi
           python3 - <<'PY'
           import json
