@@ -1111,7 +1111,7 @@ internal static partial class MultipartReader
         var headersEnd = IndexOf(data, "\r\n\r\n"u8.ToArray(), headerStart);
         if (headersEnd < 0) return false;
 
-        headersText = Encoding.UTF8.GetString(data, headerStart, headersEnd - headerStart - 4);
+        headersText = Encoding.UTF8.GetString(data, headerStart, headersEnd - headerStart);
         contentStart = headersEnd + 4;
 
         contentEnd = IndexOf(data, closingDelimiter, contentStart);
@@ -1181,7 +1181,7 @@ internal static partial class MultipartReader
         contentStart += 4; // skip \r\n\r\n
 
         // Parse Content-Type from part headers
-        var headersText = Encoding.UTF8.GetString(data, headerStart, contentStart - headerStart - 4);
+        var headersText = Encoding.UTF8.GetString(data, headerStart, contentStart - headerStart);
         var mediaType = OctetStream;
         foreach (var line in headersText.Split('\n'))
         {

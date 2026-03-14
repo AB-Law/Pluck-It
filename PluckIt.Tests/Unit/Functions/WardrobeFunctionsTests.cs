@@ -1,11 +1,15 @@
 using System.Net;
+using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Azure.Functions.Worker;
 using Shouldly;
+using Moq;
 using PluckIt.Core;
 using PluckIt.Functions.Functions;
+using PluckIt.Functions.Queue;
 using PluckIt.Functions.Serialization;
 using PluckIt.Tests.Fakes;
 using PluckIt.Tests.Helpers;
@@ -57,24 +61,60 @@ public sealed class WardrobeFunctionsTests
         DateAdded   = options?.DateAdded ?? DateTimeOffset.UtcNow.AddDays(-1),
     };
 
-private static WardrobeFunctions CreateSut(
+    private static WardrobeFunctions CreateSut(
         InMemoryWardrobeRepository? repo = null,
         FakeBlobSasService? sas = null,
         InMemoryWearHistoryRepository? wearHistoryRepo = null,
         InMemoryStylingActivityRepository? stylingActivityRepo = null,
-        InMemoryUserProfileRepository? userProfileRepo = null)
+        InMemoryUserProfileRepository? userProfileRepo = null,
+        IImageJobQueue? imageJobQueue = null)
     {
         var cfg = TestConfiguration.WithDevUser(UserId);
         return new WardrobeFunctions(
             repo  ?? new InMemoryWardrobeRepository(),
             sas   ?? new FakeBlobSasService(),
-            new FakeImageJobQueue(),
+            imageJobQueue ?? new FakeImageJobQueue(),
             new WardrobeFunctionsMutationDependencies(
                 wearHistoryRepo ?? new InMemoryWearHistoryRepository(),
                 stylingActivityRepo ?? new InMemoryStylingActivityRepository(),
                 userProfileRepo ?? new InMemoryUserProfileRepository()),
             new WardrobeFunctionsAuthContext(UserId, TestFactory.CreateTokenValidator(cfg)),
             TestFactory.NullLogger<WardrobeFunctions>());
+    }
+
+    private static TestHttpRequestData CreateMultipartRequest(
+        string url,
+        string boundary,
+        byte[] imageBytes,
+        params (string Name, string Value)[] textFields)
+    {
+        var payload = new List<byte>();
+        void Write(string value) => payload.AddRange(Encoding.UTF8.GetBytes(value));
+
+        Write($"--{boundary}\r\n");
+        Write("Content-Disposition: form-data; name=\"image\"; filename=\"upload.jpg\"\r\n");
+        Write("Content-Type: image/jpeg\r\n\r\n");
+        payload.AddRange(imageBytes);
+        Write("\r\n");
+
+        foreach (var field in textFields)
+        {
+            Write($"--{boundary}\r\n");
+            Write($"Content-Disposition: form-data; name=\"{field.Name}\"\r\n\r\n");
+            Write($"{field.Value}\r\n");
+        }
+
+        Write($"--{boundary}--\r\n");
+
+        return new TestHttpRequestData(
+            new Mock<FunctionContext>().Object,
+            HttpMethod.Post,
+            url,
+            new MemoryStream(payload.ToArray()),
+            new Dictionary<string, string>
+            {
+                ["Content-Type"] = $"multipart/form-data; boundary={boundary}",
+            });
     }
 
     private static string ComputeWardrobeFingerprint(IEnumerable<string> itemIds)
@@ -95,6 +135,42 @@ private static WardrobeFunctions CreateSut(
         var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
         var env  = JsonSerializer.Deserialize<WardrobePagedResult>(json, opts)!;
         return (env.Items, env.NextContinuationToken);
+    }
+
+    // ── UploadItem (multipart) ───────────────────────────────────────────────
+
+    [Fact]
+    public async Task UploadItem_ParsesMultipartTextFieldsAndHonorsWishlist()
+    {
+        var repo = new InMemoryWardrobeRepository();
+        var sas = new FakeBlobSasService();
+        var queue = new FakeImageJobQueue();
+        var sut = CreateSut(repo: repo, sas: sas, imageJobQueue: queue);
+
+        var request = CreateMultipartRequest(
+            "http://localhost/api/wardrobe/upload",
+            "----PluckBoundary",
+            Encoding.UTF8.GetBytes("fake-image"),
+            ("skip_segmentation", "true"),
+            ("is_wishlisted", "true"));
+
+        var response = await sut.UploadItem(request, CancellationToken.None) as TestHttpResponseData;
+        response.ShouldNotBeNull();
+        response.StatusCode.ShouldBe(HttpStatusCode.Accepted);
+
+        var responseBody = JsonSerializer.Deserialize<ClothingItem>(
+            response.ReadBodyAsString(),
+            PluckItJsonContext.Default.ClothingItem);
+        responseBody.ShouldNotBeNull();
+        responseBody.DraftStatus.ShouldBe(DraftStatus.Processing);
+        responseBody.IsWishlisted.ShouldBeTrue();
+
+        var saved = await repo.GetByIdAsync(responseBody.Id, UserId, CancellationToken.None);
+        saved.ShouldNotBeNull();
+        saved.IsWishlisted.ShouldBeTrue();
+
+        queue.EnqueuedMessages.ShouldHaveSingleItem();
+        queue.EnqueuedMessages[0].SkipSegmentation.ShouldBeTrue();
     }
 
     // ── GetWardrobe — basic ──────────────────────────────────────────────────
