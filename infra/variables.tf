@@ -110,7 +110,7 @@ variable "metadata_extract_api_key" {
 
   validation {
     condition     = lower(var.metadata_extract_auth_mode) != "api-key" || trimspace(var.metadata_extract_api_key) != ""
-    error_message = "metadata_extract_api_key is required when metadata_extract_auth_mode is \"api-key\"."
+    error_message = "metadata_extract_api_key is required when metadata_extract_auth_mode is \"api-key\". Set this value or switch metadata_extract_auth_mode to \"azuread\"."
   }
 }
 

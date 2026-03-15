@@ -138,9 +138,7 @@ async def test_post_extract_metadata_azuread_mode_accepts_valid_bearer_token(asy
     issuer = "https://login.microsoftonline.com/test-issuer/v2.0"
     token = _build_test_jwt(audience=audience, issuer=issuer, alg="RS256")
     discovery_payload = {"jwks_uri": "https://login.microsoftonline.com/common/discovery/v2.0/keys"}
-    discovery_response = MagicMock()
-    discovery_response.raise_for_status.return_value = None
-    discovery_response.json.return_value = discovery_payload
+    jwks_key_payload = {"kty": "RSA", "kid": "test-kid", "n": "AQAB", "e": "AQAB"}
 
     with patch.dict(
         os.environ,
@@ -149,12 +147,17 @@ async def test_post_extract_metadata_azuread_mode_accepts_valid_bearer_token(asy
             "METADATA_EXTRACT_AZURE_AD_AUDIENCE": audience,
             "METADATA_EXTRACT_AZURE_AD_ISSUER": issuer,
         },
-    ), patch("function_app.requests.get", return_value=discovery_response) as mock_discovery, patch(
-        "function_app.jwt.PyJWKClient"
-    ) as mock_jwks_client, patch("function_app.jwt.decode", return_value={"aud": audience, "iss": issuer, "exp": int(time.time()) + 300}) as mock_jwt_decode, patch(
+    ), patch(
+        "function_app._fetch_oidc_discovery_async", return_value=discovery_payload
+    ) as mock_discovery, patch(
+        "function_app._fetch_jwks_keys_async", return_value=[jwks_key_payload]
+    ) as mock_jwks, patch(
+        "function_app.jwt.algorithms.RSAAlgorithm.from_jwk", return_value="public-key"
+    ) as mock_from_jwk, patch(
+        "function_app.jwt.decode", return_value={"aud": audience, "iss": issuer, "exp": int(time.time()) + 300}
+    ) as mock_jwt_decode, patch(
         "function_app._infer_clothing_metadata"
     ) as mock_infer:
-        mock_jwks_client.return_value.get_signing_key_from_jwt.return_value.key = "public-key"
         mock_infer.return_value = {"brand": None, "category": None, "tags": [], "colours": []}
         response = await async_client.post(
             "/api/extract-clothing-metadata",
@@ -167,8 +170,9 @@ async def test_post_extract_metadata_azuread_mode_accepts_valid_bearer_token(asy
         )
 
     assert response.status_code == 200
-    mock_discovery.assert_called_once_with(f"{issuer}/.well-known/openid-configuration", timeout=5)
-    mock_jwks_client.assert_called_once_with(discovery_payload["jwks_uri"])
+    mock_discovery.assert_called_once_with(issuer)
+    mock_jwks.assert_called_once_with(discovery_payload["jwks_uri"])
+    mock_from_jwk.assert_called_once_with(json.dumps(jwks_key_payload))
     mock_jwt_decode.assert_called_once_with(
         token,
         "public-key",
