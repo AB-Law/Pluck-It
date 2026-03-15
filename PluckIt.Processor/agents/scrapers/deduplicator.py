@@ -50,11 +50,9 @@ def _candidate_buckets_cached(bucket: str) -> tuple[str, ...]:
                 mask |= 1 << bit
             candidates.add(base ^ mask)
 
-    max_value = (1 << PHASH_PREFIX_BITS) - 1
     return tuple(
         f"{value:0{PHASH_PREFIX_CHARS}x}"
         for value in candidates
-        if value <= max_value
     )
 
 
