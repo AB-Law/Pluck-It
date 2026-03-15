@@ -170,11 +170,14 @@ var host = new HostBuilder()
                 sp.GetRequiredService<IHttpClientFactory>(),
                 metadataEndpointUrl,
                 metadataAuthMode,
-                metadataApiKey,
-                metadataAzureAdScope,
-                metadataAzureAdAudience,
-                sp.GetRequiredService<ILogger<PythonClothingMetadataService>>(),
-                metadataTokenCredential));
+                new PythonClothingMetadataServiceOptions
+                {
+                    ApiKey = metadataApiKey,
+                    AzureAdScope = metadataAzureAdScope,
+                    AzureAdAudience = metadataAzureAdAudience,
+                    TokenCredential = metadataTokenCredential,
+                    Logger = sp.GetRequiredService<ILogger<PythonClothingMetadataService>>(),
+                }));
 
         // ── Python Processor HTTP forwarding ──────────────────────────────────
         services.AddHttpClient("processor", client =>
