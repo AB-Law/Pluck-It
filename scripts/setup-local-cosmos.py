@@ -16,6 +16,7 @@ import base64
 import hashlib
 import hmac
 import json
+from json import JSONDecodeError
 import subprocess
 import sys
 import urllib.error
@@ -55,6 +56,16 @@ BLOB_CONTAINERS = ["uploads", "archive"]
 
 # ── Cosmos helpers ─────────────────────────────────────────────────────────────
 
+
+def _parse_response_body(body):
+    if not body:
+        return ""
+    try:
+        return json.loads(body)
+    except JSONDecodeError:
+        return body.decode("utf-8", errors="ignore")
+
+
 def _cosmos_request(method, path, body=None, resource_type="", resource_id=""):
     date = datetime.datetime.now(datetime.timezone.utc).strftime(_HTTP_DATE_FMT)
     string_to_sign = f"{method.lower()}\n{resource_type.lower()}\n{resource_id}\n{date.lower()}\n\n"
@@ -72,9 +83,9 @@ def _cosmos_request(method, path, body=None, resource_type="", resource_id=""):
 
     try:
         with urllib.request.urlopen(req) as resp:
-            return resp.status, json.loads(resp.read())
+            return resp.status, _parse_response_body(resp.read())
     except urllib.error.HTTPError as e:
-        return e.code, json.loads(e.read())
+        return e.code, _parse_response_body(e.read())
 
 
 def create_database():

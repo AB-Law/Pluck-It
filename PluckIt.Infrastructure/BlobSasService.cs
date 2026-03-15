@@ -41,6 +41,8 @@ public class BlobSasService : IBlobSasService
   public BlobSasService(string connectionString, string archiveContainer,
       string uploadsContainer = "uploads")
   {
+    if (string.IsNullOrWhiteSpace(connectionString))
+      throw new ArgumentNullException(nameof(connectionString));
     _archiveContainer = archiveContainer ?? throw new ArgumentNullException(nameof(archiveContainer));
     _uploadsContainer = uploadsContainer;
     _allowedContainers = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -175,12 +177,15 @@ public class BlobSasService : IBlobSasService
   /// </summary>
   private static (string container, string blobName) ParseBlobUri(Uri uri)
   {
-    var parts = uri.AbsolutePath.TrimStart('/').Split('/', 3);
+    var parts = uri.AbsolutePath.TrimStart('/').Split('/', 2);
     // Path-style: first segment is the storage account name (not a container)
-    if (parts.Length >= 3 && parts[0] == "devstoreaccount1")
-      return (parts[1], parts[2]);
     if (parts.Length < 2)
       throw new ArgumentException($"Cannot parse container/blob from URL: {uri}");
+    if (parts[0] == "devstoreaccount1")
+    {
+      var devParts = parts[1].Split('/', 2);
+      return (devParts[0], devParts.Length > 1 ? devParts[1] : string.Empty);
+    }
     return (parts[0], parts[1]);
   }
 }

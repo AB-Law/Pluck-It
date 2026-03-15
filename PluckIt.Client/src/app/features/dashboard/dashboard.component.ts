@@ -309,10 +309,16 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   private recordStylingActivity(itemId: string, source: string): void {
+    const randomUuid = globalThis.crypto?.randomUUID;
+    const randomValues =
+      globalThis.crypto?.getRandomValues ??
+      globalThis.window?.msCrypto?.getRandomValues;
     const rand =
-      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Array.from(crypto.getRandomValues(new Uint32Array(1)))[0].toString(16)}`;
+      typeof randomUuid === 'function'
+        ? randomUuid()
+        : typeof randomValues === 'function'
+          ? `${Date.now()}-${Array.from(randomValues(new Uint32Array(1)))[0].toString(16)}`
+          : `${Date.now()}-${Math.floor(Math.random() * 0xffffffff).toString(16)}`;
     this.wardrobeService
       .recordStylingActivity({
         itemId,
