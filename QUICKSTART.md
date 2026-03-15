@@ -29,7 +29,7 @@ docker run -d -p 8081:8081 -p 10251-10254:10251-10254 \
 
 **Windows** — download the installer from https://aka.ms/cosmosdb-emulator
 
-Emulator UI (to inspect data): https://localhost:8081/_explorer/index.html
+Emulator UI (to inspect data): http://localhost:8081/_explorer/index.html
 
 ### Azure OpenAI
 
@@ -134,7 +134,7 @@ Navigate to http://localhost:4200.
 
 ## First-run: create Cosmos DB containers
 
-On first run you need to create the database and containers in the emulator. Use the emulator UI at https://localhost:8081/_explorer/index.html (click through the self-signed cert warning).
+On first run you need to create the database and containers in the emulator. Use the emulator UI at http://localhost:8081/_explorer/index.html.
 
 Create database **`PluckIt`** with these containers:
 
