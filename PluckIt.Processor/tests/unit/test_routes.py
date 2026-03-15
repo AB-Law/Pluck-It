@@ -91,6 +91,32 @@ async def test_post_extract_metadata_returns_400_on_invalid_payload(async_client
 
 
 @pytest.mark.unit
+async def test_post_extract_metadata_forwards_trace_headers_to_infer(async_client):
+    async_image = base64.b64encode(b"fake-image").decode("ascii")
+    with patch("function_app._infer_clothing_metadata") as mock_infer:
+        mock_infer.return_value = {"brand": None, "category": None, "tags": [], "colours": []}
+        response = await async_client.post(
+            "/api/extract-clothing-metadata",
+            headers={
+                "X-API-Key": "test-metadata-key",
+                "X-Request-Id": "request-123",
+                "traceparent": "00-11223344556677889900aabbccddeeff-1234567890abcdef-01",
+            },
+            json={
+                "item_id": "item-1",
+                "image_bytes_base64": async_image,
+                "media_type": "image/jpeg",
+            },
+        )
+
+    assert response.status_code == 200
+    assert mock_infer.call_count == 1
+    _, call_kwargs = mock_infer.call_args
+    assert call_kwargs["request_id"] == "request-123"
+    assert call_kwargs["traceparent"] == "00-11223344556677889900aabbccddeeff-1234567890abcdef-01"
+
+
+@pytest.mark.unit
 async def test_post_extract_metadata_rejects_invalid_api_key(async_client):
     response = await async_client.post(
         "/api/extract-clothing-metadata",

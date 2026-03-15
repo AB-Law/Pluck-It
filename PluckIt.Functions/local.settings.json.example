@@ -1,0 +1,38 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "StorageQueue": "UseDevelopmentStorage=true",
+
+    "Cosmos__Endpoint": "http://localhost:8081/",
+    "Cosmos__Key": "C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b5S5O4FhfJLkfB6NWNFNJ+Mfzq8R7uoB8Tg==",
+    "Cosmos__Database": "PluckIt",
+    "Cosmos__Container": "Wardrobe",
+    "Cosmos__RefreshTokensContainer": "RefreshTokens",
+
+    "AI__Endpoint": "https://<your-resource>.openai.azure.com/",
+    "AI__ApiKey": "<your-azure-openai-api-key>",
+    "AI__Deployment": "gpt-4.1-mini",
+
+    "BlobStorage__AccountName": "devstoreaccount1",
+    "BlobStorage__AccountKey": "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OugushZnRUOkvietl3hGys8uqHFht0YhfB7DPm3bkzrEt5PJBKgIfbI=",
+    "BlobStorage__ArchiveContainer": "archive",
+
+    "Processor__BaseUrl": "http://localhost:7071",
+
+    "GoogleAuth__ClientId": "20801742779-oihk5jfkcio2ulf9uk36ebvgnejbdv0l.apps.googleusercontent.com",
+
+    "Local__DevUserId": "local-dev-user",
+    "APPLICATIONINSIGHTS_CONNECTION_STRING": "",
+
+    "Cohere__Endpoint": "",
+    "Cohere__ApiKey": ""
+  },
+  "Host": {
+    "LocalHttpPort": 7072,
+    "CORS": "http://localhost:4200",
+    "CORSCredentials": true
+  }
+}

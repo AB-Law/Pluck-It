@@ -44,6 +44,7 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
+from inspect import Parameter, signature
 from urllib.parse import unquote
 import random
 import time
@@ -161,6 +162,7 @@ _WEBP_QUALITY = 85
 _WEBP_METHOD = 6
 _ERR_NO_IMAGE_PROVIDED = "No image provided."
 _ERR_MOOD_NOT_FOUND = "Mood not found."
+_LANGFUSE_DEFAULT_HOST = "https://us.cloud.langfuse.com"
 _ACCESS_TOKEN_LIFETIME = timedelta(minutes=30)
 _REFRESH_TOKEN_LIFETIME = timedelta(days=30)
 _ACCESS_TOKEN_LIFETIME_SECONDS = int(_ACCESS_TOKEN_LIFETIME.total_seconds())
@@ -970,6 +972,216 @@ def _metadata_traceparent_from_headers(headers: dict[str, str], request: Request
     )
 
 
+def _normalize_langfuse_trace_id(raw_trace_id: str | None) -> str | None:
+    """Normalize a trace identifier into a 32-character hexadecimal value."""
+    if not raw_trace_id:
+        return None
+
+    normalized = raw_trace_id.strip()
+    if not normalized:
+        return None
+
+    try:
+        return uuid.UUID(normalized).hex
+    except ValueError:
+        pass
+
+    hex_chars = re.sub(r"[^0-9a-fA-F]", "", normalized).lower()
+    if not hex_chars:
+        return None
+
+    if len(hex_chars) >= 32:
+        return hex_chars[:32]
+    return uuid.uuid5(uuid.NAMESPACE_DNS, normalized).hex
+
+
+def _extract_langfuse_trace_id(request_id: str | None, traceparent: str | None) -> str | None:
+    if traceparent:
+        match = re.match(r"^([0-9a-fA-F]{2})-([0-9a-fA-F]{32})-[0-9a-fA-F]{16}-[0-9a-fA-F]{2}$", traceparent)
+        if match:
+            return match.group(2).lower()
+
+        normalized_traceparent = _normalize_langfuse_trace_id(traceparent)
+        if normalized_traceparent:
+            return normalized_traceparent
+
+    if request_id:
+        return _normalize_langfuse_trace_id(request_id)
+    return None
+
+
+def _set_callback_kwarg(
+    kwargs: dict[str, Any],
+    callback_signature: Any,
+    supports_kwargs: bool,
+    name: str,
+    value: Any,
+) -> None:
+    if value is None:
+        return
+    if supports_kwargs or name in callback_signature.parameters:
+        kwargs[name] = value
+
+
+def _set_host_kwarg(
+    kwargs: dict[str, Any],
+    callback_signature: Any,
+    supports_kwargs: bool,
+    host: str,
+) -> None:
+    has_host_arg = "host" in callback_signature.parameters
+    has_base_url_arg = "base_url" in callback_signature.parameters
+    if supports_kwargs or has_host_arg:
+        kwargs["host"] = host
+        return
+    if has_base_url_arg:
+        kwargs["base_url"] = host
+
+
+def _set_trace_identifier_kwargs(
+    kwargs: dict[str, Any],
+    callback_signature: Any,
+    supports_kwargs: bool,
+    *,
+    trace_identifier: str | None,
+    user_id: str | None,
+) -> None:
+    has_user_id_arg = "user_id" in callback_signature.parameters
+    has_metadata_arg = "metadata" in callback_signature.parameters
+    has_trace_context_arg = "trace_context" in callback_signature.parameters
+    if not trace_identifier:
+        return
+
+    _set_callback_kwarg(kwargs, callback_signature, supports_kwargs, "session_id", trace_identifier)
+    if supports_kwargs or has_user_id_arg:
+        kwargs["user_id"] = user_id
+    if supports_kwargs or has_metadata_arg:
+        kwargs["metadata"] = {"trace_id": trace_identifier}
+    if supports_kwargs or has_trace_context_arg:
+        kwargs["trace_context"] = {"trace_id": trace_identifier}
+
+
+def _warn_if_trace_context_unsupported(callback_signature: Any, logger: Any) -> None:
+    if "trace_context" not in callback_signature.parameters:
+        logger.debug("Langfuse trace_context unsupported in installed CallbackHandler signature.")
+
+
+def _build_langfuse_callback_kwargs(
+    callback_signature: Any,
+    *,
+    trace_id: str | None,
+    user_id: str | None,
+    public_key: str,
+    secret_key: str,
+    host: str,
+    logger: Any,
+) -> dict[str, Any]:
+    supports_kwargs = any(
+        parameter.kind == Parameter.VAR_KEYWORD
+        for parameter in callback_signature.parameters.values()
+    )
+
+    kwargs: dict[str, Any] = {}
+    trace_identifier = _normalize_langfuse_trace_id(trace_id) or trace_id or user_id
+
+    _set_callback_kwarg(kwargs, callback_signature, supports_kwargs, "public_key", public_key)
+    _set_callback_kwarg(kwargs, callback_signature, supports_kwargs, "secret_key", secret_key)
+    _set_host_kwarg(kwargs, callback_signature, supports_kwargs, host)
+    _set_trace_identifier_kwargs(
+        kwargs,
+        callback_signature,
+        supports_kwargs,
+        trace_identifier=trace_identifier,
+        user_id=user_id,
+    )
+    if trace_identifier and not supports_kwargs:
+        _warn_if_trace_context_unsupported(callback_signature, logger)
+    return kwargs
+
+
+def _configure_langfuse_client(
+    langfuse_cls: Any,
+    public_key: str,
+    secret_key: str,
+    host: str,
+) -> None:
+    client_signature = signature(langfuse_cls.__init__)
+    if "base_url" in client_signature.parameters:
+        langfuse_cls(public_key=public_key, secret_key=secret_key, base_url=host)
+        return
+    if "host" in client_signature.parameters:
+        langfuse_cls(public_key=public_key, secret_key=secret_key, host=host)
+        return
+    langfuse_cls(public_key=public_key, secret_key=secret_key)
+
+
+def _build_langfuse_callbacks(trace_id: str | None = None, *, user_id: str | None = None) -> list[Any]:
+    """Build optional Langfuse callbacks for metadata extraction."""
+    public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "").strip()
+    secret_key = os.getenv("LANGFUSE_SECRET_KEY", "").strip()
+    if not public_key or not secret_key:
+        return []
+
+    host = (os.getenv("LANGFUSE_HOST", "") or os.getenv("LANGFUSE_BASE_URL", "")).strip() or _LANGFUSE_DEFAULT_HOST
+    os.environ["LANGFUSE_PUBLIC_KEY"] = public_key
+    os.environ["LANGFUSE_SECRET_KEY"] = secret_key
+    os.environ["LANGFUSE_HOST"] = host
+
+    try:
+        from langfuse import Langfuse
+        from langfuse.langchain import CallbackHandler
+    except Exception as exc:
+        logger.warning("Langfuse callback setup unavailable: %s", exc)
+        return []
+
+    try:
+        callback_signature = signature(CallbackHandler.__init__)
+        try:
+            _configure_langfuse_client(Langfuse, public_key, secret_key, host)
+        except Exception:
+            logger.debug("Langfuse client init failed; continuing without explicit SDK init.", exc_info=True)
+
+        kwargs = _build_langfuse_callback_kwargs(
+            callback_signature=callback_signature,
+            trace_id=trace_id,
+            user_id=user_id,
+            public_key=public_key,
+            secret_key=secret_key,
+            host=host,
+            logger=logger,
+        )
+        if not kwargs:
+            logger.debug("Langfuse callback handler has no supported constructor args; skipping setup.")
+            return []
+        return [CallbackHandler(**kwargs)]
+    except Exception as exc:
+        logger.warning("Langfuse callback initialization failed: %s", exc)
+        return []
+
+
+def _flush_langfuse_callbacks(callbacks: list[Any]) -> None:
+    """Flush Langfuse callback clients if available."""
+    for callback in callbacks:
+        langfuse_client = getattr(callback, "_langfuse_client", None)
+        if langfuse_client is None:
+            langfuse_client = getattr(callback, "langfuse", None)
+
+        flush = getattr(langfuse_client, "flush", None)
+        if callable(flush):
+            try:
+                flush()
+                continue
+            except Exception as exc:
+                logger.warning("Langfuse client flush failed: %s", exc)
+
+        callback_flush = getattr(callback, "flush", None)
+        if callable(callback_flush):
+            try:
+                callback_flush()
+            except Exception as exc:
+                logger.warning("Langfuse callback flush failed: %s", exc)
+
+
 def _decode_base64_image(image_bytes_base64: str) -> bytes:
     if not image_bytes_base64:
         raise HTTPException(status_code=400, detail="image_bytes_base64 is required.")
@@ -1217,7 +1429,15 @@ def _strip_model_code_fence(text: str) -> str:
     return stripped[first_newline + 1 : last_fence].strip()
 
 
-def _infer_clothing_metadata(image_bytes: bytes, media_type: str, item_id: str) -> dict[str, object]:
+def _infer_clothing_metadata(
+    image_bytes: bytes,
+    media_type: str,
+    item_id: str,
+    *,
+    request_id: str | None = None,
+    traceparent: str | None = None,
+) -> dict[str, object]:
+    """Extract deterministic metadata from an image via Azure OpenAI."""
     try:
         from langchain_openai import AzureChatOpenAI
         from langchain_core.messages import HumanMessage, SystemMessage
@@ -1229,12 +1449,15 @@ def _infer_clothing_metadata(image_bytes: bytes, media_type: str, item_id: str) 
         )
         return {"brand": None, "category": None, "tags": [], "colours": []}
 
+    callbacks: list[Any] = []
     try:
         endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
         api_key = os.getenv("AZURE_OPENAI_API_KEY")
         deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini")
         if not endpoint or not api_key:
             raise RuntimeError("Azure OpenAI credentials are not configured.")
+        langfuse_trace_id = _extract_langfuse_trace_id(request_id, traceparent)
+        callbacks = _build_langfuse_callbacks(langfuse_trace_id, user_id=item_id)
 
         llm = AzureChatOpenAI(
             azure_endpoint=endpoint,
@@ -1242,6 +1465,7 @@ def _infer_clothing_metadata(image_bytes: bytes, media_type: str, item_id: str) 
             azure_deployment=deployment,
             api_version="2024-12-01-preview",
             temperature=0.2,
+            callbacks=callbacks,
         )
         image_data_uri = f"data:{media_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
         system_prompt = (
@@ -1272,6 +1496,8 @@ def _infer_clothing_metadata(image_bytes: bytes, media_type: str, item_id: str) 
     except Exception as exc:
         logger.warning("extract-clothing-metadata: failed for item %s: %s", item_id, exc)
         return {"brand": None, "category": None, "tags": [], "colours": []}
+    finally:
+        _flush_langfuse_callbacks(callbacks)
 
 
 def _get_archive_blob(item_id: str):
@@ -1595,7 +1821,13 @@ async def extract_clothing_metadata(
 
     image_bytes = _decode_base64_image(payload.image_bytes_base64)
     metadata_payload = _validate_metadata_payload(
-        _infer_clothing_metadata(image_bytes, payload.media_type, payload.item_id)
+        _infer_clothing_metadata(
+            image_bytes,
+            payload.media_type,
+            payload.item_id,
+            request_id=request_id,
+            traceparent=traceparent,
+        )
     )
     response_payload = ClothingMetadataExtractionResponse(**metadata_payload)
     return response_payload
