@@ -60,8 +60,11 @@ public sealed class PythonClothingMetadataServiceTests
             factory,
             "https://processor/api/extract-clothing-metadata",
             "api-key",
-            apiKey: "test-key",
-            logger: TestFactory.NullLogger<PythonClothingMetadataService>());
+            new PythonClothingMetadataServiceOptions
+            {
+                ApiKey = "test-key",
+                Logger = TestFactory.NullLogger<PythonClothingMetadataService>(),
+            });
 
         var actual = await sut.ExtractMetadataAsync(BinaryData.FromString("bytes"), "image/jpeg");
 
@@ -82,8 +85,11 @@ public sealed class PythonClothingMetadataServiceTests
             TestFactory.CreateHttpClientFactory(handler),
             "https://processor/api/extract-clothing-metadata",
             "api-key",
-            apiKey: "test-key",
-            logger: TestFactory.NullLogger<PythonClothingMetadataService>());
+            new PythonClothingMetadataServiceOptions
+            {
+                ApiKey = "test-key",
+                Logger = TestFactory.NullLogger<PythonClothingMetadataService>(),
+            });
 
         var actual = await sut.ExtractMetadataAsync(BinaryData.FromString("bytes"), "image/jpeg");
 
@@ -104,8 +110,11 @@ public sealed class PythonClothingMetadataServiceTests
             TestFactory.CreateHttpClientFactory(handler),
             "https://processor/api/extract-clothing-metadata",
             "api-key",
-            apiKey: "test-key",
-            logger: TestFactory.NullLogger<PythonClothingMetadataService>());
+            new PythonClothingMetadataServiceOptions
+            {
+                ApiKey = "test-key",
+                Logger = TestFactory.NullLogger<PythonClothingMetadataService>(),
+            });
 
         var actual = await sut.ExtractMetadataAsync(BinaryData.FromString("bytes"), "image/jpeg");
 
@@ -135,10 +144,13 @@ public sealed class PythonClothingMetadataServiceTests
             TestFactory.CreateHttpClientFactory(handler),
             "https://processor/api/extract-clothing-metadata",
             "azuread",
-            apiKey: "ignored",
-            azureAdScope: "api://metadata/.default",
-            logger: TestFactory.NullLogger<PythonClothingMetadataService>(),
-            tokenCredential: new StaticTokenCredential());
+            new PythonClothingMetadataServiceOptions
+            {
+                ApiKey = "ignored",
+                AzureAdScope = "api://metadata/.default",
+                Logger = TestFactory.NullLogger<PythonClothingMetadataService>(),
+                TokenCredential = new StaticTokenCredential(),
+            });
 
         await sut.ExtractMetadataAsync(BinaryData.FromString("bytes"), "image/jpeg");
 

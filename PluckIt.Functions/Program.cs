@@ -142,7 +142,6 @@ var host = new HostBuilder()
         var aiKey = config["AI:ApiKey"]
             ?? throw new InvalidOperationException("Required env var 'AI__ApiKey' is not set.");
         var aiDeployment = config["AI:Deployment"] ?? "gpt-4.1-mini";
-        var visionDeployment = config["AI:VisionDeployment"] ?? aiDeployment;
 
         services.AddSingleton(_ =>
             new AzureOpenAIClient(new Uri(aiEndpoint), new AzureKeyCredential(aiKey)));
@@ -347,9 +346,8 @@ static string? BuildSignalEndpoint(string? baseOrSignalEndpoint, string signalPa
         return normalized;
     }
 
-    var matchingSignalPath = signalPaths
-        .Where(knownSignalPath => normalized.EndsWith(knownSignalPath, StringComparison.OrdinalIgnoreCase))
-        .FirstOrDefault();
+    var matchingSignalPath = signalPaths.FirstOrDefault(
+        knownSignalPath => normalized.EndsWith(knownSignalPath, StringComparison.OrdinalIgnoreCase));
 
     if (string.IsNullOrEmpty(matchingSignalPath))
     {

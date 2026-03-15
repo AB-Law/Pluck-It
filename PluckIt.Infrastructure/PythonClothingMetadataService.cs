@@ -12,6 +12,14 @@ using PluckIt.Core;
 
 namespace PluckIt.Infrastructure;
 
+public sealed record PythonClothingMetadataServiceOptions(
+  string ApiKey = "",
+  string AzureAdScope = "",
+  string AzureAdAudience = "",
+  TokenCredential? TokenCredential = null,
+  ILogger<PythonClothingMetadataService>? Logger = null,
+  string HttpClientName = "processor");
+
 /// <summary>
 /// Clothing metadata service implementation that calls the Python processor metadata
 /// endpoint. Returns empty metadata on any failure to keep the image pipeline
@@ -33,24 +41,20 @@ public class PythonClothingMetadataService : IClothingMetadataService
     IHttpClientFactory httpClientFactory,
     string metadataEndpoint,
     string authMode,
-    string? apiKey = null,
-    string? azureAdScope = null,
-    string? azureAdAudience = null,
-    ILogger<PythonClothingMetadataService>? logger = null,
-    TokenCredential? tokenCredential = null,
-    string httpClientName = "processor")
+    PythonClothingMetadataServiceOptions? options = null)
   {
+    var resolvedOptions = options ?? new();
     _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
     _metadataEndpoint = !string.IsNullOrWhiteSpace(metadataEndpoint)
       ? metadataEndpoint
       : throw new ArgumentException("Metadata endpoint URL must be set.", nameof(metadataEndpoint));
     _authMode = (authMode ?? "api-key").Trim().ToLowerInvariant();
-    _apiKey = apiKey ?? string.Empty;
-    _azureAdScope = azureAdScope ?? string.Empty;
-    _azureAdAudience = azureAdAudience ?? string.Empty;
-    _tokenCredential = tokenCredential ?? new DefaultAzureCredential();
-    _logger = logger ?? NullLogger<PythonClothingMetadataService>.Instance;
-    _httpClientName = httpClientName;
+    _apiKey = resolvedOptions.ApiKey ?? string.Empty;
+    _azureAdScope = resolvedOptions.AzureAdScope ?? string.Empty;
+    _azureAdAudience = resolvedOptions.AzureAdAudience ?? string.Empty;
+    _tokenCredential = resolvedOptions.TokenCredential ?? new DefaultAzureCredential();
+    _logger = resolvedOptions.Logger ?? NullLogger<PythonClothingMetadataService>.Instance;
+    _httpClientName = resolvedOptions.HttpClientName;
   }
 
   public async Task<ClothingMetadata> ExtractMetadataAsync(
@@ -102,7 +106,7 @@ public class PythonClothingMetadataService : IClothingMetadataService
     return new HttpRequestMessage(HttpMethod.Post, _metadataEndpoint) { Content = content };
   }
 
-  private void AttachTracingHeaders(HttpRequestHeaders headers)
+  private static void AttachTracingHeaders(HttpRequestHeaders headers)
   {
     var traceParent = System.Diagnostics.Activity.Current?.Id;
     if (!string.IsNullOrWhiteSpace(traceParent))
@@ -153,12 +157,20 @@ public class PythonClothingMetadataService : IClothingMetadataService
     return token.Token;
   }
 
-  private static string BuildDefaultScope(string audience) =>
-    string.IsNullOrWhiteSpace(audience)
-      ? string.Empty
-      : audience.Contains("/.default", StringComparison.OrdinalIgnoreCase)
-        ? audience
-        : $"{audience}/.default";
+  private static string BuildDefaultScope(string audience)
+  {
+    if (string.IsNullOrWhiteSpace(audience))
+    {
+      return string.Empty;
+    }
+
+    if (audience.Contains("/.default", StringComparison.OrdinalIgnoreCase))
+    {
+      return audience;
+    }
+
+    return $"{audience}/.default";
+  }
 
   private static ClothingMetadata MapMetadata(PythonMetadataResponse response)
   {
@@ -174,8 +186,8 @@ public class PythonClothingMetadataService : IClothingMetadataService
       ? Array.Empty<ClothingColour>()
       : response.Colours
         .Select(c => ToColour(c))
-        .Where(c => c is not null)
-        .ToArray()!;
+        .OfType<ClothingColour>()
+        .ToArray();
 
     return new ClothingMetadata(
       string.IsNullOrWhiteSpace(response.Brand) ? null : response.Brand.Trim(),

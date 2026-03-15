@@ -95,6 +95,11 @@ variable "metadata_extract_auth_mode" {
   description = "Metadata auth mode: api-key or azureAd."
   type        = string
   default     = "api-key"
+
+  validation {
+    condition     = lower(var.metadata_extract_auth_mode) == "api-key" || lower(var.metadata_extract_auth_mode) == "azuread"
+    error_message = "metadata_extract_auth_mode must be either \"api-key\" or \"azureAd\"."
+  }
 }
 
 variable "metadata_extract_api_key" {
@@ -102,6 +107,11 @@ variable "metadata_extract_api_key" {
   type        = string
   sensitive   = true
   default     = ""
+
+  validation {
+    condition     = lower(var.metadata_extract_auth_mode) != "api-key" || trimspace(var.metadata_extract_api_key) != ""
+    error_message = "metadata_extract_api_key is required when metadata_extract_auth_mode is \"api-key\"."
+  }
 }
 
 variable "metadata_extract_azure_ad_scope" {

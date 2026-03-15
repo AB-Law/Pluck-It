@@ -789,14 +789,14 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
   app_settings = {
     "FUNCTIONS_EXTENSION_VERSION"           = "~4"
     "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.pluckit.connection_string
-    "OTEL_EXPORTER_OTLP_ENDPOINT"                   = var.grafana_cloud_otlp_endpoint
-    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"            = "${var.grafana_cloud_otlp_endpoint}/v1/traces"
-    "OTEL_EXPORTER_OTLP_HEADERS"                    = var.grafana_cloud_otlp_headers
-    "OTEL_EXPORTER_OTLP_PROTOCOL"                   = "http/protobuf"
-    "OTEL_TRACES_EXPORTER"                          = "otlp"
-    "OTEL_METRICS_EXPORTER"                         = "otlp"
-    "OTEL_LOGS_EXPORTER"                            = "otlp"
-    "OTEL_SERVICE_NAME"                             = var.grafana_cloud_api_service_name
+    "OTEL_EXPORTER_OTLP_ENDPOINT"           = var.grafana_cloud_otlp_endpoint
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"    = "${var.grafana_cloud_otlp_endpoint}/v1/traces"
+    "OTEL_EXPORTER_OTLP_HEADERS"            = var.grafana_cloud_otlp_headers
+    "OTEL_EXPORTER_OTLP_PROTOCOL"           = "http/protobuf"
+    "OTEL_TRACES_EXPORTER"                  = "otlp"
+    "OTEL_METRICS_EXPORTER"                 = "otlp"
+    "OTEL_LOGS_EXPORTER"                    = "otlp"
+    "OTEL_SERVICE_NAME"                     = var.grafana_cloud_api_service_name
     "Cosmos__Endpoint"                      = azurerm_cosmosdb_account.pluckit.endpoint
     "Cosmos__Key"                           = azurerm_cosmosdb_account.pluckit.primary_key
     "Cosmos__Database"                      = azurerm_cosmosdb_sql_database.pluckit.name
@@ -821,14 +821,14 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
     "GoogleAuth__ClientId"         = var.google_oauth_client_id
     "GoogleAuth__AllowedClientIds" = var.google_oauth_allowed_client_ids
     "FEATURE_WEAR_SUGGESTIONS"     = "true"
-    "Metadata__EndpointUrl"        = coalesce(
+    "Metadata__EndpointUrl" = coalesce(
       var.metadata_extract_endpoint_url,
       "https://${local.base_name}-processor-func.azurewebsites.net/api/extract-clothing-metadata",
     )
-    "Metadata__AuthMode"           = var.metadata_extract_auth_mode
-    "Metadata__ApiKey"             = var.metadata_extract_api_key
-    "Metadata__AzureAdScope"       = var.metadata_extract_azure_ad_scope
-    "Metadata__AzureAdAudience"    = var.metadata_extract_azure_ad_audience
+    "Metadata__AuthMode"        = var.metadata_extract_auth_mode
+    "Metadata__ApiKey"          = var.metadata_extract_api_key
+    "Metadata__AzureAdScope"    = var.metadata_extract_azure_ad_scope
+    "Metadata__AzureAdAudience" = var.metadata_extract_azure_ad_audience
   }
 }
 
@@ -949,20 +949,20 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
     # Embedding model for mood name canonicalization (cross-run dedup)
     "AZURE_OPENAI_EMBEDDING_DEPLOYMENT" = "text-embedding-3-small"
     # Google OAuth client ID — used to validate bearer tokens from Angular
-    "GOOGLE_CLIENT_ID"          = var.google_oauth_client_id
-    "GOOGLE_ALLOWED_CLIENT_IDS" = var.google_oauth_allowed_client_ids
-    "ADMIN_USER_IDS"            = var.admin_user_ids
-    "CORS_ALLOWED_ORIGINS"      = join(",", var.cors_allowed_origins)
-    "FEATURE_VAULT_INSIGHTS"    = "true"
-    "LANGFUSE_PUBLIC_KEY"       = var.langfuse_public_key
-    "LANGFUSE_SECRET_KEY"       = var.langfuse_secret_key
-    "LANGFUSE_HOST"             = var.langfuse_host
-    "SEGMENTATION_ENDPOINT_URL" = var.segmentation_endpoint_url
-    "SEGMENTATION_SHARED_TOKEN" = var.segmentation_shared_token
-    "METADATA_EXTRACT_AUTH_MODE"       = var.metadata_extract_auth_mode
-    "METADATA_EXTRACT_API_KEY"         = var.metadata_extract_api_key
-    "METADATA_EXTRACT_AZURE_AD_SCOPE"  = var.metadata_extract_azure_ad_scope
+    "GOOGLE_CLIENT_ID"                   = var.google_oauth_client_id
+    "GOOGLE_ALLOWED_CLIENT_IDS"          = var.google_oauth_allowed_client_ids
+    "ADMIN_USER_IDS"                     = var.admin_user_ids
+    "CORS_ALLOWED_ORIGINS"               = join(",", var.cors_allowed_origins)
+    "FEATURE_VAULT_INSIGHTS"             = "true"
+    "LANGFUSE_PUBLIC_KEY"                = var.langfuse_public_key
+    "LANGFUSE_SECRET_KEY"                = var.langfuse_secret_key
+    "LANGFUSE_HOST"                      = var.langfuse_host
+    "SEGMENTATION_ENDPOINT_URL"          = var.segmentation_endpoint_url
+    "SEGMENTATION_SHARED_TOKEN"          = var.segmentation_shared_token
+    "METADATA_EXTRACT_AUTH_MODE"         = var.metadata_extract_auth_mode
+    "METADATA_EXTRACT_API_KEY"           = var.metadata_extract_api_key
+    "METADATA_EXTRACT_AZURE_AD_SCOPE"    = var.metadata_extract_azure_ad_scope
     "METADATA_EXTRACT_AZURE_AD_AUDIENCE" = var.metadata_extract_azure_ad_audience
-    "METADATA_EXTRACT_AZURE_AD_ISSUER" = var.metadata_extract_azure_ad_issuer
+    "METADATA_EXTRACT_AZURE_AD_ISSUER"   = var.metadata_extract_azure_ad_issuer
   }
 }

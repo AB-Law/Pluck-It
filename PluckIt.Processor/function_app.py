@@ -43,11 +43,12 @@ import json
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import re
 from urllib.parse import unquote
 import random
 import time
 import uuid
-import requests
+import httpx
 import jwt
 from azure.cosmos.exceptions import CosmosHttpResponseError
 from azure.core import MatchConditions
@@ -193,6 +194,11 @@ _TASTE_JOB_JITTER_SECONDS = _get_float_env("TASTE_JOB_JITTER_SECONDS", 0.2)
 _TASTE_JOB_PROFILE_UPDATE_MAX_RETRIES = 2
 _WEEKLY_DIGEST_MAX_CONCURRENCY = _get_int_env("WEEKLY_DIGEST_MAX_CONCURRENCY", 6)
 _SCRAPER_MAX_CONCURRENCY = _get_int_env("SCRAPER_MAX_CONCURRENCY", 4)
+
+_OIDC_DISCOVERY_CACHE: dict[str, dict[str, Any]] = {}
+_OIDC_DISCOVERY_LOCK = asyncio.Lock()
+_JWKS_CACHE: dict[str, list[dict[str, Any]]] = {}
+_JWKS_LOCK = asyncio.Lock()
 
 
 logger = logging.getLogger(__name__)
@@ -978,7 +984,95 @@ def _decode_base64_image(image_bytes_base64: str) -> bytes:
         raise HTTPException(status_code=400, detail=f"Invalid image_bytes_base64 payload: {exc}") from exc
 
 
-def _validate_azure_ad_token(token: str) -> dict[str, Any]:
+def _normalise_issuer_for_cache(issuer: str) -> str:
+    return issuer.strip().rstrip("/")
+
+
+def _find_matching_jwk(
+    jwks_keys: list[dict[str, Any]],
+    kid: str | None,
+) -> dict[str, Any] | None:
+    if not kid:
+        if len(jwks_keys) == 1:
+            only_key = jwks_keys[0]
+            return only_key if isinstance(only_key, dict) else None
+        return None
+
+    for key in jwks_keys:
+        if not isinstance(key, dict):
+            continue
+        if key.get("kid") == kid:
+            return key
+    return None
+
+
+async def _fetch_oidc_discovery_async(issuer: str) -> dict[str, Any]:
+    normalized_issuer = _normalise_issuer_for_cache(issuer)
+    cached = _OIDC_DISCOVERY_CACHE.get(normalized_issuer)
+    if cached is not None:
+        return cached
+
+    async with _OIDC_DISCOVERY_LOCK:
+        cached = _OIDC_DISCOVERY_CACHE.get(normalized_issuer)
+        if cached is not None:
+            return cached
+
+        discovery_url = f"{normalized_issuer}/.well-known/openid-configuration"
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                discovery_response = await client.get(discovery_url)
+            discovery_response.raise_for_status()
+            discovery = discovery_response.json()
+        except Exception as exc:
+            logger.exception("extract-clothing-metadata: Failed to fetch OIDC discovery document")
+            raise HTTPException(status_code=401, detail="Unauthorized metadata request.") from exc
+
+        if not isinstance(discovery, dict):
+            logger.warning("extract-clothing-metadata: OIDC discovery response was not a JSON object")
+            raise HTTPException(status_code=401, detail="Unauthorized metadata request.")
+
+        _OIDC_DISCOVERY_CACHE[normalized_issuer] = discovery
+        return discovery
+
+
+async def _fetch_jwks_keys_async(jwks_uri: str) -> list[dict[str, Any]]:
+    cached = _JWKS_CACHE.get(jwks_uri)
+    if cached is not None:
+        return cached
+
+    async with _JWKS_LOCK:
+        cached = _JWKS_CACHE.get(jwks_uri)
+        if cached is not None:
+            return cached
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                jwks_response = await client.get(jwks_uri)
+            jwks_response.raise_for_status()
+            payload = jwks_response.json()
+        except Exception as exc:
+            logger.exception("extract-clothing-metadata: Failed to fetch JWKS document")
+            raise HTTPException(status_code=401, detail="Unauthorized metadata request.") from exc
+
+        if not isinstance(payload, dict):
+            logger.warning("extract-clothing-metadata: JWKS response was not a JSON object")
+            raise HTTPException(status_code=401, detail="Unauthorized metadata request.")
+
+        keys = payload.get("keys")
+        if not isinstance(keys, list) or not keys:
+            logger.warning("extract-clothing-metadata: JWKS response missing keys")
+            raise HTTPException(status_code=401, detail="Unauthorized metadata request.")
+
+        jwks_keys = [key for key in keys if isinstance(key, dict)]
+        if not jwks_keys:
+            logger.warning("extract-clothing-metadata: JWKS response did not include valid key objects")
+            raise HTTPException(status_code=401, detail="Unauthorized metadata request.")
+
+        _JWKS_CACHE[jwks_uri] = jwks_keys
+        return jwks_keys
+
+
+async def _validate_azure_ad_token(token: str) -> dict[str, Any]:
     """Validate an Azure AD token against the OIDC discovery document and JWKS."""
     try:
         header = jwt.get_unverified_header(token)
@@ -996,25 +1090,24 @@ def _validate_azure_ad_token(token: str) -> dict[str, Any]:
     if not audience:
         raise HTTPException(status_code=401, detail="Unauthorized metadata request.")
 
-    discovery_url = f"{issuer.rstrip('/')}/.well-known/openid-configuration"
-    try:
-        discovery_response = requests.get(discovery_url, timeout=5)
-        discovery_response.raise_for_status()
-        discovery = discovery_response.json()
-    except Exception as exc:
-        logger.exception("extract-clothing-metadata: Failed to fetch OIDC discovery document")
-        raise HTTPException(status_code=401, detail="Unauthorized metadata request.") from exc
+    discovery = await _fetch_oidc_discovery_async(issuer)
 
     jwks_uri = discovery.get("jwks_uri")
     if not isinstance(jwks_uri, str) or not jwks_uri:
         logger.warning("extract-clothing-metadata: OIDC discovery response missing jwks_uri")
         raise HTTPException(status_code=401, detail="Unauthorized metadata request.")
 
+    jwks_keys = await _fetch_jwks_keys_async(jwks_uri)
+    signing_key_data = _find_matching_jwk(jwks_keys, header.get("kid"))
+    if not signing_key_data:
+        logger.warning("extract-clothing-metadata: No matching JWKS key found for token kid=%s", header.get("kid"))
+        raise HTTPException(status_code=401, detail="Unauthorized metadata request.")
+
     try:
-        signing_key = jwt.PyJWKClient(jwks_uri).get_signing_key_from_jwt(token)
+        signing_key = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(signing_key_data))
         claims = jwt.decode(
             token,
-            signing_key.key,
+            signing_key,
             algorithms=["RS256"],
             audience=audience,
             issuer=issuer,
@@ -1029,7 +1122,7 @@ def _validate_azure_ad_token(token: str) -> dict[str, Any]:
     return claims
 
 
-def _validate_metadata_auth_mode(mode: str, headers: dict[str, str]) -> None:
+async def _validate_metadata_auth_mode(mode: str, headers: dict[str, str]) -> None:
     if mode == "api-key":
         expected = _metadata_api_key()
         if not expected:
@@ -1052,7 +1145,7 @@ def _validate_metadata_auth_mode(mode: str, headers: dict[str, str]) -> None:
             raise HTTPException(status_code=401, detail="Unauthorized metadata request.")
 
         try:
-            _validate_azure_ad_token(token)
+            await _validate_azure_ad_token(token)
         except Exception as exc:
             logger.exception("extract-clothing-metadata: Failed to validate bearer token")
             raise HTTPException(status_code=401, detail="Unauthorized metadata request.") from exc
@@ -1099,7 +1192,7 @@ def _validate_metadata_payload(raw: Any) -> dict[str, object]:
             hex_value = hex_value.strip().lower()
             if not hex_value.startswith("#"):
                 hex_value = f"#{hex_value.lstrip('#')}"
-            if len(hex_value) != 7:
+            if not re.fullmatch(r"#[0-9a-f]{6}", hex_value):
                 logger.info("extract-clothing-metadata: Ignoring invalid colour hex value %s", hex_value)
                 continue
             colours.append({"name": name, "hex": hex_value})
@@ -1493,7 +1586,7 @@ async def extract_clothing_metadata(
 ) -> ClothingMetadataExtractionResponse:
     headers = {k.lower(): v for k, v in request.headers.items()}
     mode = _metadata_auth_mode()
-    _validate_metadata_auth_mode(mode, headers)
+    await _validate_metadata_auth_mode(mode, headers)
 
     request_id = _metadata_request_id_from_headers(headers, request)
     traceparent = _metadata_traceparent_from_headers(headers, request)
@@ -2546,7 +2639,6 @@ async def suggest_scraper_source(
     """
     from agents.db import get_scraper_sources_container
     from agents.scrapers.config_generator import generate_selector_config
-    import re
 
     _validate_scraper_url(body.url)  # raises 400 for unsafe URLs
 
