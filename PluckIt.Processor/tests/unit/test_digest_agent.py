@@ -10,6 +10,7 @@ import json
 from agents.digest_agent import (
     _save_digest_and_update_profile,
     compute_wardrobe_hash,
+    _load_user_wardrobe,
     run_digest_for_user_with_status,
     run_weekly_digest,
 )
@@ -31,6 +32,33 @@ def test_run_digest_for_user_with_status_fails_when_wardrobe_cannot_load():
 
     assert digest is None
     assert outcome == "failed"
+
+
+@pytest.mark.unit
+def test_load_user_wardrobe_fetches_ids_then_top_scored_items():
+    sync_wardrobe = MagicMock()
+
+    def query_items(**kwargs):
+        query = kwargs["query"]
+        if query.startswith("SELECT c.id FROM c"):
+            return iter([{"id": "item-1"}, {"id": "item-2"}, {"id": "item-3"}])
+        return iter([
+            {"id": "item-2", "category": "tops", "wearCount": 3},
+            {"id": "item-1", "category": "bottoms", "wearCount": 5},
+        ])
+
+    sync_wardrobe.query_items.side_effect = query_items
+
+    with patch("agents.digest_agent.get_wardrobe_container_sync", return_value=sync_wardrobe):
+        wardrobe_data = _load_user_wardrobe("user-test")
+
+    assert wardrobe_data is not None
+    assert wardrobe_data["item_ids"] == ["item-1", "item-2", "item-3"]
+    assert len(wardrobe_data["items"]) == 2
+    assert wardrobe_data["items"][0]["id"] in {"item-1", "item-2"}
+    query = sync_wardrobe.query_items.call_args_list[1][1]["query"]
+    assert "ORDER BY c.wearCount DESC" in query
+    assert "OFFSET 0 LIMIT 50" in query
 
 
 @pytest.mark.unit

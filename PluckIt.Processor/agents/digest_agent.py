@@ -183,15 +183,21 @@ def run_digest_for_user_with_status(user_id: str, force: bool = False) -> tuple[
 def _load_user_wardrobe(user_id: str) -> Optional[dict]:
     try:
         container = get_wardrobe_container_sync()
-        items = []
         ids = []
         for item in container.query_items(
-            query="SELECT c.id, c.category, c.colours, c.tags, c.brand, c.aestheticTags, "
-                  "c.wearCount, c.lastWornAt, c.wearEvents, c.price FROM c WHERE c.userId = @userId",
+            query="SELECT c.id FROM c WHERE c.userId = @userId",
             parameters=[{"name": "@userId", "value": user_id}],
         ):
             ids.append(item["id"])
-            items.append(item)
+        items = [
+            item for item in container.query_items(
+                query="SELECT c.id, c.category, c.colours, c.tags, c.brand, c.aestheticTags, "
+                      "c.wearCount, c.lastWornAt, c.wearEvents, c.price "
+                      "FROM c WHERE c.userId = @userId "
+                      "ORDER BY c.wearCount DESC, c.lastWornAt DESC OFFSET 0 LIMIT 50",
+                parameters=[{"name": "@userId", "value": user_id}],
+            )
+        ]
         return {"items": items, "item_ids": ids}
     except Exception as exc:
         logger.warning("Digest: failed to load wardrobe for %s: %s", user_id, exc)
