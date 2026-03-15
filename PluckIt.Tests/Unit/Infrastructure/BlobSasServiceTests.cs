@@ -17,7 +17,8 @@ public sealed class BlobSasServiceTests
     [Fact]
     public void Ctor_RejectsNullArchiveContainer()
     {
-        Should.Throw<ArgumentNullException>(() => new BlobSasService(AccountName, AccountKey, null!));
+        Should.Throw<ArgumentNullException>(() => new BlobSasService(
+            accountName: AccountName, accountKey: AccountKey, archiveContainer: null!));
     }
 
     [Fact]

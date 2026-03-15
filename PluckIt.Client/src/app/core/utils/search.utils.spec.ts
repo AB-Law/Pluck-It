@@ -136,7 +136,8 @@ describe('matchesItem – null / missing fields', () => {
   });
 
   it('handles null colours gracefully', () => {
-    expect(matchesItem(item({ colours: undefined as any }), 'black')).toBe(false);
+    const itemWithUndefinedColours = { ...item(), colours: undefined as unknown as ClothingItem['colours'] };
+    expect(matchesItem(itemWithUndefinedColours, 'black')).toBe(false);
   });
 
   it('handles missing aestheticTags gracefully', () => {

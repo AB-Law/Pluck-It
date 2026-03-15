@@ -19,7 +19,7 @@ describe('StylistService', () => {
 
   it('posts recommendation requests and returns parsed list', () => {
     const expected = [{ id: 'outfit-1', title: 'Summer', description: 'Chill fit', clothingItemIds: ['i1', 'i2'] }];
-    let payload: any = null;
+    let payload: { id: string; title: string; description: string; clothingItemIds: string[] }[] | null = null;
 
     service.getRecommendations({
       stylePrompt: 'minimal',

@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
@@ -11,9 +11,9 @@ import {
 
 @Injectable({ providedIn: 'root' })
 export class DiscoverService {
-  private readonly base = `${environment.chatApiUrl}/api`;
+  private readonly http = inject(HttpClient);
 
-  constructor(private readonly http: HttpClient) { }
+  private readonly base = `${environment.chatApiUrl}/api`;
 
   getFeed(query: DiscoverFeedQuery = {}): Observable<DiscoverFeedResponse> {
     let params = new HttpParams();
@@ -29,7 +29,7 @@ export class DiscoverService {
   getSources(): Observable<ScraperSource[]> {
     return this.http
       .get<{ sources: ScraperSource[] }>(`${this.base}/scraper/sources`)
-      .pipe(map(r => r.sources ?? []));
+      .pipe(map((r) => r.sources ?? []));
   }
 
   suggestSource(name: string, url: string, sourceType: string): Observable<ScraperSource> {
@@ -44,7 +44,11 @@ export class DiscoverService {
     return this.http.delete<void>(`${this.base}/scraper/subscribe/${sourceId}`);
   }
 
-  sendFeedback(itemId: string, signal: 'up' | 'down', galleryImageIndex?: number): Observable<{ scoreSignal: number }> {
+  sendFeedback(
+    itemId: string,
+    signal: 'up' | 'down',
+    galleryImageIndex?: number,
+  ): Observable<{ scoreSignal: number }> {
     const payload: { signal: 'up' | 'down'; galleryImageIndex?: number } = { signal };
     if (galleryImageIndex !== null && galleryImageIndex !== undefined) {
       payload.galleryImageIndex = galleryImageIndex;
@@ -56,10 +60,16 @@ export class DiscoverService {
   }
 
   acquireLease(sourceId: string): Observable<{ status: string; expiresAt: string }> {
-    return this.http.post<{ status: string; expiresAt: string }>(`${this.base}/scraper/lease/${sourceId}`, {});
+    return this.http.post<{ status: string; expiresAt: string }>(
+      `${this.base}/scraper/lease/${sourceId}`,
+      {},
+    );
   }
 
-  ingestReddit(sourceId: string, posts: any[]): Observable<{ count: number; status: string }> {
+  ingestReddit(
+    sourceId: string,
+    posts: Array<Record<string, unknown>>,
+  ): Observable<{ count: number; status: string }> {
     return this.http.post<{ count: number; status: string }>(`${this.base}/scraper/ingest/reddit`, {
       source_id: sourceId,
       posts,

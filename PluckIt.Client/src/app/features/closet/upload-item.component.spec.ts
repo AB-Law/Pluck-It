@@ -2,11 +2,12 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { UploadItemComponent } from './upload-item.component';
 
 const buildFileList = (files: File[]) => {
-  const list = files as unknown as FileList & { [key: number]: File; item: (index: number) => File | null };
+  type FileListLike = FileList & { [index: number]: File; item: (index: number) => File | null };
+  const list = files as unknown as FileListLike;
   list.item = (index: number) => files[index] ?? null;
   Object.defineProperty(list, 'length', { value: files.length, writable: true });
   files.forEach((file, index) => {
-    (list as any)[index] = file;
+    list[index] = file;
   });
   return list;
 };

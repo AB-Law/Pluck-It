@@ -1,7 +1,8 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { WritableSignal } from '@angular/core';
 import { ActivatedRoute, ParamMap, Router, convertToParamMap } from '@angular/router';
 import { By } from '@angular/platform-browser';
-import { of, throwError } from 'rxjs';
+import { of, throwError, Observable } from 'rxjs';
 import { WardrobeComponent } from './closet.component';
 import { WardrobeService } from '../../core/services/wardrobe.service';
 import { ClothingItem } from '../../core/models/clothing-item.model';
@@ -20,7 +21,47 @@ describe('WardrobeComponent', () => {
     acceptDraft: ReturnType<typeof vi.fn>;
   };
   let router: { navigate: ReturnType<typeof vi.fn> };
-  let route: { snapshot: { queryParamMap: ParamMap }; queryParamMap: any };
+  let route: { snapshot: { queryParamMap: ParamMap }; queryParamMap: Observable<ParamMap> };
+  type ClosetComponentInternals = {
+    _dispatchPendingUploads: () => void;
+    _drainOfflineQueue: () => void;
+    _onUploadAccepted: (qi: unknown, resolve: () => void, result: ClothingItem) => void;
+    _onUploadFailed: (qi: unknown, resolve: () => void, err: unknown) => void;
+    _reconcileQueueWithDrafts: (drafts: ClothingItem[]) => void;
+    _setUploadQueueState: (localId: string, patch: Record<string, unknown>) => void;
+    _getUploadErrorMessage: (err: unknown) => string;
+    loadItems: () => void;
+    syncUrl: () => void;
+    refreshDrafts: () => void;
+    _uploadSingle: (item: unknown) => Promise<void>;
+    uploadRef: unknown;
+    selectedCategory: WritableSignal<string>;
+    sortField: WritableSignal<'dateAdded' | 'wearCount' | 'price.amount'>;
+    sortDir: WritableSignal<'asc' | 'desc'>;
+    hasMore: WritableSignal<boolean>;
+    loadingMore: WritableSignal<boolean>;
+    nextToken: WritableSignal<string | null>;
+    drafts: WritableSignal<ClothingItem[]>;
+    retryingDraftIds: WritableSignal<Set<string>>;
+    uploadQueue: WritableSignal<unknown[]>;
+    reviewingDraft: WritableSignal<ClothingItem | null>;
+    editingItem: WritableSignal<ClothingItem | null>;
+    deletingItem: WritableSignal<ClothingItem | null>;
+    offlineQueue: { count: () => number; drain: () => Array<{ payload: unknown }>; clear: () => void };
+    networkService: { isCurrentlyOnline: () => boolean };
+    onFileSelected: (files: File[]) => void;
+    onQueueItemReview: (item: { localId: string; file: File; status: string; draftId?: string }) => void;
+    onQueueItemRetry: (item: { localId: string; file: File; status: string; draftId?: string }) => void;
+    onQueueItemDismiss: (item: { localId: string; file: File; status: string; draftId?: string }) => void;
+    onServerDraftRetry: (draft: ClothingItem) => void;
+    onServerDraftDismiss: (draft: ClothingItem) => void;
+    onDraftReviewSaved: (draft: ClothingItem) => void;
+    onItemUpdated: (item: ClothingItem) => void;
+    confirmDelete: () => void;
+    onDeleteItem: (item: ClothingItem) => void;
+    triggerUpload: () => void;
+  };
+  const asInternal = (): ClosetComponentInternals => component as unknown as ClosetComponentInternals;
 
   const BASE_ITEM: ClothingItem = {
     id: 'item-1',
@@ -119,20 +160,20 @@ describe('WardrobeComponent', () => {
       fileSize: 3,
     } as Record<string, unknown>);
 
-    const dispatchSpy = vi.spyOn(component as any, '_dispatchPendingUploads').mockImplementation(() => undefined);
+    const dispatchSpy = vi.spyOn(asInternal(), '_dispatchPendingUploads').mockImplementation(() => undefined);
 
-    (component as any)._drainOfflineQueue();
+    asInternal()._drainOfflineQueue();
     expect(offlineQueue.count()).toBe(1);
-    expect((offlineQueue.drain()[0].payload as any).retryCount).toBe(1);
+    expect((offlineQueue.drain()[0].payload as { retryCount: number }).retryCount).toBe(1);
     expect(dispatchSpy).not.toHaveBeenCalled();
 
-    (component as any)._drainOfflineQueue();
-    expect((offlineQueue.drain()[0].payload as any).retryCount).toBe(2);
+    asInternal()._drainOfflineQueue();
+    expect((offlineQueue.drain()[0].payload as { retryCount: number }).retryCount).toBe(2);
 
-    (component as any)._drainOfflineQueue();
-    expect((offlineQueue.drain()[0].payload as any).retryCount).toBe(3);
+    asInternal()._drainOfflineQueue();
+    expect((offlineQueue.drain()[0].payload as { retryCount: number }).retryCount).toBe(3);
 
-    (component as any)._drainOfflineQueue();
+    asInternal()._drainOfflineQueue();
     expect(offlineQueue.count()).toBe(0);
   });
 
@@ -183,7 +224,7 @@ describe('WardrobeComponent', () => {
     const qi = { localId: 'q1', file: new File(['a'], 'shirt.jpg'), status: 'uploading' as const };
     component.uploadQueue.set([qi]);
 
-    (component as any)._onUploadAccepted(qi, () => undefined, { ...READY_DRAFT, draftStatus: 'Processing' });
+    asInternal()._onUploadAccepted(qi, () => undefined, { ...READY_DRAFT, draftStatus: 'Processing' });
     expect(component.uploadQueue()[0].status).toBe('processing');
     expect(component.uploadQueue()[0].draftId).toBe('draft-1');
   });
@@ -193,7 +234,7 @@ describe('WardrobeComponent', () => {
     component.uploadQueue.set([qi]);
     const errSpy = vi.fn();
 
-    (component as any)._onUploadFailed(qi, errSpy, { error: { detail: 'broken image' } });
+    asInternal()._onUploadFailed(qi, errSpy, { error: { detail: 'broken image' } });
     expect(component.uploadQueue()[0].status).toBe('failed');
     expect(component.uploadQueue()[0].error).toBe('broken image');
     expect(errSpy).toHaveBeenCalled();
@@ -206,7 +247,7 @@ describe('WardrobeComponent', () => {
       status: 'processing',
       draftId: 'draft-1',
     }]);
-    (component as any)._reconcileQueueWithDrafts([READY_DRAFT]);
+    asInternal()._reconcileQueueWithDrafts([READY_DRAFT]);
     expect(component.uploadQueue()[0].status).toBe('ready');
     expect(component.uploadQueue()[0].category).toBe('Outerwear');
   });
@@ -218,7 +259,7 @@ describe('WardrobeComponent', () => {
       status: 'processing',
       draftId: 'draft-fail',
     }]);
-    (component as any)._reconcileQueueWithDrafts([{ ...PROCESSING_DRAFT, id: 'draft-fail', draftStatus: 'Failed', draftError: 'bad blob' }]);
+    asInternal()._reconcileQueueWithDrafts([{ ...PROCESSING_DRAFT, id: 'draft-fail', draftStatus: 'Failed', draftError: 'bad blob' }]);
     expect(component.uploadQueue()[0].status).toBe('failed');
     expect(component.uploadQueue()[0].error).toBe('bad blob');
   });
@@ -562,18 +603,18 @@ describe('WardrobeComponent', () => {
   it('leaves queue unchanged when setUploadQueueState cannot find local id', () => {
     const entry = { localId: 'q', file: new File(['a'], 'item.jpg'), status: 'queued' as const };
     component.uploadQueue.set([entry]);
-    (component as any)._setUploadQueueState('missing-id', { status: 'failed' });
+    asInternal()._setUploadQueueState('missing-id', { status: 'failed' });
     expect(component.uploadQueue()).toEqual([entry]);
   });
 
   it('loads items with error path and still clears loading state', () => {
     wardrobeService.getAll.mockReturnValueOnce(throwError(() => new Error('network')));
-    (component as any).loadItems();
+    asInternal().loadItems();
     expect(component.loading()).toBe(false);
   });
 
   it('derives upload error messages from nested error payloads', () => {
-    const getUploadErrorMessage = (component as any)._getUploadErrorMessage;
+    const getUploadErrorMessage = asInternal()._getUploadErrorMessage;
     expect(getUploadErrorMessage({ error: { detail: 'detail-msg' } })).toBe('detail-msg');
     expect(getUploadErrorMessage({ error: { error: 'error-msg' } })).toBe('error-msg');
     expect(getUploadErrorMessage({ message: 'boom' })).toBe('boom');
@@ -585,7 +626,7 @@ describe('WardrobeComponent', () => {
     component['selectedCategory'].set('all');
     component['sortField'].set('dateAdded');
     component['sortDir'].set('desc');
-    (component as any).syncUrl();
+    asInternal().syncUrl();
 
     expect(router.navigate).toHaveBeenCalledWith([], {
       queryParams: {
@@ -599,7 +640,7 @@ describe('WardrobeComponent', () => {
 
   it('triggers the upload component picker', () => {
     const uploadRef = { openFilePicker: vi.fn() };
-    (component as any).uploadRef = uploadRef;
+    asInternal().uploadRef = uploadRef;
     component.triggerUpload();
     expect(uploadRef.openFilePicker).toHaveBeenCalled();
   });
@@ -625,7 +666,7 @@ describe('WardrobeComponent', () => {
   it('handles review/edit modal cancelled outputs from template bindings', () => {
     component.reviewingDraft.set({ ...BASE_ITEM, id: 'review-id' });
     fixture.detectChanges();
-    let reviewModal = fixture.debugElement.query(By.css('app-review-item-modal'));
+    const reviewModal = fixture.debugElement.query(By.css('app-review-item-modal'));
     reviewModal.triggerEventHandler('cancelled');
     expect(component.reviewingDraft()).toBeNull();
 
@@ -681,7 +722,7 @@ describe('WardrobeComponent', () => {
   it('switches category and sort via template controls', () => {
     component.allItems.set([{ ...BASE_ITEM, id: 'i-1', category: 'Outerwear' }, { ...BASE_ITEM, id: 'i-2', category: 'Tops' }]);
     const loadItemsSpy = vi.fn();
-    (component as any).loadItems = loadItemsSpy;
+    asInternal().loadItems = loadItemsSpy;
     fixture.detectChanges();
 
     const root = fixture.nativeElement as HTMLElement;
@@ -784,7 +825,7 @@ describe('WardrobeComponent', () => {
       { localId: 'q-missing', file: new File(['a'], 'a.jpg'), status: 'processing', draftId: 'not-there' },
       { localId: 'q-still-processing', file: new File(['b'], 'b.jpg'), status: 'processing', draftId: 'd-processing' },
     ]);
-    (component as any)._reconcileQueueWithDrafts([
+    asInternal()._reconcileQueueWithDrafts([
       { ...BASE_ITEM, id: 'd-processing', draftStatus: 'Processing' as const },
     ]);
 
@@ -835,8 +876,8 @@ describe('WardrobeComponent', () => {
     });
 
     const localFixture = TestBed.createComponent(WardrobeComponent);
-    const localComponent = localFixture.componentInstance;
-    const refreshSpy = vi.spyOn(localComponent as any, 'refreshDrafts');
+    const localComponent = localFixture.componentInstance as unknown as ClosetComponentInternals;
+    const refreshSpy = vi.spyOn(localComponent, 'refreshDrafts');
 
     localFixture.detectChanges();
     expect(addEventCalls.length).toBe(1);
@@ -857,7 +898,7 @@ describe('WardrobeComponent', () => {
     vi.useFakeTimers();
     try {
       const localFixture = TestBed.createComponent(WardrobeComponent);
-      const localComponent = localFixture.componentInstance as any;
+      const localComponent = localFixture.componentInstance as unknown as ClosetComponentInternals;
       const refreshSpy = vi.spyOn(localComponent, 'refreshDrafts');
 
       localFixture.detectChanges();
@@ -887,13 +928,13 @@ describe('WardrobeComponent', () => {
     component.uploadQueue.set([
       { localId: 'q-ready', file: new File(['a'], 'ready.jpg'), status: 'ready', draftId: 'draft-ready' },
     ]);
-    (component as any)._reconcileQueueWithDrafts([READY_DRAFT]);
+    asInternal()._reconcileQueueWithDrafts([READY_DRAFT]);
     expect(component.uploadQueue()[0]).toEqual(expect.objectContaining({ localId: 'q-ready', status: 'ready' }));
 
     component.uploadQueue.set([
       { localId: 'q-processing', file: new File(['a'], 'processing.jpg'), status: 'processing', draftId: 'draft-missing' },
     ]);
-    (component as any)._reconcileQueueWithDrafts([
+    asInternal()._reconcileQueueWithDrafts([
       { ...PROCESSING_DRAFT, id: 'other', draftStatus: 'Processing' },
     ]);
     expect(component.uploadQueue()[0].status).toBe('processing');
@@ -904,9 +945,9 @@ describe('WardrobeComponent', () => {
       { localId: 'q-upload', file: new File(['a'], 'queued.jpg'), status: 'queued' },
       { localId: 'q-held', file: new File(['b'], 'hold.jpg'), status: 'processing', draftId: 'draft-held' },
     ]);
-    const uploadSpy = vi.spyOn(component as any, '_uploadSingle').mockResolvedValue(undefined);
+    const uploadSpy = vi.spyOn(asInternal(), '_uploadSingle').mockResolvedValue(undefined);
 
-    (component as any)._dispatchPendingUploads();
+    asInternal()._dispatchPendingUploads();
 
     expect(component.uploadQueue()[0].status).toBe('uploading');
     expect(component.uploadQueue()[1].status).toBe('processing');
@@ -938,7 +979,7 @@ describe('WardrobeComponent', () => {
     component.onQueueItemReview(queueItem);
     component.onQueueItemRetry(queueItem);
     component.onQueueItemDismiss(queueItem);
-    expect((component as any).reviewingDraft()).toBeNull();
+    expect(asInternal().reviewingDraft()).toBeNull();
     expect(wardrobeService.retryDraft).not.toHaveBeenCalled();
     expect(wardrobeService.dismissDraft).not.toHaveBeenCalled();
 

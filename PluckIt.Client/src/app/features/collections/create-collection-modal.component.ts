@@ -1,5 +1,5 @@
 import { Component, output, signal, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { Collection } from '../../core/models/collection.model';
 import { CollectionService } from '../../core/services/collection.service';
@@ -7,25 +7,28 @@ import { CollectionService } from '../../core/services/collection.service';
 @Component({
   selector: 'app-create-collection-modal',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [FormsModule],
   template: `
     <div
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
       (click)="onBackdropClick($event)"
     >
-      <div class="relative w-full max-w-md rounded-xl border border-border-chrome bg-black p-6 shadow-2xl mx-4">
-
+      <div
+        class="relative w-full max-w-md rounded-xl border border-border-chrome bg-black p-6 shadow-2xl mx-4"
+      >
         <!-- Header -->
         <div class="mb-6 flex items-center justify-between">
           <h3 class="text-lg font-bold text-slate-100">New Collection</h3>
-          <button class="text-slate-500 hover:text-white transition-colors" (click)="cancelled.emit()">
+          <button
+            class="text-slate-500 hover:text-white transition-colors"
+            (click)="cancelled.emit()"
+          >
             <span class="material-symbols-outlined">close</span>
           </button>
         </div>
 
         <!-- Form -->
         <div class="space-y-4">
-
           <!-- Name -->
           <div>
             <label class="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">
@@ -54,7 +57,9 @@ import { CollectionService } from '../../core/services/collection.service';
           </div>
 
           <!-- Visibility -->
-          <div class="flex items-center justify-between rounded-lg border border-border-chrome bg-card-dark px-4 py-3">
+          <div
+            class="flex items-center justify-between rounded-lg border border-border-chrome bg-card-dark px-4 py-3"
+          >
             <div>
               <p class="text-sm font-medium text-slate-100">Public collection</p>
               <p class="text-xs text-slate-500">Anyone with a share link can join</p>
@@ -71,7 +76,6 @@ import { CollectionService } from '../../core/services/collection.service';
               ></span>
             </button>
           </div>
-
         </div>
 
         <!-- Error -->
@@ -95,21 +99,20 @@ import { CollectionService } from '../../core/services/collection.service';
             {{ saving() ? 'Creating…' : 'Create Collection' }}
           </button>
         </div>
-
       </div>
     </div>
   `,
 })
 export class CreateCollectionModalComponent {
-  created   = output<Collection>();
+  created = output<Collection>();
   cancelled = output<void>();
 
-  name        = '';
+  name = '';
   description = '';
-  isPublic    = false;
+  isPublic = false;
 
   protected saving = signal(false);
-  protected error  = signal<string | null>(null);
+  protected error = signal<string | null>(null);
 
   private readonly collectionService = inject(CollectionService);
 
@@ -117,15 +120,23 @@ export class CreateCollectionModalComponent {
     if (this.saving() || !this.name.trim()) return;
     this.error.set(null);
     this.saving.set(true);
-    this.collectionService.create({
-      name: this.name.trim(),
-      description: this.description || null,
-      isPublic: this.isPublic,
-      clothingItemIds: [],
-    }).subscribe({
-      next: col => { this.saving.set(false); this.created.emit(col); },
-      error: () => { this.saving.set(false); this.error.set('Failed to create collection. Please try again.'); },
-    });
+    this.collectionService
+      .create({
+        name: this.name.trim(),
+        description: this.description || null,
+        isPublic: this.isPublic,
+        clothingItemIds: [],
+      })
+      .subscribe({
+        next: (col) => {
+          this.saving.set(false);
+          this.created.emit(col);
+        },
+        error: () => {
+          this.saving.set(false);
+          this.error.set('Failed to create collection. Please try again.');
+        },
+      });
   }
 
   onBackdropClick(e: MouseEvent): void {

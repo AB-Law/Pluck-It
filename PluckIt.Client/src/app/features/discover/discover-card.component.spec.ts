@@ -63,7 +63,7 @@ describe('DiscoverCardComponent', () => {
   it('toggles from up to down by adjusting score delta', () => {
     const up = fixture.nativeElement.querySelector('button[title="Love it"]') as HTMLButtonElement;
     const down = fixture.nativeElement.querySelector('button[title="Not for me"]') as HTMLButtonElement;
-    let payloads: Array<{ itemId: string; signal: 'up' | 'down'; galleryImageIndex?: number }> = [];
+    const payloads: Array<{ itemId: string; signal: 'up' | 'down'; galleryImageIndex?: number }> = [];
     component.feedbackSent.subscribe((value) => { payloads.push(value); });
 
     up.click();

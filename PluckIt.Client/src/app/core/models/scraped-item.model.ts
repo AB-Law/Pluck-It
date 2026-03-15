@@ -30,7 +30,7 @@ export interface ScraperSource {
   sourceType: 'reddit' | 'brand';
   isGlobal: boolean;
   isActive: boolean;
-  config: Record<string, any>;
+  config: Record<string, unknown>;
   createdAt: string;
   lastScrapedAt?: string;
   subscribed?: boolean;

@@ -3,11 +3,20 @@ import { throwError, of } from 'rxjs';
 import { CreateCollectionModalComponent } from './create-collection-modal.component';
 import { CollectionService } from '../../core/services/collection.service';
 import { Collection } from '../../core/models/collection.model';
+import { WritableSignal } from '@angular/core';
 
 describe('CreateCollectionModalComponent', () => {
   let fixture: ComponentFixture<CreateCollectionModalComponent>;
   let component: CreateCollectionModalComponent;
   let collectionService: { create: ReturnType<typeof vi.fn> };
+  type CreateCollectionModalComponentInternals = {
+    saving: WritableSignal<boolean>;
+    error: WritableSignal<string | null>;
+    save: () => void;
+    onBackdropClick: (event: MouseEvent) => void;
+  };
+  const asInternal = (): CreateCollectionModalComponentInternals =>
+    component as unknown as CreateCollectionModalComponentInternals;
 
   const CREATED: Collection = {
     id: 'c-1',
@@ -61,7 +70,7 @@ describe('CreateCollectionModalComponent', () => {
       clothingItemIds: [],
     });
     expect(emitted).toEqual(CREATED);
-    expect((component as any).saving()).toBe(false);
+    expect(asInternal().saving()).toBe(false);
   });
 
   it('surfaces an error message when create fails', () => {
@@ -71,24 +80,30 @@ describe('CreateCollectionModalComponent', () => {
     component.save();
     fixture.detectChanges();
 
-    expect((component as any).error()).toBe('Failed to create collection. Please try again.');
-    expect((component as any).saving()).toBe(false);
+    expect(asInternal().error()).toBe('Failed to create collection. Please try again.');
+    expect(asInternal().saving()).toBe(false);
   });
 
   it('emits cancelled when backdrop click occurs on backdrop', () => {
     let cancelled = 0;
     component.cancelled.subscribe(() => { cancelled += 1; });
-    const target: any = { id: 'target' };
-    component.onBackdropClick({ target, currentTarget: target } as MouseEvent);
+    const target = { id: 'target' } as HTMLElement;
+    const backdropEvent = new MouseEvent('click');
+    Object.defineProperty(backdropEvent, 'target', { value: target });
+    Object.defineProperty(backdropEvent, 'currentTarget', { value: target });
+    component.onBackdropClick(backdropEvent);
     expect(cancelled).toBe(1);
   });
 
   it('does not emit cancelled for clicks inside dialog', () => {
     let cancelled = 0;
     component.cancelled.subscribe(() => { cancelled += 1; });
-    const target: any = { id: 'child' };
-    const currentTarget: any = { id: 'container' };
-    component.onBackdropClick({ target, currentTarget } as MouseEvent);
+    const target = { id: 'child' } as HTMLElement;
+    const currentTarget = { id: 'container' } as HTMLElement;
+    const backdropEvent = new MouseEvent('click');
+    Object.defineProperty(backdropEvent, 'target', { value: target });
+    Object.defineProperty(backdropEvent, 'currentTarget', { value: currentTarget });
+    component.onBackdropClick(backdropEvent);
     expect(cancelled).toBe(0);
   });
 });

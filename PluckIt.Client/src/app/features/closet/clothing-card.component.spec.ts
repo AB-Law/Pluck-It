@@ -69,26 +69,33 @@ describe('ClothingCardComponent', () => {
   });
 
   it('emits selected item id and stops propagation on quick toggle click', () => {
-    const stopPropagation = vi.fn();
     const selectToggled = vi.fn();
     component.selectToggled.subscribe(selectToggled);
 
-    component.onToggleSelect({ stopPropagation } as unknown as MouseEvent);
+    const event = new MouseEvent('click');
+    const stopPropagationSpy = vi.spyOn(event, 'stopPropagation');
+    component.onToggleSelect(event);
 
-    expect(stopPropagation).toHaveBeenCalled();
+    expect(stopPropagationSpy).toHaveBeenCalled();
     expect(selectToggled).toHaveBeenCalledWith('item-1');
   });
 
   it('renders and toggles the contextual menu', () => {
     expect(component.menuOpen()).toBe(false);
     fixture.detectChanges();
-    component.toggleMenu({ stopPropagation: vi.fn() } as unknown as MouseEvent);
+    const openMenuEvent = new MouseEvent('click');
+    const openMenuStopPropagation = vi.spyOn(openMenuEvent, 'stopPropagation');
+    component.toggleMenu(openMenuEvent);
     expect(component.menuOpen()).toBe(true);
+    expect(openMenuStopPropagation).toHaveBeenCalled();
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Edit');
     expect(fixture.nativeElement.textContent).toContain('Delete');
-    component.toggleMenu({ stopPropagation: vi.fn() } as unknown as MouseEvent);
+    const closeMenuEvent = new MouseEvent('click');
+    const closeMenuStopPropagation = vi.spyOn(closeMenuEvent, 'stopPropagation');
+    component.toggleMenu(closeMenuEvent);
     fixture.detectChanges();
+    expect(closeMenuStopPropagation).toHaveBeenCalled();
     expect(component.menuOpen()).toBe(false);
   });
 

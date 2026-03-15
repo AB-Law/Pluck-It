@@ -1,5 +1,5 @@
 import { Component, input, output, signal, computed, inject, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { ClothingItem } from '../../core/models/clothing-item.model';
 import { CollectionService } from '../../core/services/collection.service';
@@ -9,21 +9,23 @@ import { catchError, map } from 'rxjs/operators';
 @Component({
   selector: 'app-add-to-collection-modal',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [FormsModule],
   template: `
     <!-- Backdrop -->
     <div
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
       (click)="onBackdropClick($event)"
     >
-      <div class="relative w-full max-w-none md:max-w-md h-full md:h-auto rounded-none md:rounded-xl border border-border-chrome bg-black p-4 md:p-6 shadow-2xl mx-0 md:mx-4 md:min-h-0">
-
+      <div
+        class="relative w-full max-w-none md:max-w-md h-full md:h-auto rounded-none md:rounded-xl border border-border-chrome bg-black p-4 md:p-6 shadow-2xl mx-0 md:mx-4 md:min-h-0"
+      >
         <!-- Header -->
         <div class="mb-6 flex items-center justify-between">
           <div>
             <h3 class="text-lg font-bold text-slate-100">Share to Collection</h3>
             <p class="text-xs text-slate-500 mt-0.5">
-              Add <span class="text-primary font-mono">{{ item().brand || 'this item' }}</span> to a collection
+              Add <span class="text-primary font-mono">{{ item().brand || 'this item' }}</span> to a
+              collection
             </p>
           </div>
           <button
@@ -38,12 +40,16 @@ import { catchError, map } from 'rxjs/operators';
         <!-- Collection list -->
         @if (loading()) {
           <div class="flex items-center justify-center py-8 text-slate-500 text-sm">
-            <span class="material-symbols-outlined animate-spin mr-2" style="font-size:20px">progress_activity</span>
+            <span class="material-symbols-outlined animate-spin mr-2" style="font-size:20px"
+              >progress_activity</span
+            >
             Loading collections…
           </div>
         } @else if (collections().length === 0) {
           <div class="py-8 text-center text-slate-500 text-sm">
-            <span class="material-symbols-outlined mb-2 block" style="font-size:36px">folder_off</span>
+            <span class="material-symbols-outlined mb-2 block" style="font-size:36px"
+              >folder_off</span
+            >
             You have no collections yet.
           </div>
         } @else {
@@ -51,7 +57,11 @@ import { catchError, map } from 'rxjs/operators';
             @for (col of collections(); track col.id) {
               <label
                 class="touch-target flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-colors"
-                [class]="selectedIds().has(col.id) ? 'border-primary bg-primary/10' : 'border-border-chrome hover:border-slate-600'"
+                [class]="
+                  selectedIds().has(col.id)
+                    ? 'border-primary bg-primary/10'
+                    : 'border-border-chrome hover:border-slate-600'
+                "
               >
                 <input
                   type="checkbox"
@@ -61,7 +71,10 @@ import { catchError, map } from 'rxjs/operators';
                 />
                 <div class="flex-1 min-w-0">
                   <p class="text-sm font-medium text-slate-100 truncate">{{ col.name }}</p>
-                  <p class="text-xs text-slate-500">{{ col.clothingItemIds.length }} items · {{ col.isPublic ? 'Public' : 'Private' }}</p>
+                  <p class="text-xs text-slate-500">
+                    {{ col.clothingItemIds.length }} items ·
+                    {{ col.isPublic ? 'Public' : 'Private' }}
+                  </p>
                 </div>
                 @if (col.clothingItemIds.includes(item().id)) {
                   <span class="text-[10px] font-mono text-green-500">ADDED</span>
@@ -73,7 +86,9 @@ import { catchError, map } from 'rxjs/operators';
 
         <!-- Actions -->
         @if (errorMessage()) {
-          <p class="mt-4 rounded-md border border-red-800/60 bg-red-950/30 px-3 py-2 text-xs text-red-300">
+          <p
+            class="mt-4 rounded-md border border-red-800/60 bg-red-950/30 px-3 py-2 text-xs text-red-300"
+          >
             {{ errorMessage() }}
           </p>
         }
@@ -92,17 +107,16 @@ import { catchError, map } from 'rxjs/operators';
             {{ saving() ? 'Saving…' : 'Confirm' }}
           </button>
         </div>
-
       </div>
     </div>
   `,
 })
 export class AddToCollectionModalComponent implements OnInit {
-  item   = input.required<ClothingItem>();
+  item = input.required<ClothingItem>();
   closed = output<void>();
 
-  protected loading    = signal(true);
-  protected saving     = signal(false);
+  protected loading = signal(true);
+  protected saving = signal(false);
   protected selectedIds = signal(new Set<string>());
   protected errorMessage = signal<string | null>(null);
   private readonly collectionService = inject(CollectionService);
@@ -114,9 +128,13 @@ export class AddToCollectionModalComponent implements OnInit {
   }
 
   toggleCollection(id: string): void {
-    this.selectedIds.update(s => {
+    this.selectedIds.update((s) => {
       const copy = new Set(s);
-      copy.has(id) ? copy.delete(id) : copy.add(id);
+      if (copy.has(id)) {
+        copy.delete(id);
+      } else {
+        copy.add(id);
+      }
       return copy;
     });
   }
@@ -132,18 +150,20 @@ export class AddToCollectionModalComponent implements OnInit {
       return;
     }
 
-    const calls = ids.map(id =>
+    const calls = ids.map((id) =>
       this.collectionService.addItem(id, this.item().id).pipe(
         map(() => ({ id, ok: true as const })),
-        catchError(() => of({ id, ok: false as const }))
-      )
+        catchError(() => of({ id, ok: false as const })),
+      ),
     );
 
-    forkJoin(calls).subscribe(results => {
+    forkJoin(calls).subscribe((results) => {
       this.saving.set(false);
-      const failed = results.filter(r => !r.ok);
+      const failed = results.filter((r) => !r.ok);
       if (failed.length > 0) {
-        this.errorMessage.set(`Failed to add item to ${failed.length} collection(s). Please retry.`);
+        this.errorMessage.set(
+          `Failed to add item to ${failed.length} collection(s). Please retry.`,
+        );
         return;
       }
       this.closed.emit();

@@ -29,7 +29,7 @@ docker run -d -p 8081:8081 -p 10251-10254:10251-10254 \
 
 **Windows** — download the installer from https://aka.ms/cosmosdb-emulator
 
-Emulator UI (to inspect data): https://localhost:8081/_explorer/index.html
+Emulator UI (to inspect data): http://localhost:8081/_explorer/index.html
 
 ### Azure OpenAI
 
@@ -92,7 +92,7 @@ You need **5 terminal tabs** running simultaneously.
 ### Tab 1 — Azurite (storage emulator)
 
 ```bash
-azurite --silent --location /tmp/azurite --debug /tmp/azurite.log
+azurite --silent --location ~/.azurite --debug ~/.azurite/debug.log --skipApiVersionCheck
 ```
 
 Azurite listens on:
@@ -132,38 +132,15 @@ Navigate to http://localhost:4200.
 
 ---
 
-## First-run: create Cosmos DB containers
+## First-run: create Cosmos DB containers and Azurite blobs
 
-On first run you need to create the database and containers in the emulator. Use the emulator UI at https://localhost:8081/_explorer/index.html (click through the self-signed cert warning).
-
-Create database **`PluckIt`** with these containers:
-
-| Container | Partition Key |
-|---|---|
-| Wardrobe | `/userId` |
-| UserProfiles | `/userId` |
-| Conversations | `/userId` |
-| Digests | `/userId` |
-| Moods | `/primaryMood` |
-| DigestFeedback | `/userId` |
-| WearEvents | `/userId` |
-| StylingActivity | `/userId` |
-| ScraperSources | `/id` |
-| ScrapedItems | `/sourceId` |
-| UserSourceSubscriptions | `/userId` |
-| TasteCalibration | `/userId` |
-| UserBans | `/userId` |
-| TasteAnalysisJobs | `/userId` |
-| TasteAnalysisJobDeadLetters | `/userId` |
-| RefreshTokens | `/userId` |
-
-Then create the Azurite blob containers (requires Azure CLI or Storage Explorer):
+With the Cosmos emulator and Azurite both running, execute the setup script (no dependencies — uses only the standard library):
 
 ```bash
-CONN="DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OugushZnRUOkvietl3hGys8uqHFht0YhfB7DPm3bkzrEt5PJBKgIfbI=;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;"
-az storage container create --name uploads --connection-string "$CONN"
-az storage container create --name archive --connection-string "$CONN"
+python3 scripts/setup-local-cosmos.py
 ```
+
+This creates the `PluckIt` database and all 16 containers with the correct partition keys. It is idempotent — safe to run again if containers already exist.
 
 ---
 

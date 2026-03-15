@@ -1,11 +1,10 @@
-import { signal } from '@angular/core';
+import { signal, WritableSignal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { throwError, of } from 'rxjs';
 import { CollectionService } from '../../core/services/collection.service';
 import { ClothingItem } from '../../core/models/clothing-item.model';
 import { AddToCollectionModalComponent } from './add-to-collection-modal.component';
 import { Collection } from '../../core/models/collection.model';
-
 const ITEM: ClothingItem = {
   id: 'item-1',
   imageUrl: '/assets/item-1.jpg',
@@ -53,6 +52,17 @@ describe('AddToCollectionModalComponent', () => {
     loadAll: ReturnType<typeof vi.fn>;
     addItem: ReturnType<typeof vi.fn>;
   };
+  type AddToCollectionModalComponentInternals = {
+    loading: WritableSignal<boolean>;
+    saving: WritableSignal<boolean>;
+    selectedIds: WritableSignal<Set<string>>;
+    errorMessage: WritableSignal<string | null>;
+    toggleCollection: (id: string) => void;
+    save: () => void;
+    onBackdropClick: (event: MouseEvent) => void;
+  };
+  const asInternal = (): AddToCollectionModalComponentInternals =>
+    component as unknown as AddToCollectionModalComponentInternals;
 
   const createFixture = () => {
     fixture = TestBed.createComponent(AddToCollectionModalComponent);
@@ -82,7 +92,7 @@ describe('AddToCollectionModalComponent', () => {
 
   it('shows loading state while loading', () => {
     collectionService.loadAll.mockReturnValue(of(COLLECTIONS));
-    (component as any).loading.set(true);
+    asInternal().loading.set(true);
     fixture.detectChanges();
     expect(fixture.nativeElement.textContent).toContain('Loading collections…');
   });
@@ -93,7 +103,7 @@ describe('AddToCollectionModalComponent', () => {
     fixture = TestBed.createComponent(AddToCollectionModalComponent);
     component = fixture.componentInstance;
     fixture.componentRef.setInput('item', ITEM);
-    (component as any).loading.set(false);
+    asInternal().loading.set(false);
     fixture.detectChanges();
 
     expect(fixture.nativeElement.textContent).toContain('You have no collections yet.');
@@ -115,13 +125,13 @@ describe('AddToCollectionModalComponent', () => {
     collectionService.loadAll.mockReturnValue(of(COLLECTIONS));
     collectionService.addItem.mockReturnValue(of(undefined));
     component.closed.subscribe(closed);
-    (component as any).selectedIds.set(new Set());
+    asInternal().selectedIds.set(new Set());
 
     component.save();
 
     expect(collectionService.addItem).not.toHaveBeenCalled();
     expect(closed).toHaveBeenCalledTimes(1);
-    expect((component as any).saving()).toBe(false);
+    expect(asInternal().saving()).toBe(false);
   });
 
   it('adds item to all selected collections on save', () => {
@@ -130,16 +140,16 @@ describe('AddToCollectionModalComponent', () => {
     const closed = vi.fn();
     component.closed.subscribe(closed);
 
-    (component as any).toggleCollection('c-1');
-    (component as any).toggleCollection('c-2');
+    asInternal().toggleCollection('c-1');
+    asInternal().toggleCollection('c-2');
     component.save();
 
     expect(collectionService.addItem).toHaveBeenCalledTimes(2);
     expect(collectionService.addItem).toHaveBeenNthCalledWith(1, 'c-1', ITEM.id);
     expect(collectionService.addItem).toHaveBeenNthCalledWith(2, 'c-2', ITEM.id);
     expect(closed).toHaveBeenCalledTimes(1);
-    expect((component as any).errorMessage()).toBeNull();
-    expect((component as any).saving()).toBe(false);
+    expect(asInternal().errorMessage()).toBeNull();
+    expect(asInternal().saving()).toBe(false);
   });
 
   it('keeps modal open and shows error when any add fails', () => {
@@ -152,13 +162,13 @@ describe('AddToCollectionModalComponent', () => {
     const closed = vi.fn();
     component.closed.subscribe(closed);
 
-    (component as any).toggleCollection('c-1');
-    (component as any).toggleCollection('c-2');
+    asInternal().toggleCollection('c-1');
+    asInternal().toggleCollection('c-2');
     component.save();
 
     expect(collectionService.addItem).toHaveBeenCalledTimes(2);
     expect(closed).not.toHaveBeenCalled();
-    expect((component as any).errorMessage()).toContain('Failed to add item to 1 collection(s).');
+    expect(asInternal().errorMessage()).toContain('Failed to add item to 1 collection(s).');
   });
 
   it('closes when clicking the backdrop', () => {
@@ -166,7 +176,10 @@ describe('AddToCollectionModalComponent', () => {
     component.closed.subscribe(closed);
 
     const target = document.createElement('div');
-    component.onBackdropClick({ target, currentTarget: target } as unknown as MouseEvent);
+    const backdropEvent = new MouseEvent('click');
+    Object.defineProperty(backdropEvent, 'target', { value: target });
+    Object.defineProperty(backdropEvent, 'currentTarget', { value: target });
+    component.onBackdropClick(backdropEvent);
 
     expect(closed).toHaveBeenCalledTimes(1);
   });

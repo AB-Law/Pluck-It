@@ -7,7 +7,6 @@ import {
   model,
   output,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 
 /**
  * Reusable dual-thumb range slider.
@@ -16,9 +15,13 @@ import { CommonModule } from '@angular/common';
 @Component({
   selector: 'app-range-slider',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   template: `
-    <div class="relative h-10 flex items-center select-none touch-none" #track (pointerdown)="onTrackDown($event)">
+    <div
+      class="relative h-10 flex items-center select-none touch-none"
+      #track
+      (pointerdown)="onTrackDown($event)"
+    >
       <!-- Background rail -->
       <div class="absolute inset-y-0 flex items-center w-full">
         <div class="relative h-1 w-full rounded-full bg-border-chrome">
@@ -46,14 +49,18 @@ import { CommonModule } from '@angular/common';
       </div>
     </div>
   `,
-  styles: [`
-    :host { display: block; }
-  `],
+  styles: [
+    `
+      :host {
+        display: block;
+      }
+    `,
+  ],
 })
 export class RangeSliderComponent {
-  min   = input<number>(0);
-  max   = input<number>(100);
-  step  = input<number>(1);
+  min = input<number>(0);
+  max = input<number>(100);
+  step = input<number>(1);
   value = model<[number, number]>([0, 100]);
 
   valueChange = output<[number, number]>();
@@ -62,7 +69,7 @@ export class RangeSliderComponent {
 
   private dragging: 'low' | 'high' | null = null;
 
-  get lowPct(): number  {
+  get lowPct(): number {
     const range = this.max() - this.min();
     if (range <= 0) return 0;
     return ((this.value()[0] - this.min()) / range) * 100;
@@ -102,7 +109,9 @@ export class RangeSliderComponent {
   }
 
   @HostListener('document:pointerup')
-  onPointerUp(): void { this.dragging = null; }
+  onPointerUp(): void {
+    this.dragging = null;
+  }
 
   onTrackDown(e: PointerEvent): void {
     if ((e.target as HTMLElement).tagName === 'DIV' && this.dragging === null) {

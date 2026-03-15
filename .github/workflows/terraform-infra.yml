@@ -7,9 +7,13 @@ on:
       - "infra/**"
     branches:
       - main
+      - dev
   pull_request:
     paths:
       - "infra/**"
+    branches:
+      - main
+      - dev
 
 concurrency:
   group: azure-production
@@ -129,12 +133,12 @@ jobs:
         continue-on-error: true
 
       - name: Terraform Plan
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.ref == 'refs/heads/dev'
         working-directory: infra
         run: terraform plan -input=false
 
       - name: Terraform Apply
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         working-directory: infra
         run: terraform apply -auto-approve -input=false
 

@@ -14,6 +14,8 @@ POC
 
 # Azure Functions local settings (contains secrets)
 local.settings.json
+local.settings.local.json
+local.settings.prod.json
 
 # ML models — too large for GitHub (>100 MB), download via scripts/download-models.ps1
 PluckIt.Processor/models/*.onnx

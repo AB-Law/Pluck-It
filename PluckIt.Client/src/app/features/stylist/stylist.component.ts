@@ -9,6 +9,7 @@ import {
   signal,
   computed,
   ViewChild,
+  inject,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Subscription } from 'rxjs';
@@ -25,12 +26,12 @@ interface DisplayMessage {
 }
 
 const TOOL_LABELS: Record<string, string> = {
-  search_wardrobe:      'Searching wardrobe…',
-  search_scraped_items:  'Discovering items…',
+  search_wardrobe: 'Searching wardrobe…',
+  search_scraped_items: 'Discovering items…',
   get_wardrobe_summary: 'Reading wardrobe…',
-  get_weather:          'Checking weather…',
-  get_user_profile:     'Loading your profile…',
-  analyze_wardrobe_gaps:'Analysing gaps…',
+  get_weather: 'Checking weather…',
+  get_user_profile: 'Loading your profile…',
+  analyze_wardrobe_gaps: 'Analysing gaps…',
 };
 
 @Component({
@@ -39,13 +40,18 @@ const TOOL_LABELS: Record<string, string> = {
   imports: [FormsModule],
   template: `
     <div class="flex flex-col h-full bg-background-dark">
-
       <!-- Panel header -->
-      <div class="h-16 flex items-center justify-between px-6 border-b border-border-subtle shrink-0">
+      <div
+        class="h-16 flex items-center justify-between px-6 border-b border-border-subtle shrink-0"
+      >
         <div class="flex items-center gap-3">
           <div class="relative">
-            <div class="h-2.5 w-2.5 rounded-full bg-green-500 absolute -right-0.5 -bottom-0.5 border border-background-dark animate-blink"></div>
-            <span class="material-symbols-outlined text-primary" style="font-size:22px">smart_toy</span>
+            <div
+              class="h-2.5 w-2.5 rounded-full bg-green-500 absolute -right-0.5 -bottom-0.5 border border-background-dark animate-blink"
+            ></div>
+            <span class="material-symbols-outlined text-primary" style="font-size:22px"
+              >smart_toy</span
+            >
           </div>
           <div>
             <h3 class="text-white font-semibold text-sm">AI Stylist</h3>
@@ -72,7 +78,9 @@ const TOOL_LABELS: Record<string, string> = {
       </div>
 
       @if (debugEnabled()) {
-        <div class="border-b border-yellow-600/40 bg-[#0f172a] px-4 py-2 text-[11px] text-slate-300 font-mono">
+        <div
+          class="border-b border-yellow-600/40 bg-[#0f172a] px-4 py-2 text-[11px] text-slate-300 font-mono"
+        >
           <div class="flex flex-wrap gap-x-4 gap-y-1">
             <span>traceId: {{ debugTraceId() ?? 'n/a' }}</span>
             <span>runId: {{ debugRunId() ?? 'n/a' }}</span>
@@ -83,7 +91,12 @@ const TOOL_LABELS: Record<string, string> = {
             <span>events: {{ debugEvents().length }}</span>
           </div>
           <div class="mt-2 max-h-24 overflow-auto">
-            <pre class="text-[10px] leading-snug text-[#8ca1b1] whitespace-pre-wrap">{{ debugEvents().join('\n') }}</pre>
+            <pre class="text-[10px] leading-snug text-[#8ca1b1] whitespace-pre-wrap">{{
+              debugEvents().join(
+                '
+'
+              )
+            }}</pre>
           </div>
         </div>
       }
@@ -91,7 +104,9 @@ const TOOL_LABELS: Record<string, string> = {
       <!-- Memory panel (slide-down) -->
       @if (memoryOpen()) {
         <div class="border-b border-border-subtle bg-[#0d1117] px-4 py-3 shrink-0">
-          <p class="text-[10px] text-slate-500 font-mono uppercase tracking-widest mb-2">Conversation Memory (editable)</p>
+          <p class="text-[10px] text-slate-500 font-mono uppercase tracking-widest mb-2">
+            Conversation Memory (editable)
+          </p>
           <textarea
             class="w-full bg-[#111] border border-[#333] text-slate-300 text-xs font-mono p-2 resize-none focus:outline-none focus:border-primary rounded"
             rows="4"
@@ -103,20 +118,33 @@ const TOOL_LABELS: Record<string, string> = {
               class="text-[10px] text-primary hover:text-blue-400 font-mono uppercase"
               (click)="saveMemory()"
               [disabled]="savingMemory()"
-            >{{ savingMemory() ? 'Saving…' : 'Save' }}</button>
+            >
+              {{ savingMemory() ? 'Saving…' : 'Save' }}
+            </button>
             <button
               class="text-[10px] text-slate-500 hover:text-white font-mono uppercase"
               (click)="memoryOpen.set(false)"
-            >Close</button>
+            >
+              Close
+            </button>
           </div>
         </div>
       }
 
       <!-- Selected items context banner -->
       @if (selectedItemIds() && selectedItemIds()!.length > 0) {
-        <div class="flex items-center gap-2 px-4 py-2 bg-primary/10 border-b border-primary/30 shrink-0">
-          <span class="material-symbols-outlined text-primary" style="font-size:16px">dashboard_customize</span>
-          <span class="text-xs text-primary font-mono">{{ selectedItemIds()!.length }} item{{ selectedItemIds()!.length > 1 ? 's' : '' }} selected for styling</span>
+        <div
+          class="flex items-center gap-2 px-4 py-2 bg-primary/10 border-b border-primary/30 shrink-0"
+        >
+          <span class="material-symbols-outlined text-primary" style="font-size:16px"
+            >dashboard_customize</span
+          >
+          <span class="text-xs text-primary font-mono"
+            >{{ selectedItemIds()!.length }} item{{
+              selectedItemIds()!.length > 1 ? 's' : ''
+            }}
+            selected for styling</span
+          >
           <button class="ml-auto text-slate-500 hover:text-white" (click)="clearSelected.emit()">
             <span class="material-symbols-outlined" style="font-size:14px">close</span>
           </button>
@@ -125,28 +153,46 @@ const TOOL_LABELS: Record<string, string> = {
 
       <!-- Messages -->
       <div #messageList class="flex-1 overflow-y-auto p-4 space-y-6 custom-scrollbar">
-
         @for (msg of messages(); track $index) {
           @if (msg.role === 'assistant') {
             <div class="flex gap-3">
-              <div class="h-8 w-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
-                <span class="material-symbols-outlined text-primary" style="font-size:16px">smart_toy</span>
+              <div
+                class="h-8 w-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0"
+              >
+                <span class="material-symbols-outlined text-primary" style="font-size:16px"
+                  >smart_toy</span
+                >
               </div>
               <div class="flex flex-col gap-1 min-w-0">
                 <span class="text-[11px] text-slate-400 font-mono">{{ msg.time }}</span>
-                <div class="bg-[#223649] p-3 rounded-2xl rounded-tl-none text-sm text-slate-200 leading-relaxed border border-[#333] whitespace-pre-wrap">{{ msg.text }}<span
-                  [class]="msg.streaming ? 'inline-block w-0.5 h-3.5 bg-slate-400 animate-blink align-middle ml-0.5' : 'hidden'"
-                ></span></div>
+                <div
+                  class="bg-[#223649] p-3 rounded-2xl rounded-tl-none text-sm text-slate-200 leading-relaxed border border-[#333] whitespace-pre-wrap"
+                >
+                  {{ msg.text
+                  }}<span
+                    [class]="
+                      msg.streaming
+                        ? 'inline-block w-0.5 h-3.5 bg-slate-400 animate-blink align-middle ml-0.5'
+                        : 'hidden'
+                    "
+                  ></span>
+                </div>
               </div>
             </div>
           } @else {
             <div class="flex gap-3 flex-row-reverse">
-              <div class="h-8 w-8 rounded-full bg-slate-700 flex items-center justify-center shrink-0">
-                <span class="material-symbols-outlined text-slate-400" style="font-size:16px">person</span>
+              <div
+                class="h-8 w-8 rounded-full bg-slate-700 flex items-center justify-center shrink-0"
+              >
+                <span class="material-symbols-outlined text-slate-400" style="font-size:16px"
+                  >person</span
+                >
               </div>
               <div class="flex flex-col gap-1 items-end min-w-0 max-w-[82%]">
                 <span class="text-[11px] text-slate-400 font-mono">{{ msg.time }}</span>
-                <div class="bg-gradient-to-br from-[#2563eb] to-[#1d4ed8] border border-blue-300/25 shadow-[0_8px_24px_rgba(37,99,235,0.35)] p-3 rounded-2xl rounded-tr-none text-sm text-white leading-relaxed whitespace-pre-wrap">
+                <div
+                  class="bg-gradient-to-br from-[#2563eb] to-[#1d4ed8] border border-blue-300/25 shadow-[0_8px_24px_rgba(37,99,235,0.35)] p-3 rounded-2xl rounded-tr-none text-sm text-white leading-relaxed whitespace-pre-wrap"
+                >
                   {{ msg.text }}
                 </div>
               </div>
@@ -157,20 +203,36 @@ const TOOL_LABELS: Record<string, string> = {
         <!-- Thinking / tool-call status -->
         @if (thinking()) {
           <div class="flex gap-3">
-            <div class="h-8 w-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0">
-              <span class="material-symbols-outlined text-primary" style="font-size:16px">smart_toy</span>
+            <div
+              class="h-8 w-8 rounded-full bg-primary/20 flex items-center justify-center shrink-0"
+            >
+              <span class="material-symbols-outlined text-primary" style="font-size:16px"
+                >smart_toy</span
+              >
             </div>
             <div class="flex flex-col gap-2">
               @if (!currentTool() && !streamingActive()) {
-                <div class="bg-[#223649] px-4 py-3 rounded-2xl rounded-tl-none border border-[#333] flex gap-1.5 items-center">
+                <div
+                  class="bg-[#223649] px-4 py-3 rounded-2xl rounded-tl-none border border-[#333] flex gap-1.5 items-center"
+                >
                   <span class="w-1.5 h-1.5 rounded-full bg-slate-400 animate-blink"></span>
-                  <span class="w-1.5 h-1.5 rounded-full bg-slate-400 animate-blink" style="animation-delay:0.3s"></span>
-                  <span class="w-1.5 h-1.5 rounded-full bg-slate-400 animate-blink" style="animation-delay:0.6s"></span>
+                  <span
+                    class="w-1.5 h-1.5 rounded-full bg-slate-400 animate-blink"
+                    style="animation-delay:0.3s"
+                  ></span>
+                  <span
+                    class="w-1.5 h-1.5 rounded-full bg-slate-400 animate-blink"
+                    style="animation-delay:0.6s"
+                  ></span>
                 </div>
               }
               @if (currentTool()) {
                 <div class="flex items-center gap-1.5 text-[11px] text-slate-400 font-mono">
-                  <span class="material-symbols-outlined animate-spin text-primary" style="font-size:13px">progress_activity</span>
+                  <span
+                    class="material-symbols-outlined animate-spin text-primary"
+                    style="font-size:13px"
+                    >progress_activity</span
+                  >
                   {{ toolLabel() }}
                 </div>
               }
@@ -198,13 +260,19 @@ const TOOL_LABELS: Record<string, string> = {
             <span class="material-symbols-outlined" style="font-size:18px">arrow_upward</span>
           </button>
         </div>
-        <p class="text-[10px] text-slate-600 text-center mt-2">AI can make mistakes. Review all outfit suggestions.</p>
+        <p class="text-[10px] text-slate-600 text-center mt-2">
+          AI can make mistakes. Review all outfit suggestions.
+        </p>
       </div>
     </div>
   `,
 })
 export class StylistPanelComponent implements OnInit, OnDestroy {
-  @Output() closed        = new EventEmitter<void>();
+  private readonly chat = inject(ChatService);
+  private readonly networkService = inject(NetworkService);
+  private readonly offlineQueue = inject(OfflineQueueService);
+
+  @Output() closed = new EventEmitter<void>();
   @Output() clearSelected = new EventEmitter<void>();
 
   /** Wardrobe item IDs pre-selected from the styling board. */
@@ -212,51 +280,49 @@ export class StylistPanelComponent implements OnInit, OnDestroy {
 
   @ViewChild('messageList') private readonly messageList!: ElementRef<HTMLElement>;
 
-  readonly messages       = signal<DisplayMessage[]>([]);
-  readonly thinking       = signal(false);
-  readonly currentTool    = signal<string | null>(null);
-  readonly memoryOpen     = signal(false);
-  readonly savingMemory   = signal(false);
-  readonly debugEnabled  = signal(false);
-  readonly debugEvents   = signal<string[]>([]);
-  readonly debugTraceId  = signal<string | null>(null);
-  readonly debugRunId    = signal<string | null>(null);
-  readonly debugModel    = signal<string | null>(null);
+  readonly messages = signal<DisplayMessage[]>([]);
+  readonly thinking = signal(false);
+  readonly currentTool = signal<string | null>(null);
+  readonly memoryOpen = signal(false);
+  readonly savingMemory = signal(false);
+  readonly debugEnabled = signal(false);
+  readonly debugEvents = signal<string[]>([]);
+  readonly debugTraceId = signal<string | null>(null);
+  readonly debugRunId = signal<string | null>(null);
+  readonly debugModel = signal<string | null>(null);
   readonly debugTokenCount = signal<number | null>(null);
   readonly debugToolName = signal<string | null>(null);
   readonly debugToolLatencyMs = signal<number | null>(null);
   /** True once the streaming bubble has been created (first token received). */
-  readonly streamingActive = computed(() => this.messages().some(m => m.streaming));
+  readonly streamingActive = computed(() => this.messages().some((m) => m.streaming));
 
   readonly toolLabel = computed(() => {
     const t = this.currentTool();
     return t ? (TOOL_LABELS[t] ?? `${t}…`) : '';
   });
 
-  inputText  = '';
+  inputText = '';
   memoryDraft = '';
 
   private chatHistory: ChatMessage[] = [];
   private streamSub?: Subscription;
   private streamingIndex = -1;
 
-  constructor(
-    private readonly chat: ChatService,
-    private readonly networkService: NetworkService,
-    private readonly offlineQueue: OfflineQueueService,
-  ) {}
-
   ngOnInit(): void {
     this.debugEnabled.set(this.isDebugModeEnabled());
-    this.messages.set([{
-      role: 'assistant',
-      text: "Hi! I'm your AI Stylist. Tell me what you're going for — an occasion, a vibe, or specific pieces — and I'll build looks from your wardrobe.",
-      time: this.now(),
-    }]);
+    this.messages.set([
+      {
+        role: 'assistant',
+        text: "Hi! I'm your AI Stylist. Tell me what you're going for — an occasion, a vibe, or specific pieces — and I'll build looks from your wardrobe.",
+        time: this.now(),
+      },
+    ]);
 
     // Load memory for the editor
     this.chat.getMemory().subscribe({
-      next: m => { this.memoryDraft = m.summary; },
+      next: (m) => {
+        this.memoryDraft = m.summary;
+      },
       error: () => {},
     });
   }
@@ -291,7 +357,7 @@ export class StylistPanelComponent implements OnInit, OnDestroy {
     if (event.toolLatencyMs !== undefined) {
       this.debugToolLatencyMs.set(event.toolLatencyMs);
     }
-    this.debugEvents.update(events => {
+    this.debugEvents.update((events) => {
       const next = [...events, JSON.stringify(event)];
       return next.length > 80 ? next.slice(-80) : next;
     });
@@ -306,27 +372,37 @@ export class StylistPanelComponent implements OnInit, OnDestroy {
         selectedItemIds: this.selectedItemIds(),
       });
       this.inputText = '';
-      this.messages.update(msgs => [
+      this.messages.update((msgs) => [
         ...msgs,
         { role: 'user', text, time: this.now() },
-        { role: 'assistant', text: showOfflineBlockMessage('Stylist send', 'The message was queued and will send when you reconnect.'), time: this.now() },
+        {
+          role: 'assistant',
+          text: showOfflineBlockMessage(
+            'Stylist send',
+            'The message was queued and will send when you reconnect.',
+          ),
+          time: this.now(),
+        },
       ]);
       setTimeout(() => this.scrollToBottom());
       return;
     }
 
     this.inputText = '';
-    this.messages.update(msgs => [...msgs, { role: 'user', text, time: this.now() }]);
+    this.messages.update((msgs) => [...msgs, { role: 'user', text, time: this.now() }]);
     this.thinking.set(true);
     this.currentTool.set(null);
     this.streamingIndex = -1; // will be set on first token
     setTimeout(() => this.scrollToBottom());
 
-    this.streamSub = this.chat.streamMessage(text, this.chatHistory, this.selectedItemIds() ?? undefined)
+    this.streamSub = this.chat
+      .streamMessage(text, this.chatHistory, this.selectedItemIds() ?? undefined)
       .subscribe({
         next: (event: ChatEvent) => this.handleEvent(event, text),
         error: () => {
-          this.finaliseStream('Sorry, I had trouble reaching the styling service. Please try again.');
+          this.finaliseStream(
+            'Sorry, I had trouble reaching the styling service. Please try again.',
+          );
         },
         complete: () => {
           this.thinking.set(false);
@@ -341,13 +417,19 @@ export class StylistPanelComponent implements OnInit, OnDestroy {
       case 'token':
         // Create the streaming bubble on the very first token (not before)
         if (this.streamingIndex < 0) {
-          this.messages.update(msgs => [...msgs, { role: 'assistant', text: '', time: this.now(), streaming: true }]);
+          this.messages.update((msgs) => [
+            ...msgs,
+            { role: 'assistant', text: '', time: this.now(), streaming: true },
+          ]);
           this.streamingIndex = this.messages().length - 1;
         }
-        this.messages.update(msgs => {
+        this.messages.update((msgs) => {
           const copy = [...msgs];
           if (this.streamingIndex >= 0 && copy[this.streamingIndex]) {
-            copy[this.streamingIndex] = { ...copy[this.streamingIndex], text: copy[this.streamingIndex].text + event.content };
+            copy[this.streamingIndex] = {
+              ...copy[this.streamingIndex],
+              text: copy[this.streamingIndex].text + event.content,
+            };
           }
           return copy;
         });
@@ -388,7 +470,7 @@ export class StylistPanelComponent implements OnInit, OnDestroy {
   private finaliseStream(errorText: string | null): void {
     this.thinking.set(false);
     this.currentTool.set(null);
-    this.messages.update(msgs => {
+    this.messages.update((msgs) => {
       const copy = [...msgs];
       if (this.streamingIndex >= 0 && copy[this.streamingIndex]) {
         copy[this.streamingIndex] = {
@@ -408,8 +490,13 @@ export class StylistPanelComponent implements OnInit, OnDestroy {
   saveMemory(): void {
     this.savingMemory.set(true);
     this.chat.updateMemory(this.memoryDraft).subscribe({
-      next: () => { this.savingMemory.set(false); this.memoryOpen.set(false); },
-      error: () => { this.savingMemory.set(false); },
+      next: () => {
+        this.savingMemory.set(false);
+        this.memoryOpen.set(false);
+      },
+      error: () => {
+        this.savingMemory.set(false);
+      },
     });
   }
 
@@ -423,4 +510,3 @@ export class StylistPanelComponent implements OnInit, OnDestroy {
     return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
 }
-

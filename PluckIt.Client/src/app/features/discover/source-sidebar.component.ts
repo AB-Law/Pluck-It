@@ -1,12 +1,12 @@
 import { Component, input, output, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { ScraperSource } from '../../core/models/scraped-item.model';
 
 @Component({
   selector: 'app-source-sidebar',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [FormsModule],
   template: `
     <aside
       class="flex h-full w-64 flex-shrink-0 flex-col border-r border-border-chrome bg-black"
@@ -41,7 +41,11 @@ import { ScraperSource } from '../../core/models/scraped-item.model';
         <!-- All / Global -->
         <button
           class="touch-target flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors"
-          [class]="activeSourceId() === null ? 'bg-primary/10 text-primary' : 'text-slate-400 hover:bg-zinc-900 hover:text-slate-100'"
+          [class]="
+            activeSourceId() === null
+              ? 'bg-primary/10 text-primary'
+              : 'text-slate-400 hover:bg-zinc-900 hover:text-slate-100'
+          "
           (click)="sourceSelected.emit(null)"
         >
           <span class="material-symbols-outlined text-base">explore</span>
@@ -49,13 +53,17 @@ import { ScraperSource } from '../../core/models/scraped-item.model';
         </button>
 
         <!-- Reddit section -->
-        <p class="mt-3 px-3 text-[9px] font-bold uppercase tracking-widest text-slate-600">Reddit</p>
+        <p class="mt-3 px-3 text-[9px] font-bold uppercase tracking-widest text-slate-600">
+          Reddit
+        </p>
         @for (src of redditSources(); track src.id) {
           <button
             class="touch-target flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors"
-            [class]="activeSourceId() === src.id
-              ? 'bg-primary/10 text-primary'
-              : 'text-slate-400 hover:bg-zinc-900 hover:text-slate-100'"
+            [class]="
+              activeSourceId() === src.id
+                ? 'bg-primary/10 text-primary'
+                : 'text-slate-400 hover:bg-zinc-900 hover:text-slate-100'
+            "
             (click)="sourceSelected.emit(src.id)"
           >
             <span class="material-symbols-outlined text-base text-orange-400">forum</span>
@@ -75,22 +83,26 @@ import { ScraperSource } from '../../core/models/scraped-item.model';
 
         <!-- Brand section -->
         @if (brandSources().length > 0) {
-          <p class="mt-3 px-3 text-[9px] font-bold uppercase tracking-widest text-slate-600">Brands</p>
+          <p class="mt-3 px-3 text-[9px] font-bold uppercase tracking-widest text-slate-600">
+            Brands
+          </p>
           @for (src of brandSources(); track src.id) {
             <button
-            class="touch-target flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors"
-              [class]="activeSourceId() === src.id
-                ? 'bg-primary/10 text-primary'
-                : 'text-slate-400 hover:bg-zinc-900 hover:text-slate-100'"
+              class="touch-target flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors"
+              [class]="
+                activeSourceId() === src.id
+                  ? 'bg-primary/10 text-primary'
+                  : 'text-slate-400 hover:bg-zinc-900 hover:text-slate-100'
+              "
               (click)="sourceSelected.emit(src.id)"
             >
               <span class="material-symbols-outlined text-base text-blue-400">storefront</span>
               <span class="flex-1 text-xs font-medium truncate">{{ src.name }}</span>
               @if (!src.isGlobal) {
                 <button
-                class="touch-target rounded-lg p-1.5 text-slate-600 hover:text-red-400 transition-colors"
-                title="Unsubscribe"
-                aria-label="Unsubscribe from source"
+                  class="touch-target rounded-lg p-1.5 text-slate-600 hover:text-red-400 transition-colors"
+                  title="Unsubscribe"
+                  aria-label="Unsubscribe from source"
                   (click)="unsubscribe.emit(src.id); $event.stopPropagation()"
                 >
                   <span class="material-symbols-outlined text-[12px]">close</span>
@@ -163,8 +175,8 @@ export class SourceSidebarComponent {
   mobileMode = input<boolean>(false);
   closed = output<void>();
 
-  redditSources = computed(() => this.sources().filter(s => s.sourceType === 'reddit'));
-  brandSources = computed(() => this.sources().filter(s => s.sourceType === 'brand'));
+  redditSources = computed(() => this.sources().filter((s) => s.sourceType === 'reddit'));
+  brandSources = computed(() => this.sources().filter((s) => s.sourceType === 'brand'));
 
   onSuggest() {
     if (!this.brandName.trim() || !this.brandUrl.trim()) return;

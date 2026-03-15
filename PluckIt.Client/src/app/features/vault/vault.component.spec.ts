@@ -1,14 +1,16 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { WritableSignal } from '@angular/core';
 import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
 import { VaultComponent } from './vault.component';
 import { VaultInsightsService } from '../../core/services/vault-insights.service';
 import { WardrobeService } from '../../core/services/wardrobe.service';
 import { UserProfileService } from '../../core/services/user-profile.service';
-import { of, throwError } from 'rxjs';
-import { ItemCondition } from '../../core/models/clothing-item.model';
+import { ItemCondition, ClothingItem, WardrobeQuery, WearSuggestionItem } from '../../core/models/clothing-item.model';
+import { of, throwError, Observable } from 'rxjs';
 import { SmartGroup, VaultFilters } from './vault-sidebar.component';
 import { CollectionService } from '../../core/services/collection.service';
 import { MobileNavState } from '../../shared/layout/mobile-nav.state';
+import { VaultInsightsPanelData, VaultInsightsResponse } from '../../core/models/vault-insights.model';
 
 describe('VaultComponent', () => {
   let component: VaultComponent;
@@ -34,11 +36,38 @@ describe('VaultComponent', () => {
   };
   let collectionService: {
     loadAll: ReturnType<typeof vi.fn>;
-    collections: () => any[];
+    collections: () => unknown[];
     addItem: ReturnType<typeof vi.fn>;
   };
-  let route: { snapshot: { queryParamMap: ReturnType<typeof convertToParamMap> }; queryParamMap: any };
+  let route: {
+    snapshot: { queryParamMap: ReturnType<typeof convertToParamMap> };
+    queryParamMap: Observable<ReturnType<typeof convertToParamMap>>;
+  };
   let mobileNavState: MobileNavState;
+  type VaultComponentInternals = {
+    loading: WritableSignal<boolean>;
+    loadingInsights: WritableSignal<boolean>;
+    loadingMore: WritableSignal<boolean>;
+    hasMore: WritableSignal<boolean>;
+    nextToken: WritableSignal<string | null>;
+    searchQuery: WritableSignal<string>;
+    activeFilters: WritableSignal<VaultFilters>;
+    allItems: WritableSignal<ClothingItem[]>;
+    selectedItem: WritableSignal<ClothingItem | null>;
+    editingItem: WritableSignal<ClothingItem | null>;
+    sharingItem: WritableSignal<ClothingItem | null>;
+    wearSuggestions: WritableSignal<WearSuggestionItem[]>;
+    insights: WritableSignal<VaultInsightsResponse | null>;
+    settingsOpen: WritableSignal<boolean>;
+    enrichedInsights: () => VaultInsightsPanelData | null;
+    buildQuery: (filters: VaultFilters, continuationToken?: string | null) => WardrobeQuery;
+    nextClientEventId: (prefix: string) => string;
+    onWindowResize: () => void;
+    openSettings: () => void;
+    closeSettingsPanel: () => void;
+    knownBrands: () => string[];
+  };
+  const asInternal = (): VaultComponentInternals => component as unknown as VaultComponentInternals;
   const ITEM = {
     id: 'i-1',
     imageUrl: '/img/1.jpg',
@@ -55,7 +84,12 @@ describe('VaultComponent', () => {
     condition: 'New' as ItemCondition,
   };
   const ITEM_WITH_WEAR = { ...ITEM, id: 'i-2', wearCount: 0 };
-  const SUGGESTION = { suggestionId: 's-1', itemId: 'i-1', message: 'Mark this worn this week' };
+  const SUGGESTION: WearSuggestionItem = {
+    suggestionId: 's-1',
+    itemId: 'i-1',
+    message: 'Mark this worn this week',
+    activityAt: '2026-03-15T00:00:00Z',
+  };
   const QUERY_FILTER: VaultFilters = {
     group: 'all' as SmartGroup,
     priceRange: [0, 999999],
@@ -150,19 +184,19 @@ describe('VaultComponent', () => {
     const firstCall = wardrobeService.getAll.mock.calls[0][0];
     expect(firstCall.pageSize).toBe(24);
     expect(firstCall.sortField).toBe('dateAdded');
-    expect((component as any).loading()).toBe(false);
+    expect(asInternal().loading()).toBe(false);
     expect(component.filteredItems()).toEqual([ITEM]);
   });
 
   it('toggles card selection and updates filtered items for favorites/search', () => {
     component.onCardSelect(ITEM);
-    expect((component as any).selectedItem()?.id).toBe('i-1');
+    expect(asInternal().selectedItem()?.id).toBe('i-1');
     component.onCardSelect(ITEM);
-    expect((component as any).selectedItem()).toBeNull();
+    expect(asInternal().selectedItem()).toBeNull();
 
-    (component as any).searchQuery.set('missing');
+    asInternal().searchQuery.set('missing');
     expect(component.filteredItems()).toEqual([]);
-    (component as any).searchQuery.set('');
+    asInternal().searchQuery.set('');
     expect(component.filteredItems()).toEqual([ITEM]);
   });
 
@@ -200,7 +234,7 @@ describe('VaultComponent', () => {
     fixture.detectChanges();
 
     expect(wardrobeService.getAll).toHaveBeenCalledTimes(1);
-    expect((component as any).activeFilters()).toEqual(expect.objectContaining({
+    expect(asInternal().activeFilters()).toEqual(expect.objectContaining({
       group: 'favorites',
       priceRange: [10, 250],
       minWears: 2,
@@ -209,12 +243,12 @@ describe('VaultComponent', () => {
       sortField: 'wearCount',
       sortDir: 'asc',
     }));
-    expect((component as any).nextToken()).toBe('p2');
+    expect(asInternal().nextToken()).toBe('p2');
   });
 
   it('increments wear count optimistically and preserves fallback on failure', () => {
     component.onCardWear(ITEM);
-    expect((component as any).allItems()).toContainEqual({ ...ITEM, wearCount: 2 });
+    expect(asInternal().allItems()).toContainEqual({ ...ITEM, wearCount: 2 });
     wardrobeService.logWear.mockReturnValueOnce(throwError(() => new Error('nope')));
     component.onCardWear({ ...ITEM, wearCount: 2 });
     expect(wardrobeService.logWear).toHaveBeenCalledWith('i-1', {
@@ -226,7 +260,7 @@ describe('VaultComponent', () => {
   it('rolls back optimistic wear update when logging fails', () => {
     wardrobeService.logWear.mockReturnValueOnce(throwError(() => new Error('fail')));
     component.onCardWear(ITEM);
-    expect((component as any).allItems()).toEqual([ITEM]);
+    expect(asInternal().allItems()).toEqual([ITEM]);
   });
 
   it('loads more items when a continuation token exists', () => {
@@ -239,10 +273,10 @@ describe('VaultComponent', () => {
 
     component.loadMore();
     expect(wardrobeService.getAll).toHaveBeenCalledTimes(2);
-    expect((component as any).allItems()).toEqual([ITEM, ITEM_WITH_WEAR]);
-    expect((component as any).hasMore()).toBe(false);
-    expect((component as any).loadingMore()).toBe(false);
-    expect((component as any).nextToken()).toBeNull();
+    expect(asInternal().allItems()).toEqual([ITEM, ITEM_WITH_WEAR]);
+    expect(asInternal().hasMore()).toBe(false);
+    expect(asInternal().loadingMore()).toBe(false);
+    expect(asInternal().nextToken()).toBeNull();
   });
 
   it('ignores loadMore when no continuation token is available', () => {
@@ -251,20 +285,20 @@ describe('VaultComponent', () => {
   });
 
   it('avoids concurrent loadMore calls while loadingMore is true', () => {
-    (component as any).nextToken.set('tok');
-    (component as any).loadingMore.set(true);
+    asInternal().nextToken.set('tok');
+    asInternal().loadingMore.set(true);
     component.loadMore();
     expect(wardrobeService.getAll).toHaveBeenCalledTimes(1);
   });
 
   it('refreshes insights and suggestions after wear logging', () => {
-    const initialInsightsCalls = (insightsService.getInsights as any).mock.calls.length;
-    const initialSuggestionCalls = (wardrobeService.getWearSuggestions as any).mock.calls.length;
+    const initialInsightsCalls = insightsService.getInsights.mock.calls.length;
+    const initialSuggestionCalls = wardrobeService.getWearSuggestions.mock.calls.length;
 
     component.onWearLogged({ ...ITEM, wearCount: 3 });
 
-    expect((component as any).selectedItem()).toEqual({ ...ITEM, wearCount: 3 });
-    expect((component as any).allItems()).toContainEqual({ ...ITEM, wearCount: 3 });
+    expect(asInternal().selectedItem()).toEqual({ ...ITEM, wearCount: 3 });
+    expect(asInternal().allItems()).toContainEqual({ ...ITEM, wearCount: 3 });
     expect(insightsService.getInsights).toHaveBeenCalledTimes(initialInsightsCalls + 1);
     expect(wardrobeService.getWearSuggestions).toHaveBeenCalledTimes(initialSuggestionCalls + 1);
   });
@@ -275,8 +309,8 @@ describe('VaultComponent', () => {
   });
 
   it('enriches insight rows with item labels and image urls when wardrobe data is present', () => {
-    (component as any).allItems.set([ITEM]);
-    (component as any).insights.set({
+    asInternal().allItems.set([ITEM]);
+    asInternal().insights.set({
       generatedAt: '2026-03-12T00:00:00Z',
       currency: 'USD',
       insufficientData: false,
@@ -298,7 +332,7 @@ describe('VaultComponent', () => {
       ],
     });
 
-    const enriched = (component as any).enrichedInsights();
+    const enriched = asInternal().enrichedInsights();
     expect(enriched?.cpwIntel?.[0]).toMatchObject({
       itemId: 'i-1',
       itemLabel: 'UNQ · Top',
@@ -307,8 +341,12 @@ describe('VaultComponent', () => {
   });
 
   it('opens share/edit modals and accepts wear suggestions', () => {
-    const suggestion = { suggestionId: 's-1', itemId: 'i-1', message: 'Wear this' };
-    component.acceptSuggestion(suggestion as any);
+    const suggestion: WearSuggestionItem = {
+      ...SUGGESTION,
+      message: 'Wear this',
+      activityAt: '2026-03-15T00:00:00Z',
+    };
+    component.acceptSuggestion(suggestion);
     expect(wardrobeService.logWear).toHaveBeenCalledWith('i-1', {
       source: 'suggestion_prompt',
       clientEventId: expect.stringContaining('wear-'),
@@ -316,18 +354,18 @@ describe('VaultComponent', () => {
     });
 
     component.openEditModal(ITEM);
-    expect((component as any).editingItem()).toEqual(ITEM);
+    expect(asInternal().editingItem()).toEqual(ITEM);
     component.openShareModal(ITEM);
-    expect((component as any).sharingItem()).toEqual(ITEM);
+    expect(asInternal().sharingItem()).toEqual(ITEM);
     component.onItemUpdated({ ...ITEM, notes: 'updated' });
     expect(wardrobeService.update).toHaveBeenCalledWith({ ...ITEM, notes: 'updated' });
   });
 
   it('dismisses a wear suggestion from the list', () => {
-    (component as any).wearSuggestions.set([SUGGESTION as any]);
-    component.dismissSuggestion(SUGGESTION as any);
+    asInternal().wearSuggestions.set([SUGGESTION]);
+    component.dismissSuggestion(SUGGESTION);
     expect(wardrobeService.updateWearSuggestionStatus).toHaveBeenCalledWith('s-1', { status: 'Dismissed' });
-    expect((component as any).wearSuggestions()).toEqual([]);
+    expect(asInternal().wearSuggestions()).toEqual([]);
   });
 
   it('handles initial item load failure without blocking UI state', () => {
@@ -336,7 +374,7 @@ describe('VaultComponent', () => {
     component = fixture.componentInstance;
     fixture.detectChanges();
 
-    expect((component as any).loading()).toBe(false);
+    expect(asInternal().loading()).toBe(false);
   });
 
   it('resets insights to null when the insights call fails', () => {
@@ -345,22 +383,22 @@ describe('VaultComponent', () => {
     component = fixture.componentInstance;
     fixture.detectChanges();
 
-    expect((component as any).insights()).toBeNull();
-    expect((component as any).loadingInsights()).toBe(false);
+    expect(asInternal().insights()).toBeNull();
+    expect(asInternal().loadingInsights()).toBe(false);
   });
 
   it('renders loading, empty, and suggestion branches in template', () => {
     const root = fixture.nativeElement as HTMLElement;
-    (component as any).loading.set(true);
+    asInternal().loading.set(true);
     fixture.detectChanges();
     expect(root.textContent).toContain('Loading vault…');
 
-    (component as any).loading.set(false);
-    (component as any).allItems.set([]);
+    asInternal().loading.set(false);
+    asInternal().allItems.set([]);
     fixture.detectChanges();
     expect(root.textContent).toContain('No items match your filters.');
 
-    (component as any).wearSuggestions.set([{ ...SUGGESTION, message: 'Test suggestion' } as any]);
+    asInternal().wearSuggestions.set([{ ...SUGGESTION, message: 'Test suggestion' }]);
     fixture.detectChanges();
     expect(root.textContent).toContain('Test suggestion');
 
@@ -370,9 +408,9 @@ describe('VaultComponent', () => {
     );
     acceptButton?.click();
     fixture.detectChanges();
-    expect((component as any).wearSuggestions()).toEqual([]);
+    expect(asInternal().wearSuggestions()).toEqual([]);
 
-    (component as any).wearSuggestions.set([{ ...SUGGESTION, message: 'Close soon', suggestionId: 's-2' } as any]);
+    asInternal().wearSuggestions.set([{ ...SUGGESTION, message: 'Close soon', suggestionId: 's-2' }]);
     fixture.detectChanges();
     const dismissButton = Array.from(root.querySelectorAll('button')).find(
       btn => btn.textContent?.trim() === 'Dismiss',
@@ -383,12 +421,12 @@ describe('VaultComponent', () => {
 
   it('renders and toggles edit/share modal overlays', () => {
     const root = fixture.nativeElement as HTMLElement;
-    (component as any).editingItem.set(ITEM);
+    asInternal().editingItem.set(ITEM);
     fixture.detectChanges();
     expect(root.querySelector('app-review-item-modal')).toBeTruthy();
 
-    (component as any).editingItem.set(null);
-    (component as any).sharingItem.set(ITEM);
+    asInternal().editingItem.set(null);
+    asInternal().sharingItem.set(ITEM);
     fixture.detectChanges();
     expect(root.querySelector('app-add-to-collection-modal')).toBeTruthy();
   });
@@ -397,40 +435,42 @@ describe('VaultComponent', () => {
     const favourite = { ...ITEM, id: 'fav', tags: ['favorite'], wearCount: 3 };
     const recent = { ...ITEM, id: 'recent', wearCount: 5, tags: [] };
     const archived = { ...ITEM, id: 'old', wearCount: 0, tags: [] };
-    (component as any).allItems.set([favourite, recent, archived]);
+    asInternal().allItems.set([favourite, recent, archived]);
 
-    (component as any).activeFilters.set({ ...QUERY_FILTER, group: 'favorites' });
+    asInternal().activeFilters.set({ ...QUERY_FILTER, group: 'favorites' });
     expect(component.filteredItems()).toEqual([favourite]);
 
-    (component as any).activeFilters.set({ ...QUERY_FILTER, group: 'recent' });
+    asInternal().activeFilters.set({ ...QUERY_FILTER, group: 'recent' });
     expect(component.filteredItems()).toEqual([favourite, recent]);
 
-    (component as any).searchQuery.set('fav');
+    asInternal().searchQuery.set('fav');
     expect(component.filteredItems().length).toBe(1);
-    (component as any).searchQuery.set('');
+    asInternal().searchQuery.set('');
     expect(component.filteredItems().length).toBe(2);
   });
 
   it('handles cpw display branches and intel lookups', () => {
-    (component as any).allItems.set([{ ...ITEM, price: { amount: 120, originalCurrency: 'USD' }, wearCount: 2 } as any]);
+    asInternal().allItems.set([{ ...ITEM, price: { amount: 120, originalCurrency: 'USD' }, wearCount: 2 }]);
     expect(component.avgCpwDisplay()).toBe('$60.00');
 
-    (component as any).allItems.set([{ ...ITEM, price: undefined, wearCount: 0 } as any]);
+    asInternal().allItems.set([{ ...ITEM, price: null, wearCount: 0 }]);
     expect(component.avgCpwDisplay()).toBe('N/A');
 
-    (component as any).insights.set({
-      topWornBrands: ['UNQ'],
+    asInternal().insights.set({
+      generatedAt: new Date().toISOString(),
+      currency: 'USD',
+      insufficientData: false,
       behavioralInsights: { topColorWearShare: { color: 'black', pct: 10 }, unworn90dPct: 0, mostExpensiveUnworn: { itemId: 'x', amount: 10, currency: 'USD' } },
-      cpwIntel: [{ itemId: 'i-1', badge: 'great', breakEvenReached: true }],
+      cpwIntel: [{ itemId: 'i-1', badge: 'low', breakEvenReached: true, breakEvenTargetCpw: 42 }],
     });
-    expect(component.cpwBadgeFor('i-1')).toBe('great');
+    expect(component.cpwBadgeFor('i-1')).toBe('low');
     expect(component.breakEvenFor('i-1')).toBe(true);
     expect(component.cpwBadgeFor('missing')).toBe('unknown');
   });
 
   it('buildQuery and syncUrl include expected defaults and overrides', () => {
     const custom = { ...QUERY_FILTER, brand: 'UNQ', condition: 'New' as ItemCondition, priceRange: [20, 500] as [number, number], minWears: 2 };
-    expect((component as any).buildQuery(custom)).toEqual(expect.objectContaining({
+    expect(asInternal().buildQuery(custom)).toEqual(expect.objectContaining({
       brand: 'UNQ',
       condition: 'New',
       priceMin: 20,
@@ -441,7 +481,7 @@ describe('VaultComponent', () => {
       sortField: 'dateAdded',
       sortDir: 'desc',
     }));
-    expect((component as any).buildQuery(QUERY_FILTER)).toEqual(expect.objectContaining({
+    expect(asInternal().buildQuery(QUERY_FILTER)).toEqual(expect.objectContaining({
       brand: undefined,
       condition: undefined,
       priceMin: undefined,
@@ -468,7 +508,7 @@ describe('VaultComponent', () => {
   });
 
   it('buildQuery includes wishlisted items only for the wishlist group', () => {
-    const wishlistQuery = (component as any).buildQuery({
+    const wishlistQuery = asInternal().buildQuery({
       ...QUERY_FILTER,
       group: 'wishlist',
     });
@@ -481,7 +521,7 @@ describe('VaultComponent', () => {
     component = fixture.componentInstance;
     fixture.detectChanges();
 
-    expect((component as any).wearSuggestions()).toEqual([]);
+    expect(asInternal().wearSuggestions()).toEqual([]);
   });
 
   it('falls back to timestamp-based event ids when crypto helpers are missing', () => {
@@ -491,14 +531,14 @@ describe('VaultComponent', () => {
         value: { getRandomValues: () => new Uint32Array([123]) },
         configurable: true,
       });
-      const randomValueId = (component as any).nextClientEventId('wear');
+      const randomValueId = asInternal().nextClientEventId('wear');
       expect(randomValueId).toMatch(/^wear-/);
 
       Object.defineProperty(globalThis, 'crypto', {
         value: {},
         configurable: true,
       });
-      const fallbackId = (component as any).nextClientEventId('wear');
+      const fallbackId = asInternal().nextClientEventId('wear');
       expect(fallbackId).toMatch(/^wear-/);
     } finally {
       Object.defineProperty(globalThis, 'crypto', { value: originalCrypto, configurable: true });
@@ -507,13 +547,13 @@ describe('VaultComponent', () => {
 
   it('covers load-more loading state, selected-item branch, and card selection toggles', () => {
     const localItems = [
-      { ...ITEM, id: 'a', price: { amount: 10, originalCurrency: 'USD' }, brand: undefined as any, wearCount: 1 },
+      { ...ITEM, id: 'a', price: { amount: 10, originalCurrency: 'USD' }, brand: null, wearCount: 1 },
       { ...ITEM, id: 'b', price: { amount: 120, originalCurrency: 'USD' }, wearCount: 2 },
     ];
-    (component as any).allItems.set(localItems);
-    (component as any).nextToken.set('more');
-    (component as any).hasMore.set(true);
-    (component as any).loadingMore.set(true);
+    asInternal().allItems.set(localItems);
+    asInternal().nextToken.set('more');
+    asInternal().hasMore.set(true);
+    asInternal().loadingMore.set(true);
     fixture.detectChanges();
 
     const root = fixture.nativeElement as HTMLElement;
@@ -523,16 +563,16 @@ describe('VaultComponent', () => {
     expect(loadMoreButton?.disabled).toBe(true);
     expect(loadMoreButton?.textContent).toContain('Loading...');
 
-    (component as any).loadingMore.set(false);
+    asInternal().loadingMore.set(false);
     fixture.detectChanges();
     expect(loadMoreButton?.textContent).toContain('Load More');
 
     component.onCardSelect(localItems[0]);
     fixture.detectChanges();
-    expect((component as any).selectedItem()?.id).toBe('a');
+    expect(asInternal().selectedItem()?.id).toBe('a');
     component.onCardSelect(localItems[0]);
     fixture.detectChanges();
-    expect((component as any).selectedItem()).toBeNull();
+    expect(asInternal().selectedItem()).toBeNull();
   });
 
   it('uses randomUUID branch for client event IDs', () => {
@@ -542,7 +582,7 @@ describe('VaultComponent', () => {
         value: { randomUUID: vi.fn(() => 'uuid-1') },
         configurable: true,
       });
-      const id = (component as any).nextClientEventId('wear');
+      const id = asInternal().nextClientEventId('wear');
       expect(id).toContain('wear-uuid-1-');
     } finally {
       Object.defineProperty(globalThis, 'crypto', { value: originalCrypto, configurable: true });
@@ -561,7 +601,7 @@ describe('VaultComponent', () => {
       sortDir: 'asc' as const,
     } as VaultFilters;
 
-    expect((component as any).buildQuery(explicit)).toEqual(expect.objectContaining({
+    expect(asInternal().buildQuery(explicit)).toEqual(expect.objectContaining({
       brand: 'Acme',
       condition: 'New',
       priceMin: 12,
@@ -572,7 +612,7 @@ describe('VaultComponent', () => {
       continuationToken: undefined,
     }));
 
-    (router.navigate as any).mockClear();
+    router.navigate.mockClear();
     component['syncUrl'](explicit);
     expect(router.navigate).toHaveBeenCalledWith([], expect.objectContaining({
       queryParams: expect.objectContaining({
@@ -590,51 +630,51 @@ describe('VaultComponent', () => {
   });
 
   it('computes max price and known brand collection across item variants', () => {
-    (component as any).allItems.set([]);
+    asInternal().allItems.set([]);
     expect(component.maxItemPrice()).toBe(5000);
 
-    (component as any).allItems.set([
+    asInternal().allItems.set([
       { ...ITEM, id: 'x', price: { amount: 9000, originalCurrency: 'USD' }, brand: 'Alpha' },
       { ...ITEM, id: 'y', price: undefined, brand: 'Beta' },
-      { ...ITEM, id: 'z', price: { amount: 420, originalCurrency: 'USD' }, brand: undefined },
+      { ...ITEM, id: 'z', price: { amount: 420, originalCurrency: 'USD' }, brand: null },
       { ...ITEM, id: 'w', price: { amount: 7200, originalCurrency: 'USD' }, brand: 'Alpha' },
-    ] as any[]);
+    ] as ClothingItem[]);
     expect(component.maxItemPrice()).toBe(9000);
-    expect((component as any).knownBrands()).toEqual(['Alpha', 'Beta']);
+    expect(asInternal().knownBrands()).toEqual(['Alpha', 'Beta']);
   });
 
   it('handles errors for suggestion accept and dismiss flows', () => {
-    (component as any).wearSuggestions.set([SUGGESTION as any]);
+    asInternal().wearSuggestions.set([SUGGESTION]);
     wardrobeService.logWear = vi.fn().mockReturnValue(throwError(() => new Error('retry later')));
-    component.acceptSuggestion(SUGGESTION as any);
-    expect((component as any).wearSuggestions().length).toBe(1);
+    component.acceptSuggestion(SUGGESTION);
+    expect(asInternal().wearSuggestions().length).toBe(1);
 
     wardrobeService.updateWearSuggestionStatus = vi.fn().mockReturnValue(throwError(() => new Error('bad status')));
-    component.dismissSuggestion(SUGGESTION as any);
-    expect((component as any).wearSuggestions().length).toBe(1);
+    component.dismissSuggestion(SUGGESTION);
+    expect(asInternal().wearSuggestions().length).toBe(1);
   });
 
   it('resets loadingMore when additional pages fail', () => {
-    (component as any).nextToken.set('tok');
-    (component as any).loadingMore.set(false);
+    asInternal().nextToken.set('tok');
+    asInternal().loadingMore.set(false);
     wardrobeService.getAll = vi.fn().mockReturnValue(throwError(() => new Error('paged fail')));
     component.loadMore();
-    expect((component as any).loadingMore()).toBe(false);
+    expect(asInternal().loadingMore()).toBe(false);
   });
 
   it('routes settings open to shell profile panel on mobile and local panel on desktop', () => {
     Object.defineProperty(globalThis.window, 'innerWidth', { value: 390, configurable: true });
-    (component as any).onWindowResize();
+    asInternal().onWindowResize();
     mobileNavState.closePanel();
-    (component as any).openSettings();
+    asInternal().openSettings();
     expect(mobileNavState.activePanel()).toBe('profile');
-    expect((component as any).settingsOpen()).toBe(false);
+    expect(asInternal().settingsOpen()).toBe(false);
 
     mobileNavState.closePanel();
     Object.defineProperty(globalThis.window, 'innerWidth', { value: 1280, configurable: true });
-    (component as any).onWindowResize();
-    (component as any).openSettings();
-    expect((component as any).settingsOpen()).toBe(true);
+    asInternal().onWindowResize();
+    asInternal().openSettings();
+    expect(asInternal().settingsOpen()).toBe(true);
     expect(mobileNavState.activePanel()).toBe('none');
   });
 
@@ -644,8 +684,8 @@ describe('VaultComponent', () => {
       'focus',
     );
 
-    (component as any).settingsOpen.set(true);
-    (component as any).closeSettingsPanel();
+    asInternal().settingsOpen.set(true);
+    asInternal().closeSettingsPanel();
 
     await Promise.resolve();
     expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true });
@@ -653,11 +693,11 @@ describe('VaultComponent', () => {
 
   it('clears stale mobile panel before opening settings', () => {
     Object.defineProperty(globalThis.window, 'innerWidth', { value: 390, configurable: true });
-    (component as any).onWindowResize();
+    asInternal().onWindowResize();
     mobileNavState.openDigest();
     const closeSpy = vi.spyOn(mobileNavState, 'closePanel');
 
-    (component as any).openSettings();
+    asInternal().openSettings();
 
     expect(closeSpy).toHaveBeenCalled();
     expect(mobileNavState.activePanel()).toBe('profile');
