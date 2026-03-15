@@ -6,7 +6,11 @@ No Cosmos or network calls — all state is injected directly.
 
 import pytest
 
-from agents.scrapers.deduplicator import RunDeduplicator, PHASH_THRESHOLD
+from agents.scrapers.deduplicator import (
+    PHASH_PREFIX_CHARS,
+    PHASH_THRESHOLD,
+    RunDeduplicator,
+)
 
 
 # ── URL dedup ─────────────────────────────────────────────────────────────────
@@ -36,6 +40,13 @@ def _make_dedup_with_phash(existing_hash: str) -> RunDeduplicator:
     return dedup
 
 
+def _flip_bits(hash_value: str, bit_count: int) -> str:
+    """Return `hash_value` with the lowest `bit_count` bits flipped."""
+    if bit_count <= 0:
+        return hash_value
+    return f"{int(hash_value, 16) ^ ((1 << bit_count) - 1):0{len(hash_value)}x}"
+
+
 def test_phash_dedup_identical_hash():
     """Hamming distance 0 — clearly duplicate."""
     h = "a" * 16  # 64-bit pHash hex
@@ -49,6 +60,32 @@ def test_phash_dedup_very_different_hash():
     candidate = "ffffffffffffffff"
     dedup = _make_dedup_with_phash(existing)
     assert dedup.is_duplicate("https://reddit.com/new", phash=candidate) is False
+
+
+def test_phash_dedup_nearby_prefix_variation_is_detected():
+    """Flipping a top-bit prefix still counts as duplicate at threshold 5."""
+    existing = "1111111111111111"
+    candidate = f"{int(existing, 16) ^ (1 << 60):016x}"  # diff = 1 bit, different prefix
+    dedup = _make_dedup_with_phash(existing)
+    assert dedup.is_duplicate("https://reddit.com/new", phash=candidate) is True
+
+
+def test_phash_dedup_at_threshold_boundary():
+    """A candidate at exactly `PHASH_THRESHOLD` bits is not a duplicate."""
+    hash_len = max(PHASH_PREFIX_CHARS, (PHASH_THRESHOLD + 3) // 4)
+    existing = "a" * hash_len
+    candidate = _flip_bits(existing, PHASH_THRESHOLD)
+    dedup = _make_dedup_with_phash(existing)
+    assert dedup.is_duplicate("https://reddit.com/new", phash=candidate) is False
+
+
+def test_phash_dedup_just_under_threshold():
+    """A candidate at one bit under `PHASH_THRESHOLD` is still duplicate."""
+    hash_len = max(PHASH_PREFIX_CHARS, (PHASH_THRESHOLD + 3) // 4)
+    existing = "a" * hash_len
+    candidate = _flip_bits(existing, PHASH_THRESHOLD - 1)
+    dedup = _make_dedup_with_phash(existing)
+    assert dedup.is_duplicate("https://reddit.com/new", phash=candidate) is True
 
 
 def test_phash_dedup_none_skipped():
