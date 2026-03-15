@@ -20,6 +20,7 @@ opentelemetry-instrumentation-httpx
 langgraph
 langchain-openai
 langchain-core
+langchain
 
 # Langfuse tracing for LLM calls and tool executions
 langfuse

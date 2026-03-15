@@ -21,6 +21,7 @@ dependencies = [
   "langgraph",
   "langchain-openai",
   "langchain-core",
+  "langchain",
   "langfuse",
   "aiohttp",
   "httpx",
