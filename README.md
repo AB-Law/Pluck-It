@@ -1,306 +1,163 @@
-# PluckIt — AI-Powered Digital Wardrobe
+# PluckIt — AI-Powered Personal Wardrobe
 
-**PluckIt** is a digital wardrobe application that lets you catalogue your clothing, track wear history, and receive AI-driven outfit suggestions from a personal stylist agent. It is fully deployed to Azure.
+PluckIt is an AI-powered wardrobe stylist platform I built:
+a cohesive Angular frontend, .NET/Python backend services, and a production-style architecture unified in one codebase.
 
----
+## Why I built it
+- I wanted a real application where users can organize wardrobe data and get meaningful AI suggestions.
+- I wanted to combine frontend, backend, AI, and asynchronous processing in one coherent product.
+- I wanted to demonstrate clean boundaries between domain logic, infrastructure, and serving layers.
 
-## Features
+## What the product does
+- Upload and catalog clothing items with metadata and search/filter capabilities.
+- Create collections to group outfits and related items.
+- Track wear events and derive quick wardrobe usage insights.
+- Chat with an AI stylist that is aware of closet content and context.
+- Generate a weekly fashion digest with lightweight feedback-based adjustment.
+- Process clothing images through AI background removal before they are stored.
 
-| Feature | Status | Description |
-|---|---|---|
-| Digital Closet | Live | Upload clothing photos, auto-remove backgrounds, tag & categorise items |
-| Wardrobe Collections | Live | Group items into named collections; invite other users to join |
-| AI Stylist Chat | Live | Streaming GPT-4.1-mini ReAct agent with wardrobe awareness and real-time weather |
-| Vault Insights | Live | Cost-per-wear analytics and wardrobe value breakdown |
-| Wardrobe Digest | Live | Weekly AI-generated purchase suggestions with thumbs-up/down feedback loop |
-| Fashion Mood Trends | Live | Daily trend extraction from RSS feeds, canonicalised via embeddings |
-| Wear History | Live | Full wear-event ledger per item with timeline view |
-| Conversation Memory | Live | Rolling summary of stylist conversations auto-expires after 30 days |
-| Background Removal | Live | BiRefNet transformer model (GPU, Modal) replaces rembg for production quality |
-| Google Auth | Live | Google Identity Services sign-in; ID tokens validated in-process on the API |
-| Dashboard | Live | Summary stats, recent wear events, digest highlights |
-| Profile Management | Live | User preferences, body measurements, style tags |
+## Build
 
----
+### Frontend
+- Angular 19+ SPA with standalone components and Signals for local state.
+- Responsive wardrobe management views for browsing, editing, and analytics.
+- Streaming stylist chat client for AI responses.
 
-## Architecture
+### API and data services
+- .NET 10 isolated Azure Functions for the public API surface.
+- FastAPI running in Azure Functions for processor-focused endpoints and SSE behavior.
+- Queue-driven background workflow to keep long AI/image tasks out of the user request path.
+- Cosmos DB and Azure Blob Storage as the primary persistence layer.
 
-```
-┌──────────────────────────────────────────────────────────────────┐
-│  Browser — Angular 19+ SPA                                        │
-│  pluckit.omakashay.com  (Azure Static Web Apps — Free tier)      │
-└─────────────────────────────────┬────────────────────────────────┘
-                                  │ HTTPS + Bearer token (Google ID)
-          ┌───────────────────────┴───────────────────────┐
-          │                                               │
-┌─────────▼──────────────┐              ┌────────────────▼────────────────┐
-│  .NET 10 Functions     │              │  Python 3.12 Functions          │
-│  (Flex Consumption)    │              │  (Flex Consumption + FastAPI)   │
-│  pluckit-prod-api-func │              │  pluckit-prod-processor-func    │
-│                        │              │                                  │
-│  WardrobeFunctions     │  Storage     │  POST /api/process-image        │
-│  CollectionFunctions   │  Queue ─────►│  POST /api/chat (SSE)           │
-│  StylistFunctions      │              │  GET  /api/digest/latest        │
-│  UserProfileFunctions  │              │  GET  /api/insights/vault       │
-│  CleanupFunctions      │              │  GET  /api/moods                │
-└────────────┬───────────┘              └────────────────┬────────────────┘
-             │                                           │
-             │                                 ┌─────────▼────────────┐
-             │                                 │  Modal.com (GPU)     │
-             │                                 │  BiRefNet Segmenter  │
-             │                                 │  Scales to zero      │
-             │                                 └──────────────────────┘
-             │
-┌────────────▼─────────────────────────────────────────────────────┐
-│  Azure Services (PluckIt-RG, West Europe)                         │
-│  Cosmos DB (Free Tier) · Blob Storage LRS · App Insights          │
-└──────────────────────────────────────────────────────────────────┘
-```
+### AI and async processing
+- ReAct-style styling assistant with tool calls for contextual recommendations.
+- Dedicated AI image segmentation path for cleaner catalog photos.
+- End-to-end telemetry and logs across services for traceability.
 
-### Project Layout
+## Architecture at a glance
 
-```
-PluckIt.Core/           # Domain entities & interfaces — zero external dependencies
-PluckIt.Infrastructure/ # Implements Core interfaces (Cosmos DB, Blob, OpenAI)
-PluckIt.Functions/      # .NET 10 Azure Functions — HTTP triggers, composition root
-PluckIt.Processor/      # Python 3.12 Azure Functions — image processing, AI agents
-PluckIt.Client/         # Angular 19+ SPA — standalone components, signals
-PluckIt.Segmentation.Modal/ # BiRefNet background removal — deployed to Modal.com
-PluckIt.Tests/          # xUnit unit & integration tests
-infra/                  # All Azure infrastructure as Terraform
-.github/workflows/      # CI/CD pipelines
+```mermaid
+flowchart LR
+    Client["Angular SPA<br/>PluckIt.Client"]
+    Api[".NET 10 Azure Functions<br/>PluckIt.Functions"]
+    Queue["Azure Queue"]
+    Processor["Python FastAPI Processor + SSE<br/>PluckIt.Processor"]
+    AI["Stylist + Memory + Digest + Mood"]
+    Segmentation["Segmentation Worker<br/>PluckIt.Segmentation.Modal"]
+    DB["Cosmos DB"]
+    Blob["Azure Blob Storage"]
+    Telemetry["Observability<br/>Logs + CI"]
+
+    Client -->|/api/wardrobe, /collections, /profile| Api
+    Client -->|/api/chat, /api/digest, /api/moods, /api/insights, /api/process-image| Api
+    Client -->|SSE updates| Processor
+    Api --> DB
+    Api --> Blob
+    Api --> Queue
+    Queue --> Processor
+    Processor --> AI
+    Processor --> Segmentation
+    Segmentation --> Blob
+    Processor --> DB
+    Api --> Telemetry
+    Processor --> Telemetry
 ```
 
-### Clean Architecture Rules
+```mermaid
+sequenceDiagram
+    participant Frontend
+    participant Functions as .NET Functions
+    participant Queue as Azure Queue
+    participant Processor as FastAPI Processor
+    participant AI as Stylist / Memory / Mood
+    participant Seg as Segmentation Worker
+    participant Store as Cosmos DB / Blob
 
-- `PluckIt.Core` has **no external dependencies** — it defines the domain model and interfaces only.
-- `PluckIt.Infrastructure` implements those interfaces using Azure SDKs (Cosmos DB SDK, Blob Storage, Azure OpenAI).
-- `PluckIt.Functions` and `PluckIt.Processor` are the **composition roots** — they wire DI and expose HTTP endpoints.
-
----
+    Frontend->>Functions: Upload image + wardrobe metadata
+    Functions->>Store: Persist catalog metadata
+    Functions->>Queue: Enqueue background image/AI task
+    Functions-->>Frontend: Return immediate operation ack
+    Queue->>Processor: Consume async job
+    Processor->>Seg: Request background removal
+    Seg-->>Store: Store cleaned image asset
+    Processor->>AI: Generate style recommendations + digest context
+    AI-->>Processor: Return structured response
+    Processor-->>Functions: Persist insights + status
+    Functions-->>Frontend: Push SSE completion / recommendations
+```
 
 ## Technology Choices & Rationale
 
-### Frontend — Angular 19+ with Standalone Components & Signals
+- **Angular 19+ (Signals + Standalone Components)** to keep frontend code organized and fast for dynamic wardrobe views.
+- **.NET 10 Azure Functions** as the API edge because isolated process functions keep startup fast and let the public surface stay cleanly structured.
+- **Python FastAPI in Azure Functions** for processor workloads requiring async patterns and SSE streams.
+- **Queue-driven processing + workers** so image-heavy AI jobs run asynchronously and do not block user actions.
+- **Azure Cosmos DB + Blob Storage** to support flexible item schema evolution and efficient media storage.
+- **Modal-hosted BiRefNet segmentation** to keep heavy model inference isolated from core platform services and reduce operational complexity.
+- **Terraform** to keep infrastructure changes reviewable, reproducible, and auditable.
 
-Angular 19's standalone component model eliminates NgModules entirely, reducing boilerplate and making lazy-loading trivial. Angular Signals replace RxJS for local reactive state — they are synchronous, easier to reason about, and produce smaller bundles. The app is hosted on **Azure Static Web Apps Free tier** ($0/month), which handles global CDN distribution and custom domains automatically.
+## Azure Infrastructure (High level)
 
-### Backend API — .NET 10 Azure Functions (Flex Consumption)
-
-Azure Functions Flex Consumption (FC1) is a true pay-per-execution serverless tier — there are no always-ready instances by default and no minimum hourly charge. For a workload with sporadic traffic this saves ~$50–60/month compared to a dedicated App Service or always-ready Functions plan. Native AOT compilation and source-generated JSON serialization (`PluckItJsonContext`) keep cold-start latency low (~2–5 s) and reduce memory footprint.
-
-### Python Processor — FastAPI ASGI on Azure Functions
-
-The Python processor uses the Azure Functions v2 programming model with a **FastAPI ASGI app** mounted inside it. This gives true Server-Sent Events (SSE) for the AI stylist chat stream — something the standard Functions HTTP trigger cannot do natively. Non-HTTP triggers (queue, timer) remain as standard Function decorators on the same `AsgiFunctionApp`.
-
-### AI — GPT-4.1-mini via Azure OpenAI
-
-GPT-4.1-mini was chosen over GPT-4o for cost efficiency: ~20× cheaper per token while delivering strong instruction-following, function-calling, and code generation. For this workload (outfit suggestions, gap analysis, digest generation) the quality difference is negligible. The LangGraph `create_react_agent` loop gives the stylist access to live wardrobe data, weather, user profile, and trend moods via typed tools.
-
-### Background Removal — BiRefNet on Modal.com
-
-The original `rembg` (U2Net) model ran inside the Azure Function itself, bundling a 176 MB ONNX file with every deployment. It also produced mediocre results on complex garments. **BiRefNet** (a transformer-based salient object detector) running on a GPU produces significantly cleaner cutouts with fine-grained edge detail. Modal.com was chosen because:
-
-- **Scales to zero** — GPU container is only billed during actual inference (~1–3 s per image).
-- **Model weights are cached** in a Modal Volume, eliminating download time on cold starts.
-- **No GPU quota required on Azure** — keeping the Azure subscription in the free/low-cost zone.
-- **Simple deployment** — `modal deploy modal_app.py` from CI; the endpoint is a plain HTTPS URL.
-
-The Azure Processor calls the Modal endpoint synchronously after the queue trigger fires, writes the cutout PNG to Blob Storage, and updates the Cosmos DB item record.
-
-### Database — Azure Cosmos DB NoSQL (Free Tier)
-
-Cosmos DB NoSQL was selected for its schema-less documents (clothing items evolve frequently), partition-based scaling, and generous free tier: **1,000 RU/s throughput + 25 GB storage at $0/month**. Shared throughput across all containers means adding new containers (e.g. Moods, DigestFeedback) does not increase the bill. Composite indexes covering each sort dimension are defined in Terraform to avoid cross-partition queries and keep RU consumption within the free allocation.
-
-### Infrastructure — Terraform on Azure
-
-All Azure resources are defined in `infra/` and managed exclusively via Terraform. This gives:
-
-- **Reproducibility** — the entire environment can be torn down and recreated in minutes.
-- **Drift detection** — `terraform plan` on every PR catches accidental manual changes.
-- **Auditability** — resource configuration lives in version control alongside application code.
-
-Remote state is stored in Azure Blob Storage so CI and local developers share the same state file. Sensitive values (API keys, connection strings) are injected via `terraform.auto.tfvars` at CI time and never hardcoded.
-
----
+- Azure Static Web App: frontend hosting with CDN and HTTPS.
+- Azure Functions (Flex Consumption): API and processor endpoints.
+- Azure Storage Queue: async orchestration between API and background processors.
+- Cosmos DB NoSQL + Blob Storage: domain data and image assets.
+- Monitoring and logging: telemetry/alerts for request + background job visibility.
+- Azure OpenAI + Modal: AI and segmentation execution endpoints.
 
 ## Cost Summary
 
-| Resource | SKU / Tier | Est. Monthly Cost |
-|---|---|---|
-| Azure Static Web Apps | Free | $0 |
-| Cosmos DB (all containers) | Free tier (1,000 RU/s, 25 GB) | $0 |
-| Azure Functions — API | Flex Consumption FC1, no always-ready | ~$0–2 (pay-per-call) |
-| Azure Functions — Processor | Flex Consumption FC1, no always-ready | ~$0–2 (pay-per-call) |
-| Azure Blob Storage | Standard LRS, StorageV2 | ~$1–3 |
-| Azure Storage Queues | Included in storage account | $0 (free tier ops) |
-| Log Analytics Workspace | PerGB2018, 30-day retention | $0 (< 500 MB/day free) |
-| Application Insights | Workspace-based | $0 (< 5 GB/month free) |
-| Modal.com BiRefNet | Per-second GPU billing, scale-to-zero | ~$0–5 (per usage) |
-| Azure OpenAI GPT-4.1-mini | Serverless pay-per-token | ~$1–10 |
+- Target personal usage budget: **under \$20/month** for a single-project, low-to-moderate workload.
+- This is a **total monthly budget estimate**, not a per-user cost.
+- Cost-control levers:
+  - Keep Function Apps in serverless modes to avoid idle compute.
+  - Use LRS Blob storage where cross-region replication is not required.
+  - Choose `gpt-4.1-mini` for lower token cost on stylist/digest workloads.
+  - Use Modal scale-to-zero segmentation so GPU spend follows actual usage.
+- Estimated monthly cost by service:
 
-**Estimated total: < $20/month at typical personal-use traffic.**
+| Resource | Tier / Model | Est. monthly cost |
+| --- | --- | --- |
+| Azure Static Web App | Free tier | \$0 |
+| Cosmos DB NoSQL | Free tier (RU/storage included) | \$0 |
+| Azure Functions — API | Flex Consumption | \$0–2 |
+| Azure Functions — Processor | Flex Consumption | \$0–2 |
+| Azure Blob Storage | Standard LRS | \$1–3 |
+| Storage Queue | Included with account | \$0 |
+| Log Analytics + telemetry on Grafan Cloud | Standard retention settings | \$0 |
+| Azure OpenAI (`gpt-4.1-mini`) | Usage-based pay-per-token | \$1–10 |
+| Modal BiRefNet segmentation | GPU scale-to-zero | \$0–5 ($30 free credit per month) |
 
-### Cost Optimisation Decisions
-
-- **No always-ready instances** on either Function App — cold starts are acceptable for personal use.
-- **LRS replication** on Blob Storage — single-region redundancy is sufficient; RA-GRS would triple storage costs.
-- **GPT-4.1-mini** instead of GPT-4o — ~20× cheaper per million tokens.
-- **Cosmos DB Free Tier** — a single free-tier account per subscription covers the entire data layer.
-- **Shared throughput pool** on the Cosmos DB database — 1,000 RU/s split across all containers rather than provisioning each container separately.
-- **TTL on ephemeral containers** — `StylingActivity` (90 days), `Conversations` (30 days), `DigestFeedback` (90 days) auto-expire stale documents, bounding RU consumption and storage.
-- **Modal scale-to-zero GPU** — the BiRefNet segmenter has zero cost when idle; no reserved GPU instance.
-- **Free-tier Static Web App** — no Standard-tier EasyAuth; Google token validation is done in-process on the API, avoiding the $9/month SWA Standard charge.
-
----
-
-## Azure Infrastructure
-
-All resources are in resource group **PluckIt-RG** (West Europe).
-
-| Resource | Name | Notes |
-|---|---|---|
-| Resource Group | `PluckIt-RG` | All resources co-located |
-| Storage Account (app data) | *(see infra/backend.tf)* | Blobs, queues, tfstate |
-| Storage Account (Functions) | *(see infra/main.tf)* | Deployment package blobs only |
-| Cosmos DB Account | `pluckit-prod-cosmos` | Free tier, Session consistency |
-| Cosmos DB Database | `PluckIt` | Shared 1,000 RU/s throughput |
-| Cosmos Containers | Wardrobe, WearEvents, StylingActivity, UserProfiles, Conversations, Digests, Moods, DigestFeedback, Collections, VaultInsightsCache | See `infra/main.tf` for partition keys and index policies |
-| .NET Function App | `pluckit-prod-api-func` | Flex Consumption, dotnet-isolated 10.0 |
-| Python Function App | `pluckit-prod-processor-func` | Flex Consumption, Python 3.12 |
-| Static Web App | `pluckit-prod-web` | Free tier, East Asia, custom domain |
-| Log Analytics | `pluckit-prod-logs` | 30-day retention |
-| Application Insights | `pluckit-prod-appinsights` | Workspace-based |
-
-### Terraform Workflow
-
-```bash
-cd infra
-terraform init          # first time or after provider upgrades
-terraform plan          # always review before pushing
-terraform apply         # local apply; CI applies on push to main
-```
-
-> **Rule**: Never provision or modify Azure resources via the `az` CLI, Portal, or any imperative tool. All infrastructure changes go through Terraform.
-
----
+**Estimated total: \<\$10/month** for typical personal-use traffic. Can scale per user (estimates pending but will assume storing 100+ clothes + using stylist AI chat frequently)
 
 ## CI/CD — GitHub Actions
 
-| Workflow | Trigger | Action |
-|---|---|---|
-| `terraform-infra.yml` | push/PR on `infra/**` | Plan (PR) or Apply (push to `main`) |
-| `backend-ci.yml` | push/PR on `PluckIt.Functions/**`, `PluckIt.Core/**`, `PluckIt.Infrastructure/**` | Build & deploy .NET Functions |
-| `frontend-ci.yml` | push/PR on `PluckIt.Client/**` | Build Angular, deploy to SWA |
-| `function-ci.yml` | push on `PluckIt.Processor/**` | Deploy Python Functions |
-| `modal-deploy.yml` | push on `PluckIt.Segmentation.Modal/**` | `modal deploy` BiRefNet segmenter |
+- Pull requests trigger validation builds/tests and infra planning.
+- Production branches trigger deployment workflows for infra, API, processor, frontend, and segmentation services.
+- Queue and deployment jobs are organized to avoid race conditions during infra + app rollouts.
+- Infrastructure and runtime are deployed from code; manual portal/CLI drift is minimized.
 
-- **PRs** run build/plan only — no deployments.
-- **Push to `main`** deploys to production.
-- The `azure-production` concurrency group prevents Terraform and Python Function deployments from racing.
+## Engineering highlights
+- Built and maintained a clean module split across `PluckIt.Core`, `PluckIt.Infrastructure`, `PluckIt.Functions`, `PluckIt.Processor`, and `PluckIt.Client`.
+- Designed for async image and AI workflows without blocking core user interactions.
+- Used domain-driven layering to keep services testable and maintainable.
+- Used CI and infrastructure automation so changes are repeatable and reviewable.
+- Added tests for core behavior paths and shared service contracts.
 
----
+## Repository map
+- `PluckIt.Client/` — Angular frontend application.
+- `PluckIt.Core/` — Domain models and service contracts.
+- `PluckIt.Infrastructure/` — Storage, database, and external integrations.
+- `PluckIt.Functions/` — .NET API and orchestration layer.
+- `PluckIt.Processor/` — Async processors and AI-facing endpoints.
+- `PluckIt.Segmentation.Modal/` — AI background removal worker.
+- `PluckIt.Tests/` — test suite.
+- `infra/` — infrastructure definitions (kept separate from this overview).
 
-## Local Development
+## Native clients
+- iOS + macOS app repositories are maintained separately at [Pluck-It.Apple](https://github.com/AB-Law/Pluck-It.Apple), covering Swift-based mobile and desktop clients.
 
-> Full setup instructions are in [QUICKSTART.md](QUICKSTART.md). Key points below.
-
-### Prerequisites
-
-- .NET 10 SDK
-- Node.js 22 + Angular CLI v19+
-- Python 3.12
-- Azure Functions Core Tools v4 (`func`)
-- Terraform >= 1.9
-
-### Devcontainer / Codespaces
-
-The `.devcontainer/` directory includes a fully configured environment with all toolchains pre-installed. A `post-create.sh` script runs automatically to restore packages and create `local.settings.json` files from Codespaces secrets.
-
-```bash
-# Create from GitHub UI: Code → Codespaces → New codespace
-```
-
-### Running Locally
-
-```bash
-# .NET API (port 7071)
-cd PluckIt.Functions
-func start --port 7071
-
-# Python Processor (port 7072)
-cd PluckIt.Processor
-source .venv/bin/activate
-func start --port 7072
-
-# Angular SPA (port 4200, proxies to Functions)
-cd PluckIt.Client
-npm start
-```
-
-### Required Local Secrets
-
-Add these to `PluckIt.Functions/local.settings.json` and `PluckIt.Processor/local.settings.json` (both are gitignored):
-
-- `AZURE_WEBJOBS_STORAGE` — Azure Storage connection string (required for queue triggers)
-- `Cosmos__Endpoint`, `Cosmos__Key` — Cosmos DB credentials
-- `AI__Endpoint`, `AI__ApiKey` — Azure OpenAI
-- `BlobStorage__AccountName`, `BlobStorage__AccountKey` — Blob Storage
-- `GOOGLE_CLIENT_ID` / `GoogleAuth__ClientId` — Google OAuth client ID
-- `GOOGLE_AUTH_JWKS_URL` (optional) / `GoogleAuth__JwksUrl` — Google JWKS endpoint
-- `SEGMENTATION_ENDPOINT_URL`, `SEGMENTATION_SHARED_TOKEN` — Modal segmentation
-- `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` — Langfuse tracing credentials
-- `LANGFUSE_HOST` (optional) — Langfuse API host (defaults to `https://us.cloud.langfuse.com`)  
-  You can also use `LANGFUSE_BASE_URL` in place of `LANGFUSE_HOST`.
-- `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` / `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` / `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` — Grafana OTLP endpoints
-- `OTEL_EXPORTER_OTLP_HEADERS` — URL-encoded `Authorization` header for Grafana OTLP
-- `OTEL_EXPORTER_OTLP_PROTOCOL` — usually `http/protobuf`
-- `OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER`, `OTEL_LOGS_EXPORTER` — set each to `otlp` to send all signal types
-- `OTEL_SERVICE_NAME`  
-  - `PluckIt.Functions`: `pluckit-api-func-local` (local) or `pluckit-prod-api-func` (Terraform default)
-  - `PluckIt.Processor`: `pluckit-prod-processor-func`
-- `COSMOS_DB_VAULT_INSIGHTS_CACHE_CONTAINER` / `COSMOS_DB_VAULT_INSIGHTS_CACHE_TTL_MS` — optional processor cache container and TTL (ms) for vault insights
-
-For Codespaces, add the same names as **Codespaces secrets** (not Actions secrets — they are separate namespaces).
-For CI, set `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and optional `LANGFUSE_HOST` in GitHub Action secrets so `terraform-infra.yml` can pass them into `terraform.auto.tfvars`.
-For the API observability service name override, set repository variable `GRAFANA_CLOUD_OTEL_SERVICE_NAME_API` (optional). If unset, Terraform uses `grafana_cloud_api_service_name`'s default (`pluckit-prod-api-func`).
-
----
-
-## Validation
-
-Run these after every change before considering work complete:
-
-```bash
-# Frontend
-cd PluckIt.Client && npm run build
-
-# .NET backend
-dotnet build PluckIt.sln
-
-# Python processor
-cd PluckIt.Processor && python -m py_compile function_app.py
-
-# Terraform
-cd infra && terraform validate && terraform plan
-```
-
----
-
-## Project Status
-
-- Full Clean Architecture (.NET 10 — Core / Infrastructure / Functions)
-- Angular 19+ SPA — standalone components, signals, SSE client
-- Azure infrastructure fully provisioned via Terraform (IaC)
-- Google Identity Services authentication (in-process token validation)
-- Digital closet — upload, tag, sort, filter, wear tracking
-- Collections — shared wardrobe groups with member invite
-- AI Stylist — LangGraph ReAct agent, streaming SSE, conversation memory
-- Wardrobe Digest — weekly AI purchase suggestions + feedback loop
-- Vault Insights — cost-per-wear analytics
-- Fashion Mood Trends — daily RSS extraction, embedding-based deduplication
-- BiRefNet background removal — GPU on Modal.com, scales to zero
-- Async image processing pipeline via Azure Storage Queue
-- Application Insights telemetry across all services
-- 5 CI/CD pipelines (Terraform, .NET Functions, Angular SWA, Python Functions, Modal)
-- xUnit unit & integration test suite
+## Current status
+- Core wardrobe, AI styling, and insights features are implemented end-to-end.
+- System supports both interactive chat and asynchronous background tasks.
+- Ongoing improvements include UX polish, additional recommendations logic, and expanded test coverage.
