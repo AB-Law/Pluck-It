@@ -92,10 +92,15 @@ var host = new HostBuilder()
                 new JsonStringEnumConverter(null, allowIntegerValues: true),
             },
         };
-        services.AddSingleton(_ => new CosmosClient(cosmosEndpoint, cosmosKey, new CosmosClientOptions
+        var cosmosOptions = new CosmosClientOptions
         {
             Serializer = new AotCosmosSerializer(cosmosSerializerOptions)
-        }));
+        };
+        // The vnext-preview Cosmos emulator only supports Gateway (HTTP) mode, not Direct/RNTBD.
+        // Force Gateway mode when connecting to localhost.
+        if (cosmosEndpoint.Contains("localhost") || cosmosEndpoint.Contains("127.0.0.1"))
+            cosmosOptions.ConnectionMode = ConnectionMode.Gateway;
+        services.AddSingleton(_ => new CosmosClient(cosmosEndpoint, cosmosKey, cosmosOptions));
         services.AddSingleton<RefreshSessionStore>();
         services.AddSingleton<IWardrobeRepository>(sp =>
             new WardrobeRepository(
@@ -191,8 +196,12 @@ var host = new HostBuilder()
         var blobAccountKey = config["BlobStorage:AccountKey"] ?? "";
         var blobArchiveContainer = config["BlobStorage:ArchiveContainer"] ?? "archive";
         var blobUploadsContainer = config["BlobStorage:UploadsContainer"] ?? "uploads";
-        services.AddSingleton<IBlobSasService>(
-            new BlobSasService(blobAccountName, blobAccountKey, blobArchiveContainer, blobUploadsContainer));
+        // Use the Azurite-compatible connection-string constructor for local dev.
+        // StorageSharedKeyCredential + explicit URI breaks with Azure.Storage.Blobs v12.28+ against Azurite.
+        IBlobSasService blobSasService = blobAccountName == "devstoreaccount1"
+            ? new BlobSasService("UseDevelopmentStorage=true", blobArchiveContainer, blobUploadsContainer)
+            : new BlobSasService(blobAccountName, blobAccountKey, blobArchiveContainer, blobUploadsContainer);
+        services.AddSingleton(blobSasService);
 
         // ── Image processing job queue ─────────────────────────────────────────
         // Re-uses the same storage account as blobs (sa_pluckit).

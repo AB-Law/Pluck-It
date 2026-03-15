@@ -32,7 +32,7 @@ DATABASE = "PluckIt"
 
 CONTAINERS = [
     ("Wardrobe",                      _PK_USER),
-    ("UserProfiles",                  _PK_USER),
+    ("UserProfiles",                  "/id"),
     ("Conversations",                 _PK_USER),
     ("Digests",                       _PK_USER),
     ("Moods",                         "/primaryMood"),
@@ -125,6 +125,22 @@ def create_blob_containers():
                 print(f"  Blob container '{name}' already exists")
         else:
             print(f"  ERROR creating blob container '{name}': {result.stderr.strip()[:200]}")
+            continue
+
+        # Set public-blob access so the app can serve images without SAS tokens.
+        # (Azurite doesn't support the SDK's SAS API version in local dev.)
+        perm = subprocess.run(
+            [
+                "az", "storage", "container", "set-permission",
+                "--name", name,
+                "--public-access", "blob",
+                "--connection-string", AZURITE_CONN,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if perm.returncode != 0:
+            print(f"  WARN: could not set public access on '{name}': {perm.stderr.strip()[:200]}")
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
