@@ -2,7 +2,7 @@ name: Backend (Functions) CI/CD
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, dev ]
     paths:
       - 'PluckIt.Functions/**'
       - 'PluckIt.Core/**'
@@ -10,7 +10,7 @@ on:
       - 'PluckIt.Tests/**'
       - '.github/workflows/backend-ci.yml'
   pull_request:
-    branches: [ main ]
+    branches: [ main, dev ]
     paths:
       - 'PluckIt.Functions/**'
       - 'PluckIt.Core/**'

@@ -1,5 +1,16 @@
-import { Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild, computed, effect, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {
+  Component,
+  ElementRef,
+  HostListener,
+  OnDestroy,
+  OnInit,
+  ViewChild,
+  computed,
+  effect,
+  signal,
+  inject,
+} from '@angular/core';
+
 import { ActivatedRoute, Router } from '@angular/router';
 import { WardrobeService } from '../../core/services/wardrobe.service';
 import { UserProfileService } from '../../core/services/user-profile.service';
@@ -21,14 +32,18 @@ import { AddToCollectionModalComponent } from '../collections/add-to-collection-
 import { matchesItem } from '../../core/utils/search.utils';
 import { VaultInsightsService } from '../../core/services/vault-insights.service';
 import { VaultInsightsPanelComponent } from './vault-insights-panel.component';
-import { CpwIntelItem, CpwIntelPanelItem, VaultInsightsPanelData, VaultInsightsResponse } from '../../core/models/vault-insights.model';
+import {
+  CpwIntelItem,
+  CpwIntelPanelItem,
+  VaultInsightsPanelData,
+  VaultInsightsResponse,
+} from '../../core/models/vault-insights.model';
 import { MobileNavState } from '../../shared/layout/mobile-nav.state';
 
 @Component({
   selector: 'app-vault',
   standalone: true,
   imports: [
-    CommonModule,
     VaultSidebarComponent,
     VaultCardComponent,
     ItemDetailDrawerComponent,
@@ -40,8 +55,9 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
     AddToCollectionModalComponent,
   ],
   template: `
-    <div class="relative flex h-[100dvh] flex-col overflow-hidden bg-black text-slate-100 pb-16 md:pb-0 font-display">
-
+    <div
+      class="relative flex h-[100dvh] flex-col overflow-hidden bg-black text-slate-100 pb-16 md:pb-0 font-display"
+    >
       <app-shared-header
         section="vault"
         [showSearch]="true"
@@ -87,7 +103,6 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
           tabindex="-1"
           aria-label="Vault content"
         >
-
           <!-- Stats row -->
           <div class="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             <app-stat-card
@@ -120,21 +135,29 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
                         class="mt-0.5 h-28 w-24 rounded bg-black/30 object-contain border border-primary/25 shrink-0"
                       />
                     } @else {
-                      <div class="mt-0.5 h-28 w-24 rounded bg-black/40 border border-primary/25 flex items-center justify-center text-sm text-slate-500 shrink-0">
+                      <div
+                        class="mt-0.5 h-28 w-24 rounded bg-black/40 border border-primary/25 flex items-center justify-center text-sm text-slate-500 shrink-0"
+                      >
                         <span class="material-symbols-outlined text-2xl">image</span>
                       </div>
                     }
                     <div class="min-w-0 flex-1 space-y-3">
-                      <p class="text-sm text-primary font-semibold leading-relaxed flex-1">{{ s.message }}</p>
+                      <p class="text-sm text-primary font-semibold leading-relaxed flex-1">
+                        {{ s.message }}
+                      </p>
                       <div class="flex flex-wrap items-center gap-2">
                         <button
                           class="rounded border border-primary/40 px-3 py-1.5 text-sm font-bold text-primary hover:bg-primary/20"
                           (click)="acceptSuggestion(s)"
-                        >Mark Worn</button>
+                        >
+                          Mark Worn
+                        </button>
                         <button
                           class="rounded border border-border-chrome px-3 py-1.5 text-sm font-bold text-slate-300 hover:text-white"
                           (click)="dismissSuggestion(s)"
-                        >Dismiss</button>
+                        >
+                          Dismiss
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -148,7 +171,9 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
           <!-- Loading state -->
           @if (loading()) {
             <div class="flex items-center justify-center py-20 text-slate-500">
-              <span class="material-symbols-outlined animate-spin mr-2" style="font-size:28px">progress_activity</span>
+              <span class="material-symbols-outlined animate-spin mr-2" style="font-size:28px"
+                >progress_activity</span
+              >
               Loading vault…
             </div>
           }
@@ -179,15 +204,17 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
 
           <!-- Load More -->
           @if (hasMore()) {
-          <div class="mt-8 flex justify-center">
+            <div class="mt-8 flex justify-center">
               <button
-              class="touch-target px-6 py-2.5 rounded-lg border border-[#333] text-sm font-medium text-slate-300 hover:text-white hover:border-slate-500 transition-colors font-mono disabled:opacity-50"
+                class="touch-target px-6 py-2.5 rounded-lg border border-[#333] text-sm font-medium text-slate-300 hover:text-white hover:border-slate-500 transition-colors font-mono disabled:opacity-50"
                 [disabled]="loadingMore()"
                 (click)="loadMore()"
               >
                 @if (loadingMore()) {
                   <span class="flex items-center gap-2">
-                    <span class="material-symbols-outlined animate-spin" style="font-size:16px">progress_activity</span>
+                    <span class="material-symbols-outlined animate-spin" style="font-size:16px"
+                      >progress_activity</span
+                    >
                     Loading...
                   </span>
                 } @else {
@@ -196,7 +223,6 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
               </button>
             </div>
           }
-
         </main>
 
         <!-- Right drawer -->
@@ -211,7 +237,6 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
           (shareToCollection)="openShareModal($event)"
           (wearLogged)="onWearLogged($event)"
         />
-
       </div>
 
       <!-- Edit metadata modal -->
@@ -227,20 +252,23 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
 
       <!-- Add to collection modal -->
       @if (sharingItem()) {
-        <app-add-to-collection-modal
-          [item]="sharingItem()!"
-          (closed)="sharingItem.set(null)"
-        />
+        <app-add-to-collection-modal [item]="sharingItem()!" (closed)="sharingItem.set(null)" />
       }
 
       @if (settingsOpen()) {
         <app-profile-panel (closed)="closeSettingsPanel()" />
       }
-
     </div>
   `,
 })
 export class VaultComponent implements OnInit, OnDestroy {
+  private readonly wardrobeService = inject(WardrobeService);
+  private readonly vaultInsightsService = inject(VaultInsightsService);
+  private readonly profileService = inject(UserProfileService);
+  private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
+  protected readonly mobileNavState = inject(MobileNavState);
+
   @ViewChild('mainScrollArea')
   private readonly mainScrollArea?: ElementRef<HTMLElement>;
 
@@ -270,14 +298,7 @@ export class VaultComponent implements OnInit, OnDestroy {
     sortDir: 'desc',
   });
 
-  constructor(
-    private readonly wardrobeService: WardrobeService,
-    private readonly vaultInsightsService: VaultInsightsService,
-    private readonly profileService: UserProfileService,
-    private readonly router: Router,
-    private readonly route: ActivatedRoute,
-    protected readonly mobileNavState: MobileNavState,
-  ) {
+  constructor() {
     effect(() => {
       if (this.mobileNavState.activePanel() === 'none') {
         this.restoreMainFocusTarget();
@@ -363,7 +384,8 @@ export class VaultComponent implements OnInit, OnDestroy {
   readonly currency = computed(() => this.profileService.getOrDefault().currencyCode);
 
   readonly maxItemPrice = computed(() =>
-    Math.max(5000, ...this.allItems().map(i => i.price?.amount ?? 0)));
+    Math.max(5000, ...this.allItems().map((i) => i.price?.amount ?? 0)),
+  );
 
   /**
    * Client-side filter: applies only Smart Group and free-text search.
@@ -372,7 +394,7 @@ export class VaultComponent implements OnInit, OnDestroy {
   readonly filteredItems = computed(() => {
     const q = this.searchQuery().toLowerCase();
     const { group } = this.activeFilters();
-    return this.allItems().filter(item => {
+    return this.allItems().filter((item) => {
       if (q && !this.matchesSearch(item, q)) return false;
       if (group === 'favorites')
         return item.tags.includes('favorite') || item.aestheticTags?.includes('Favorite');
@@ -387,28 +409,36 @@ export class VaultComponent implements OnInit, OnDestroy {
 
   readonly portfolioValueDisplay = computed(() => {
     const total = this.filteredItems().reduce(
-      (sum, i) => sum + (i.estimatedMarketValue ?? i.price?.amount ?? 0), 0);
+      (sum, i) => sum + (i.estimatedMarketValue ?? i.price?.amount ?? 0),
+      0,
+    );
     return this.fmt(total);
   });
 
   readonly avgCpwDisplay = computed(() => {
-    const items = this.filteredItems().filter(i => i.price?.amount && (i.wearCount ?? 0) > 0);
+    const items = this.filteredItems().filter((i) => i.price?.amount && (i.wearCount ?? 0) > 0);
     if (!items.length) return 'N/A';
-    const avg = items.reduce((s, i) => s + (i.price!.amount / (i.wearCount ?? 1)), 0) / items.length;
+    const avg = items.reduce((s, i) => s + i.price!.amount / (i.wearCount ?? 1), 0) / items.length;
     return this.fmt(avg);
   });
 
-  readonly knownBrands = computed(() =>
-    [...new Set(this.allItems().map(i => i.brand).filter(Boolean) as string[])]);
+  readonly knownBrands = computed(() => [
+    ...new Set(
+      this.allItems()
+        .map((i) => i.brand)
+        .filter(Boolean) as string[],
+    ),
+  ]);
 
-  readonly cpwIntelMap = computed(() =>
-    new Map((this.insights()?.cpwIntel ?? []).map(row => [row.itemId, row])));
+  readonly cpwIntelMap = computed(
+    () => new Map((this.insights()?.cpwIntel ?? []).map((row) => [row.itemId, row])),
+  );
 
   readonly enrichedInsights = computed<VaultInsightsPanelData | null>(() => {
     const source = this.insights();
     if (!source) return null;
-    const itemsById = new Map(this.allItems().map(item => [item.id, item]));
-    const cpwIntel: CpwIntelPanelItem[] = (source.cpwIntel ?? []).map(row => {
+    const itemsById = new Map(this.allItems().map((item) => [item.id, item]));
+    const cpwIntel: CpwIntelPanelItem[] = (source.cpwIntel ?? []).map((row) => {
       const item = itemsById.get(row.itemId);
       return {
         ...row,
@@ -439,8 +469,8 @@ export class VaultComponent implements OnInit, OnDestroy {
     if (!token || this.loadingMore()) return;
     this.loadingMore.set(true);
     this.wardrobeService.getAll(this.buildQuery(this.activeFilters(), token)).subscribe({
-      next: res => {
-        this.allItems.update(curr => [...curr, ...res.items]);
+      next: (res) => {
+        this.allItems.update((curr) => [...curr, ...res.items]);
         this.nextToken.set(res.nextContinuationToken ?? null);
         this.hasMore.set(!!res.nextContinuationToken);
         this.loadingMore.set(false);
@@ -455,25 +485,31 @@ export class VaultComponent implements OnInit, OnDestroy {
 
   onCardWear(item: ClothingItem): void {
     const optimistic = { ...item, wearCount: (item.wearCount ?? 0) + 1 };
-    this.allItems.update(list => list.map(i => i.id === item.id ? optimistic : i));
+    this.allItems.update((list) => list.map((i) => (i.id === item.id ? optimistic : i)));
     if (this.selectedItem()?.id === item.id) this.selectedItem.set(optimistic);
 
     const rand = this.nextClientEventId('wear');
-    this.wardrobeService.logWear(item.id, {
-      source: 'vault_card',
-      clientEventId: `wear-${rand}`,
-    }).subscribe({
-      next: updated => this.onWearLogged(updated),
-      error: () => this.allItems.update(list => list.map(i => i.id === item.id ? item : i)),
-    });
+    this.wardrobeService
+      .logWear(item.id, {
+        source: 'vault_card',
+        clientEventId: `wear-${rand}`,
+      })
+      .subscribe({
+        next: (updated) => this.onWearLogged(updated),
+        error: () => this.allItems.update((list) => list.map((i) => (i.id === item.id ? item : i))),
+      });
   }
 
-  openEditModal(item: ClothingItem): void { this.editingItem.set(item); }
-  openShareModal(item: ClothingItem): void { this.sharingItem.set(item); }
+  openEditModal(item: ClothingItem): void {
+    this.editingItem.set(item);
+  }
+  openShareModal(item: ClothingItem): void {
+    this.sharingItem.set(item);
+  }
 
   onItemUpdated(updated: ClothingItem): void {
     this.wardrobeService.update(updated).subscribe(() => {
-      this.allItems.update(list => list.map(i => i.id === updated.id ? updated : i));
+      this.allItems.update((list) => list.map((i) => (i.id === updated.id ? updated : i)));
       this.selectedItem.set(updated);
       this.editingItem.set(null);
     });
@@ -481,14 +517,14 @@ export class VaultComponent implements OnInit, OnDestroy {
 
   onWearLogged(updated: ClothingItem): void {
     const merged = this.mergeItemImageFromCache(updated);
-    this.allItems.update(list => list.map(i => i.id === merged.id ? merged : i));
+    this.allItems.update((list) => list.map((i) => (i.id === merged.id ? merged : i)));
     this.selectedItem.set(merged);
     this.loadInsights();
     this.loadWearSuggestions();
   }
 
   private mergeItemImageFromCache(updated: ClothingItem): ClothingItem {
-    const cached = this.allItems().find(i => i.id === updated.id);
+    const cached = this.allItems().find((i) => i.id === updated.id);
     if (!cached) return updated;
     return {
       ...updated,
@@ -498,24 +534,33 @@ export class VaultComponent implements OnInit, OnDestroy {
 
   acceptSuggestion(s: WearSuggestionItem): void {
     const rand = this.nextClientEventId('wear');
-    this.wardrobeService.logWear(s.itemId, {
-      source: 'suggestion_prompt',
-      clientEventId: `wear-${rand}`,
-      stylingActivityId: s.suggestionId,
-    }).subscribe({
-      next: updated => {
-        this.onWearLogged(updated);
-        this.wearSuggestions.update(list => list.filter(x => x.suggestionId !== s.suggestionId));
-      },
-      error: () => { },
-    });
+    this.wardrobeService
+      .logWear(s.itemId, {
+        source: 'suggestion_prompt',
+        clientEventId: `wear-${rand}`,
+        stylingActivityId: s.suggestionId,
+      })
+      .subscribe({
+        next: (updated) => {
+          this.onWearLogged(updated);
+          this.wearSuggestions.update((list) =>
+            list.filter((x) => x.suggestionId !== s.suggestionId),
+          );
+        },
+        error: () => {},
+      });
   }
 
   dismissSuggestion(s: WearSuggestionItem): void {
-    this.wardrobeService.updateWearSuggestionStatus(s.suggestionId, { status: 'Dismissed' }).subscribe({
-      next: () => this.wearSuggestions.update(list => list.filter(x => x.suggestionId !== s.suggestionId)),
-      error: () => { },
-    });
+    this.wardrobeService
+      .updateWearSuggestionStatus(s.suggestionId, { status: 'Dismissed' })
+      .subscribe({
+        next: () =>
+          this.wearSuggestions.update((list) =>
+            list.filter((x) => x.suggestionId !== s.suggestionId),
+          ),
+        error: () => {},
+      });
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -550,7 +595,7 @@ export class VaultComponent implements OnInit, OnDestroy {
 
   private loadWearSuggestions(): void {
     this.wardrobeService.getWearSuggestions().subscribe({
-      next: res => this.wearSuggestions.set(res.suggestions ?? []),
+      next: (res) => this.wearSuggestions.set(res.suggestions ?? []),
       error: () => this.wearSuggestions.set([]),
     });
   }
@@ -558,7 +603,7 @@ export class VaultComponent implements OnInit, OnDestroy {
   private loadInsights(): void {
     this.loadingInsights.set(true);
     this.vaultInsightsService.getInsights(90, 100).subscribe({
-      next: res => {
+      next: (res) => {
         this.insights.set(res);
         this.loadingInsights.set(false);
       },
@@ -574,7 +619,7 @@ export class VaultComponent implements OnInit, OnDestroy {
     this.nextToken.set(null);
     this.hasMore.set(false);
     this.wardrobeService.getAll(this.buildQuery(filters)).subscribe({
-      next: res => {
+      next: (res) => {
         this.allItems.set(res.items);
         this.nextToken.set(res.nextContinuationToken ?? null);
         this.hasMore.set(!!res.nextContinuationToken);

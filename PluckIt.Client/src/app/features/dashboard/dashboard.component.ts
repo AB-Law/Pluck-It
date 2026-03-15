@@ -1,4 +1,15 @@
-import { Component, DestroyRef, ElementRef, HostListener, OnDestroy, OnInit, effect, signal, ViewChild, inject } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  ElementRef,
+  HostListener,
+  OnDestroy,
+  OnInit,
+  effect,
+  signal,
+  ViewChild,
+  inject,
+} from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 import { UserProfileService } from '../../core/services/user-profile.service';
@@ -17,10 +28,17 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [WardrobeComponent, StylistPanelComponent, ProfilePanelComponent, DigestPanelComponent, AppHeaderComponent],
+  imports: [
+    WardrobeComponent,
+    StylistPanelComponent,
+    ProfilePanelComponent,
+    DigestPanelComponent,
+    AppHeaderComponent,
+  ],
   template: `
-    <div class="flex flex-col h-[100dvh] bg-background-dark text-chrome overflow-hidden pb-16 md:pb-0 font-display">
-
+    <div
+      class="flex flex-col h-[100dvh] bg-background-dark text-chrome overflow-hidden pb-16 md:pb-0 font-display"
+    >
       <app-shared-header
         section="dashboard"
         [showSearch]="true"
@@ -37,14 +55,15 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
         (stylistRequested)="openStylist()"
       />
       @if (uploadOfflineNotice()) {
-        <div class="mx-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
+        <div
+          class="mx-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300"
+        >
           {{ uploadOfflineNotice() }}
         </div>
       }
 
       <!-- ─── Body ─────────────────────────────────────────────────── -->
       <div class="flex flex-1 min-h-0">
-
         <!-- Wardrobe main area -->
         <main
           #mainScrollArea
@@ -82,7 +101,9 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
           (drop)="onDrop($event)"
         >
           @if (dragOver()) {
-            <div class="absolute inset-0 z-10 flex items-center justify-center bg-primary/10 pointer-events-none">
+            <div
+              class="absolute inset-0 z-10 flex items-center justify-center bg-primary/10 pointer-events-none"
+            >
               <div class="flex flex-col items-center gap-2 text-primary">
                 <span class="material-symbols-outlined" style="font-size:40px">style</span>
                 <span class="text-xs font-mono font-bold tracking-wider">DROP TO STYLE</span>
@@ -111,6 +132,12 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
   `,
 })
 export class DashboardComponent implements OnInit, OnDestroy {
+  protected readonly auth = inject(AuthService);
+  private readonly profileService = inject(UserProfileService);
+  private readonly wardrobeService = inject(WardrobeService);
+  private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
+
   @ViewChild('mainScrollArea')
   private readonly mainScrollArea?: ElementRef<HTMLElement>;
   @ViewChild('wardrobeRef') wardrobeRef!: WardrobeComponent;
@@ -128,13 +155,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   private readonly networkService = inject(NetworkService);
   private readonly offlineQueue = inject(OfflineQueueService);
 
-  constructor(
-    protected readonly auth: AuthService,
-    private readonly profileService: UserProfileService,
-    private readonly wardrobeService: WardrobeService,
-    private readonly router: Router,
-    private readonly route: ActivatedRoute,
-  ) {
+  constructor() {
     effect(() => {
       if (this.mobileNavState.activePanel() === 'none') {
         this.restoreMainFocusTarget();
@@ -158,7 +179,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
     this.route.queryParamMap
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(params => this.applyMobilePanelCommand(params.get('mobilePanel')));
+      .subscribe((params) => this.applyMobilePanelCommand(params.get('mobilePanel')));
   }
 
   @HostListener('window:resize')
@@ -178,7 +199,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
   onUploadRequested(): void {
     if (!this.networkService.isCurrentlyOnline()) {
       this.offlineQueue.enqueue('dashboard/upload', {});
-      this.uploadOfflineNotice.set(showOfflineBlockMessage('Wardrobe upload', 'This action was queued and will run when you reconnect.'));
+      this.uploadOfflineNotice.set(
+        showOfflineBlockMessage(
+          'Wardrobe upload',
+          'This action was queued and will run when you reconnect.',
+        ),
+      );
       return;
     }
     this.uploadOfflineNotice.set(null);
@@ -250,8 +276,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   toggleItemSelection(id: string): void {
     const currentlySelected = this.selectedIds().includes(id);
-    this.selectedIds.update(ids =>
-      currentlySelected ? ids.filter(i => i !== id) : [...ids, id]
+    this.selectedIds.update((ids) =>
+      currentlySelected ? ids.filter((i) => i !== id) : [...ids, id],
     );
     if (!currentlySelected) {
       this.recordStylingActivity(id, 'dashboard_toggle');
@@ -270,11 +296,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
   onDrop(event: DragEvent): void {
     event.preventDefault();
     this.dragOver.set(false);
-    const id = event.dataTransfer?.getData('text/plain')
-      ?? event.dataTransfer?.getData('application/pluckit-item');
+    const id =
+      event.dataTransfer?.getData('text/plain') ??
+      event.dataTransfer?.getData('application/pluckit-item');
     if (id) {
       const exists = this.selectedIds().includes(id);
-      this.selectedIds.update(ids => ids.includes(id) ? ids : [...ids, id]);
+      this.selectedIds.update((ids) => (ids.includes(id) ? ids : [...ids, id]));
       if (!exists) {
         this.recordStylingActivity(id, 'dashboard_drag_drop');
       }
@@ -282,15 +309,42 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   private recordStylingActivity(itemId: string, source: string): void {
-    const rand = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Array.from(crypto.getRandomValues(new Uint32Array(1)))[0].toString(16)}`;
-    this.wardrobeService.recordStylingActivity({
-      itemId,
-      source,
-      activityType: 'AddedToStyleBoard',
-      clientEventId: `sty-${rand}`,
-      occurredAt: new Date().toISOString(),
-    }).subscribe({ error: () => { } });
+    const windowCrypto = globalThis.crypto;
+    const windowMsCrypto = (globalThis as { msCrypto?: { getRandomValues: Crypto['getRandomValues'] } })
+      .msCrypto;
+    let rand: string | undefined;
+    let randomSuffix: string | undefined;
+    if (typeof windowCrypto?.randomUUID === 'function' && windowCrypto) {
+      rand = windowCrypto.randomUUID();
+    } else {
+      if (typeof windowCrypto?.getRandomValues === 'function' && windowCrypto) {
+        try {
+          const values = new Uint32Array(1);
+          windowCrypto.getRandomValues.call(windowCrypto, values);
+          randomSuffix = values[0].toString(16);
+        } catch {
+          randomSuffix = undefined;
+        }
+      }
+      if (randomSuffix === undefined && windowMsCrypto?.getRandomValues) {
+        try {
+          const values = new Uint32Array(1);
+          windowMsCrypto.getRandomValues.call(windowMsCrypto, values);
+          randomSuffix = values[0].toString(16);
+        } catch {
+          randomSuffix = undefined;
+        }
+      }
+      rand = `${Date.now()}-${randomSuffix ?? Math.floor(Math.random() * 0xffffffff).toString(16)}`;
+    }
+    this.wardrobeService
+      .recordStylingActivity({
+        itemId,
+        source,
+        activityType: 'AddedToStyleBoard',
+        clientEventId: `sty-${rand}`,
+        occurredAt: new Date().toISOString(),
+      })
+      .subscribe({ error: () => {} });
   }
 }

@@ -1,7 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
 import { BehaviorSubject, of } from 'rxjs';
-import { signal } from '@angular/core';
+import { signal, WritableSignal } from '@angular/core';
 import { DashboardComponent } from './dashboard.component';
 import { WardrobeService } from '../../core/services/wardrobe.service';
 import { UserProfileService } from '../../core/services/user-profile.service';
@@ -11,7 +11,13 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
 describe('DashboardComponent', () => {
   let component: DashboardComponent;
   let fixture: ComponentFixture<DashboardComponent>;
-  let wardrobeService: { [key: string]: ReturnType<typeof vi.fn> };
+  let wardrobeService: {
+    getAll: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+    delete: ReturnType<typeof vi.fn>;
+    getDrafts: ReturnType<typeof vi.fn>;
+    recordStylingActivity: ReturnType<typeof vi.fn>;
+  };
   let authService: { logout: ReturnType<typeof vi.fn>; user: ReturnType<typeof vi.fn> };
   let mobileNavState: MobileNavState;
   let queryParamMap$: BehaviorSubject<ReturnType<typeof convertToParamMap>>;
@@ -25,6 +31,18 @@ describe('DashboardComponent', () => {
     serializeUrl: ReturnType<typeof vi.fn>;
     isActive: ReturnType<typeof vi.fn>;
   };
+  type DashboardComponentInternals = {
+    dragOver: WritableSignal<boolean>;
+    onWindowResize: () => void;
+    openSettings: () => void;
+    closeSettingsPanel: () => void;
+    openDigest: () => void;
+    settingsOpen: WritableSignal<boolean>;
+    digestOpen: WritableSignal<boolean>;
+    stylistOpen: WritableSignal<boolean>;
+    uploadOfflineNotice: WritableSignal<string | null>;
+  };
+  const asInternal = (): DashboardComponentInternals => component as unknown as DashboardComponentInternals;
 
   beforeEach(async () => {
     const initialQueryParams = convertToParamMap({});
@@ -92,7 +110,7 @@ describe('DashboardComponent', () => {
     const dragOver = { preventDefault: vi.fn() } as unknown as DragEvent;
     component.onDragOver(dragOver);
     expect(dragOver.preventDefault).toHaveBeenCalled();
-    expect((component as any).dragOver()).toBe(true);
+    expect(asInternal().dragOver()).toBe(true);
 
     component.onDrop({
       preventDefault: vi.fn(),
@@ -101,12 +119,12 @@ describe('DashboardComponent', () => {
       },
     } as unknown as DragEvent);
     expect(wardrobeService['recordStylingActivity']).toHaveBeenCalledTimes(1);
-    expect((component as any).dragOver()).toBe(false);
+    expect(asInternal().dragOver()).toBe(false);
   });
 
   it('does not duplicate selection on drop when item is already selected', () => {
     component.toggleItemSelection('item-1');
-    (wardrobeService['recordStylingActivity'] as any).mockClear();
+    wardrobeService.recordStylingActivity.mockClear();
     component.onDrop({
       preventDefault: vi.fn(),
       dataTransfer: {
@@ -119,9 +137,9 @@ describe('DashboardComponent', () => {
 
   it('does not add already selected item on drop and handles drag leave', () => {
     component.toggleItemSelection('item-1');
-    (wardrobeService['recordStylingActivity'] as any).mockClear();
+    wardrobeService.recordStylingActivity.mockClear();
     component.onDragLeave();
-    expect((component as any).dragOver()).toBe(false);
+    expect(asInternal().dragOver()).toBe(false);
 
     component.onDrop({
       preventDefault: vi.fn(),
@@ -140,33 +158,33 @@ describe('DashboardComponent', () => {
 
   it('routes settings open to shell profile panel on mobile and local panel on desktop', () => {
     Object.defineProperty(globalThis.window, 'innerWidth', { value: 390, configurable: true });
-    (component as any).onWindowResize();
+    asInternal().onWindowResize();
     mobileNavState.closePanel();
-    (component as any).openSettings();
+    asInternal().openSettings();
     expect(mobileNavState.activePanel()).toBe('profile');
-    expect((component as any).settingsOpen()).toBe(false);
+    expect(asInternal().settingsOpen()).toBe(false);
 
     mobileNavState.closePanel();
     Object.defineProperty(globalThis.window, 'innerWidth', { value: 1400, configurable: true });
-    (component as any).onWindowResize();
-    (component as any).openSettings();
-    expect((component as any).settingsOpen()).toBe(true);
+    asInternal().onWindowResize();
+    asInternal().openSettings();
+    expect(asInternal().settingsOpen()).toBe(true);
     expect(mobileNavState.activePanel()).toBe('none');
   });
 
   it('routes digest open to shell digest panel on mobile and local overlay on desktop', () => {
     Object.defineProperty(globalThis.window, 'innerWidth', { value: 390, configurable: true });
-    (component as any).onWindowResize();
+    asInternal().onWindowResize();
     mobileNavState.closePanel();
-    (component as any).openDigest();
+    asInternal().openDigest();
     expect(mobileNavState.activePanel()).toBe('digest');
-    expect((component as any).digestOpen()).toBe(false);
+    expect(asInternal().digestOpen()).toBe(false);
 
     mobileNavState.closePanel();
     Object.defineProperty(globalThis.window, 'innerWidth', { value: 1200, configurable: true });
-    (component as any).onWindowResize();
-    (component as any).openDigest();
-    expect((component as any).digestOpen()).toBe(true);
+    asInternal().onWindowResize();
+    asInternal().openDigest();
+    expect(asInternal().digestOpen()).toBe(true);
     expect(mobileNavState.activePanel()).toBe('none');
   });
 
@@ -174,7 +192,7 @@ describe('DashboardComponent', () => {
     queryParamMap$.next(convertToParamMap({ mobilePanel: 'stylist' }));
     fixture.detectChanges();
 
-    expect((component as any).stylistOpen()).toBe(true);
+    expect(asInternal().stylistOpen()).toBe(true);
     expect(router.navigate).toHaveBeenCalledWith(
       [],
       expect.objectContaining({
@@ -187,11 +205,11 @@ describe('DashboardComponent', () => {
   });
 
   it('closes stylist when mobilePanel=wardrobe query param is present', () => {
-    (component as any).stylistOpen.set(true);
+    asInternal().stylistOpen.set(true);
     queryParamMap$.next(convertToParamMap({ mobilePanel: 'wardrobe' }));
     fixture.detectChanges();
 
-    expect((component as any).stylistOpen()).toBe(false);
+    expect(asInternal().stylistOpen()).toBe(false);
     expect(router.navigate).toHaveBeenCalledWith(
       [],
       expect.objectContaining({
@@ -205,7 +223,7 @@ describe('DashboardComponent', () => {
 
   it('closes any stale shell panel and restores main focus target when settings close', async () => {
     Object.defineProperty(globalThis.window, 'innerWidth', { value: 390, configurable: true });
-    (component as any).onWindowResize();
+    asInternal().onWindowResize();
     mobileNavState.openDigest();
     fixture.detectChanges();
 
@@ -213,8 +231,8 @@ describe('DashboardComponent', () => {
     expect(focusTarget).not.toBeNull();
     const focusSpy = vi.spyOn(focusTarget!, 'focus');
 
-    (component as any).settingsOpen.set(true);
-    (component as any).closeSettingsPanel();
+    asInternal().settingsOpen.set(true);
+    asInternal().closeSettingsPanel();
 
     expect(mobileNavState.activePanel()).toBe('none');
     await Promise.resolve();
@@ -222,11 +240,11 @@ describe('DashboardComponent', () => {
   });
   it('resets stale mobile panel state before opening settings', () => {
     Object.defineProperty(globalThis.window, 'innerWidth', { value: 390, configurable: true });
-    (component as any).onWindowResize();
+    asInternal().onWindowResize();
     mobileNavState.openDigest();
     const closeSpy = vi.spyOn(mobileNavState, 'closePanel');
 
-    (component as any).openSettings();
+    asInternal().openSettings();
 
     expect(closeSpy).toHaveBeenCalled();
     expect(mobileNavState.activePanel()).toBe('profile');
@@ -239,6 +257,6 @@ describe('DashboardComponent', () => {
     component.onUploadRequested();
 
     expect(enqueueSpy).toHaveBeenCalledWith('dashboard/upload', {});
-    expect((component as any).uploadOfflineNotice()).toContain('queued');
+    expect(asInternal().uploadOfflineNotice()).toContain('queued');
   });
 });

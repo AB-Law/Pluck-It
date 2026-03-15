@@ -164,7 +164,7 @@ export class ChatService {
     traceId: string,
   ): { done: boolean; nextBuffer: string } {
     const parts = inputBuffer.split('\n\n');
-    let nextBuffer = parts.pop() ?? '';
+    const nextBuffer = parts.pop() ?? '';
     for (const part of parts) {
       const event = this.parseSseLine(part);
       if (!event) continue;

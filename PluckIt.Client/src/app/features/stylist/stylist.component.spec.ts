@@ -1,6 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { StylistPanelComponent } from './stylist.component';
 import { ChatService } from '../../core/services/chat.service';
+import { WritableSignal } from '@angular/core';
 import { of, throwError } from 'rxjs';
 
 
@@ -14,6 +15,32 @@ describe('StylistPanelComponent', () => {
   let component: StylistPanelComponent;
   let fixture: ComponentFixture<StylistPanelComponent>;
   let chatService: MockChatService;
+  type StylistComponentInternals = {
+    inputText: string;
+    sendMessage: () => void;
+    networkService: { isCurrentlyOnline: () => boolean };
+    offlineQueue: { enqueue: (key: string, payload: Record<string, unknown>) => void };
+    debugEnabled: WritableSignal<boolean>;
+    debugModel: WritableSignal<string | null>;
+    debugTokenCount: WritableSignal<number | null>;
+    debugToolLatencyMs: WritableSignal<number | null>;
+    handleEvent: (
+      event: {
+        type: string;
+        content?: string;
+        traceId?: string;
+        runId?: string;
+        model?: string;
+        tokenCount?: number;
+        name?: string;
+        summary?: string;
+        toolLatencyMs?: number;
+      },
+      userText: string,
+    ) => void;
+    chatHistory: { role: string; content: string }[];
+  };
+  const asInternal = (): StylistComponentInternals => component as unknown as StylistComponentInternals;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
@@ -24,7 +51,7 @@ describe('StylistPanelComponent', () => {
     }).compileComponents();
     fixture = TestBed.createComponent(StylistPanelComponent);
     component = fixture.componentInstance;
-    chatService = TestBed.inject(ChatService) as any;
+    chatService = TestBed.inject(ChatService) as unknown as MockChatService;
     fixture.detectChanges();
   });
 
@@ -66,8 +93,8 @@ describe('StylistPanelComponent', () => {
   });
 
   it('queues offline style requests and shows warning message', () => {
-    vi.spyOn(component['networkService'], 'isCurrentlyOnline').mockReturnValue(false);
-    const enqueueSpy = vi.spyOn(component['offlineQueue'], 'enqueue');
+    vi.spyOn(asInternal().networkService, 'isCurrentlyOnline').mockReturnValue(false);
+    const enqueueSpy = vi.spyOn(asInternal().offlineQueue, 'enqueue');
     component.inputText = 'Offline outfit request';
     component.sendMessage();
 
@@ -100,7 +127,7 @@ describe('StylistPanelComponent', () => {
   });
 
   it('does not enable debug mode without query flag', () => {
-    expect(component['debugEnabled']()).toBe(false);
+    expect(asInternal().debugEnabled()).toBe(false);
   });
 
   it('should show saving state and clear it after memory save', () => {
@@ -122,7 +149,7 @@ describe('StylistPanelComponent', () => {
     const previousUrl = globalThis.location.href;
     globalThis.history.pushState({}, '', '/?debug=1');
     const debugFixture = TestBed.createComponent(StylistPanelComponent);
-    const debugComponent = debugFixture.componentInstance as unknown as StylistPanelComponent;
+    const debugComponent = debugFixture.componentInstance as unknown as StylistComponentInternals;
     debugFixture.detectChanges();
 
     chatService.streamMessage.mockReturnValueOnce(
@@ -136,13 +163,13 @@ describe('StylistPanelComponent', () => {
     debugComponent.inputText = 'Need an outfit';
     debugComponent.sendMessage();
     debugFixture.detectChanges();
-    expect((debugComponent as any).debugEnabled()).toBe(true);
+    expect(debugComponent.debugEnabled()).toBe(true);
 
     expect(debugFixture.nativeElement.textContent).toContain('traceId: trace-1');
     expect(debugFixture.nativeElement.textContent).toContain('runId: run-1');
-    expect((debugComponent as any).debugModel()).toBe('gpt-4');
-    expect((debugComponent as any).debugToolLatencyMs()).toBe(42);
-    expect((debugComponent as any).debugTokenCount()).toBe(7);
+    expect(debugComponent.debugModel()).toBe('gpt-4');
+    expect(debugComponent.debugToolLatencyMs()).toBe(42);
+    expect(debugComponent.debugTokenCount()).toBe(7);
     globalThis.history.replaceState({}, '', previousUrl);
   });
 
@@ -198,11 +225,11 @@ describe('StylistPanelComponent', () => {
 
   it('shows tool labels and clears thinking via tool lifecycle events', () => {
     component.thinking.set(true);
-    (component as any).handleEvent({ type: 'tool_use', name: 'search_wardrobe' }, '');
+    asInternal().handleEvent({ type: 'tool_use', name: 'search_wardrobe' }, '');
     expect(component.currentTool()).toBe('search_wardrobe');
     expect(component.toolLabel()).toContain('Searching wardrobe');
 
-    (component as any).handleEvent(
+    asInternal().handleEvent(
       { type: 'tool_result', name: 'search_wardrobe', summary: '2 matches' },
       '',
     );
@@ -211,25 +238,25 @@ describe('StylistPanelComponent', () => {
 
   it('shows discovery label for search_scraped_items', () => {
     component.thinking.set(true);
-    (component as any).handleEvent({ type: 'tool_use', name: 'search_scraped_items' }, '');
+    asInternal().handleEvent({ type: 'tool_use', name: 'search_scraped_items' }, '');
     expect(component.currentTool()).toBe('search_scraped_items');
     expect(component.toolLabel()).toContain('Discovering items');
   });
 
   it('finalises stream on done and captures chat history', () => {
-    (component as any).handleEvent({ type: 'token', content: 'hello' }, 'How do I dress?');
-    (component as any).handleEvent({ type: 'done' }, 'How do I dress?');
+    asInternal().handleEvent({ type: 'token', content: 'hello' }, 'How do I dress?');
+    asInternal().handleEvent({ type: 'done' }, 'How do I dress?');
 
     expect(component.thinking()).toBe(false);
     expect(component.messages().some(m => m.text.includes('hello'))).toBe(true);
-    expect((component as any).chatHistory).toEqual([
+    expect(asInternal().chatHistory).toEqual([
       { role: 'user', content: 'How do I dress?' },
       { role: 'assistant', content: 'hello' },
     ]);
   });
 
   it('adds assistant error bubble when stream fails without streaming bubble', () => {
-    (component as any).handleEvent({ type: 'error', content: 'service down' }, 'weather');
+    asInternal().handleEvent({ type: 'error', content: 'service down' }, 'weather');
     expect(component.thinking()).toBe(false);
     expect(component.messages().some(m => m.text === 'service down')).toBe(true);
   });

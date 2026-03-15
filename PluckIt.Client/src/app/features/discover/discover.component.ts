@@ -1,7 +1,22 @@
-import { Component, ElementRef, HostListener, OnDestroy, OnInit, ViewChild, computed, effect, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {
+  Component,
+  ElementRef,
+  HostListener,
+  OnDestroy,
+  OnInit,
+  ViewChild,
+  computed,
+  effect,
+  inject,
+  signal,
+} from '@angular/core';
+
 import { DiscoverService } from '../../core/services/discover.service';
-import { ScrapedItem, ScraperSource, DiscoverFeedQuery } from '../../core/models/scraped-item.model';
+import {
+  ScrapedItem,
+  ScraperSource,
+  DiscoverFeedQuery,
+} from '../../core/models/scraped-item.model';
 import { DiscoverCardComponent } from './discover-card.component';
 import { SourceSidebarComponent } from './source-sidebar.component';
 import { AppHeaderComponent } from '../../shared/app-header.component';
@@ -12,10 +27,16 @@ import { NetworkService } from '../../core/services/network.service';
 @Component({
   selector: 'app-discover',
   standalone: true,
-  imports: [CommonModule, AppHeaderComponent, ProfilePanelComponent, DiscoverCardComponent, SourceSidebarComponent],
+  imports: [
+    AppHeaderComponent,
+    ProfilePanelComponent,
+    DiscoverCardComponent,
+    SourceSidebarComponent,
+  ],
   template: `
-    <div class="relative flex h-[100dvh] flex-col overflow-hidden bg-black text-slate-100 pb-16 md:pb-0">
-
+    <div
+      class="relative flex h-[100dvh] flex-col overflow-hidden bg-black text-slate-100 pb-16 md:pb-0"
+    >
       <!-- Top bar -->
       <app-shared-header
         section="discover"
@@ -27,7 +48,9 @@ import { NetworkService } from '../../core/services/network.service';
         (settingsRequested)="openSettings()"
       />
 
-      <header class="flex flex-wrap items-center gap-3 border-b border-border-chrome px-4 sm:px-6 py-3 flex-shrink-0">
+      <header
+        class="flex flex-wrap items-center gap-3 border-b border-border-chrome px-4 sm:px-6 py-3 flex-shrink-0"
+      >
         <div class="flex items-center gap-2">
           <span class="material-symbols-outlined text-primary">explore</span>
           <h1 class="text-sm font-bold tracking-wide">Discover</h1>
@@ -49,18 +72,22 @@ import { NetworkService } from '../../core/services/network.service';
           <span class="text-xs text-slate-500">Sort:</span>
           <button
             class="touch-target rounded-lg border px-3 py-1.5 text-xs transition-colors"
-            [class]="sortBy() === 'score'
-              ? 'border-primary/40 bg-primary/10 text-primary'
-              : 'border-border-chrome text-slate-400 hover:text-slate-100'"
+            [class]="
+              sortBy() === 'score'
+                ? 'border-primary/40 bg-primary/10 text-primary'
+                : 'border-border-chrome text-slate-400 hover:text-slate-100'
+            "
             (click)="setSortBy('score')"
           >
             Top
           </button>
           <button
             class="touch-target rounded-lg border px-3 py-1.5 text-xs transition-colors"
-            [class]="sortBy() === 'recent'
-              ? 'border-primary/40 bg-primary/10 text-primary'
-              : 'border-border-chrome text-slate-400 hover:text-slate-100'"
+            [class]="
+              sortBy() === 'recent'
+                ? 'border-primary/40 bg-primary/10 text-primary'
+                : 'border-border-chrome text-slate-400 hover:text-slate-100'
+            "
             (click)="setSortBy('recent')"
           >
             Recent
@@ -87,21 +114,21 @@ import { NetworkService } from '../../core/services/network.service';
           @for (opt of timeRangeOptions; track opt.value) {
             <button
               class="touch-target rounded-lg border px-2.5 py-1.5 text-[11px] transition-colors"
-              [class]="timeRange() === opt.value
-                ? 'border-primary/40 bg-primary/10 text-primary'
-                : 'border-border-chrome text-slate-400 hover:text-slate-100'"
+              [class]="
+                timeRange() === opt.value
+                  ? 'border-primary/40 bg-primary/10 text-primary'
+                  : 'border-border-chrome text-slate-400 hover:text-slate-100'
+              "
               (click)="setTimeRange(opt.value)"
             >
               {{ opt.label }}
             </button>
           }
         </div>
-
       </header>
 
       <!-- Body: sidebar + grid -->
       <div class="flex flex-1 min-h-0 overflow-hidden">
-
         <!-- Source sidebar -->
         <app-source-sidebar
           class="hidden md:flex"
@@ -119,24 +146,26 @@ import { NetworkService } from '../../core/services/network.service';
           tabindex="-1"
           aria-label="Discover feed"
         >
-
           @if (loading()) {
             <!-- Skeleton loader -->
             <div class="columns-2 md:columns-3 lg:columns-4 xl:columns-5 gap-4 space-y-4">
               @for (n of skeletons; track n) {
-                <div class="break-inside-avoid mb-4 rounded-xl bg-zinc-900 animate-pulse"
-                  [style.height.px]="200 + (n % 3) * 60">
-                </div>
+                <div
+                  class="break-inside-avoid mb-4 rounded-xl bg-zinc-900 animate-pulse"
+                  [style.height.px]="200 + (n % 3) * 60"
+                ></div>
               }
             </div>
-
           } @else if (filteredItems().length === 0) {
             <!-- Empty state -->
             <div class="flex flex-col items-center justify-center h-full gap-4 text-center">
-              <span class="material-symbols-outlined text-5xl text-slate-700">image_not_supported</span>
-              <p class="text-slate-500 text-sm">No items found. Try a different source or run the scraper.</p>
+              <span class="material-symbols-outlined text-5xl text-slate-700"
+                >image_not_supported</span
+              >
+              <p class="text-slate-500 text-sm">
+                No items found. Try a different source or run the scraper.
+              </p>
             </div>
-
           } @else {
             <!-- Masonry grid via CSS columns -->
             <div class="columns-2 md:columns-3 lg:columns-4 xl:columns-5 gap-4">
@@ -161,7 +190,9 @@ import { NetworkService } from '../../core/services/network.service';
                   (click)="loadMore()"
                 >
                   @if (loadingMore()) {
-                    <span class="material-symbols-outlined animate-spin text-base">progress_activity</span>
+                    <span class="material-symbols-outlined animate-spin text-base"
+                      >progress_activity</span
+                    >
                   }
                   Load more
                 </button>
@@ -221,7 +252,9 @@ import { NetworkService } from '../../core/services/network.service';
                   }
                 </div>
                 <!-- Counter -->
-                <span class="absolute top-2 left-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] text-slate-300">
+                <span
+                  class="absolute top-2 left-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] text-slate-300"
+                >
                   {{ galleryIndex() + 1 }} / {{ selectedItem()!.galleryImages!.length }}
                 </span>
 
@@ -229,16 +262,28 @@ import { NetworkService } from '../../core/services/network.service';
                 <div class="absolute bottom-2 right-2 flex items-center gap-1.5">
                   <button
                     class="flex items-center justify-center h-7 w-7 rounded-full transition-all active:scale-90"
-                    [class]="modalVoted() === 'down' ? 'bg-rose-600 text-white' : 'bg-black/60 text-slate-300 hover:bg-rose-900/70 hover:text-rose-300'"
+                    [class]="
+                      modalVoted() === 'down'
+                        ? 'bg-rose-600 text-white'
+                        : 'bg-black/60 text-slate-300 hover:bg-rose-900/70 hover:text-rose-300'
+                    "
                     title="Not for me"
                     (click)="onModalFeedback('down')"
-                  ><span class="material-symbols-outlined text-sm">thumb_down</span></button>
+                  >
+                    <span class="material-symbols-outlined text-sm">thumb_down</span>
+                  </button>
                   <button
                     class="flex items-center justify-center h-7 w-7 rounded-full transition-all active:scale-90"
-                    [class]="modalVoted() === 'up' ? 'bg-emerald-600 text-white' : 'bg-black/60 text-slate-300 hover:bg-emerald-900/70 hover:text-emerald-300'"
+                    [class]="
+                      modalVoted() === 'up'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-black/60 text-slate-300 hover:bg-emerald-900/70 hover:text-emerald-300'
+                    "
                     title="Love it"
                     (click)="onModalFeedback('up')"
-                  ><span class="material-symbols-outlined text-sm">thumb_up</span></button>
+                  >
+                    <span class="material-symbols-outlined text-sm">thumb_up</span>
+                  </button>
                 </div>
               </div>
             } @else {
@@ -252,16 +297,28 @@ import { NetworkService } from '../../core/services/network.service';
                 <div class="absolute bottom-2 right-2 flex items-center gap-1.5">
                   <button
                     class="flex items-center justify-center h-7 w-7 rounded-full transition-all active:scale-90"
-                    [class]="modalVoted() === 'down' ? 'bg-rose-600 text-white' : 'bg-black/60 text-slate-300 hover:bg-rose-900/70 hover:text-rose-300'"
+                    [class]="
+                      modalVoted() === 'down'
+                        ? 'bg-rose-600 text-white'
+                        : 'bg-black/60 text-slate-300 hover:bg-rose-900/70 hover:text-rose-300'
+                    "
                     title="Not for me"
                     (click)="onModalFeedback('down')"
-                  ><span class="material-symbols-outlined text-sm">thumb_down</span></button>
+                  >
+                    <span class="material-symbols-outlined text-sm">thumb_down</span>
+                  </button>
                   <button
                     class="flex items-center justify-center h-7 w-7 rounded-full transition-all active:scale-90"
-                    [class]="modalVoted() === 'up' ? 'bg-emerald-600 text-white' : 'bg-black/60 text-slate-300 hover:bg-emerald-900/70 hover:text-emerald-300'"
+                    [class]="
+                      modalVoted() === 'up'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-black/60 text-slate-300 hover:bg-emerald-900/70 hover:text-emerald-300'
+                    "
                     title="Love it"
                     (click)="onModalFeedback('up')"
-                  ><span class="material-symbols-outlined text-sm">thumb_up</span></button>
+                  >
+                    <span class="material-symbols-outlined text-sm">thumb_up</span>
+                  </button>
                 </div>
               </div>
             }
@@ -276,13 +333,17 @@ import { NetworkService } from '../../core/services/network.service';
 
               <div class="flex flex-wrap gap-1">
                 @for (tag of selectedItem()!.tags; track tag) {
-                  <span class="rounded bg-zinc-800 px-2 py-0.5 text-[10px] text-slate-400">{{ tag }}</span>
+                  <span class="rounded bg-zinc-800 px-2 py-0.5 text-[10px] text-slate-400">{{
+                    tag
+                  }}</span>
                 }
               </div>
 
               @if (selectedItem()!.buyLinks.length > 0) {
                 <div class="space-y-1.5">
-                  <p class="text-[10px] font-bold uppercase tracking-widest text-slate-500">Buy Links</p>
+                  <p class="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                    Buy Links
+                  </p>
                   @for (link of selectedItem()!.buyLinks; track link.url) {
                     <a
                       [href]="link.url"
@@ -307,10 +368,14 @@ import { NetworkService } from '../../core/services/network.service';
               <!-- Comment excerpt (buy-link source context) -->
               @if (selectedItem()!.commentText) {
                 <details class="text-[10px] text-slate-500 cursor-pointer">
-                  <summary class="font-bold uppercase tracking-widest hover:text-slate-300 transition-colors">
+                  <summary
+                    class="font-bold uppercase tracking-widest hover:text-slate-300 transition-colors"
+                  >
                     Top Comments
                   </summary>
-                  <p class="mt-2 whitespace-pre-wrap leading-relaxed">{{ selectedItem()!.commentText }}</p>
+                  <p class="mt-2 whitespace-pre-wrap leading-relaxed">
+                    {{ selectedItem()!.commentText }}
+                  </p>
                 </details>
               }
 
@@ -338,6 +403,8 @@ import { NetworkService } from '../../core/services/network.service';
   `,
 })
 export class DiscoverComponent implements OnInit, OnDestroy {
+  private readonly discoverService = inject(DiscoverService);
+
   @ViewChild('mainScrollArea')
   private readonly mainScrollArea?: ElementRef<HTMLElement>;
   protected readonly showSources = signal(false);
@@ -371,13 +438,13 @@ export class DiscoverComponent implements OnInit, OnDestroy {
   readonly filteredItems = computed(() => {
     const q = this.searchQuery().toLowerCase().trim();
     if (!q) return this.allItems();
-    return this.allItems().filter(item =>
-      item.title.toLowerCase().includes(q) ||
-      item.tags.some(t => t.toLowerCase().includes(q))
+    return this.allItems().filter(
+      (item) =>
+        item.title.toLowerCase().includes(q) || item.tags.some((t) => t.toLowerCase().includes(q)),
     );
   });
 
-  constructor(private readonly discoverService: DiscoverService) {
+  constructor() {
     effect(() => {
       if (this.mobileNavState.activePanel() === 'none') {
         this.restoreMainFocusTarget();
@@ -463,7 +530,7 @@ export class DiscoverComponent implements OnInit, OnDestroy {
   private loadSources() {
     if (!this.networkService.isCurrentlyOnline()) return;
     this.discoverService.getSources().subscribe({
-      next: sources => this.sources.set(sources),
+      next: (sources) => this.sources.set(sources),
     });
   }
 
@@ -490,9 +557,9 @@ export class DiscoverComponent implements OnInit, OnDestroy {
     };
 
     this.discoverService.getFeed(query).subscribe({
-      next: res => {
+      next: (res) => {
         if (append) {
-          this.allItems.update(items => [...items, ...res.items]);
+          this.allItems.update((items) => [...items, ...res.items]);
         } else {
           this.allItems.set(res.items);
         }
@@ -515,7 +582,7 @@ export class DiscoverComponent implements OnInit, OnDestroy {
     const sourceId = this.activeSourceId();
     if (!sourceId) return;
 
-    const source = this.sources().find(s => s.id === sourceId);
+    const source = this.sources().find((s) => s.id === sourceId);
     if (source?.sourceType === 'reddit' && source.needsClientIngest) {
       const subreddit = source.config['subreddit'] as string;
       if (!subreddit) return;
@@ -533,7 +600,7 @@ export class DiscoverComponent implements OnInit, OnDestroy {
 
       console.log(`Source ${sourceId} needs fresh data. Attempting lease...`);
       this.discoverService.acquireLease(sourceId).subscribe({
-        next: (lease) => {
+        next: () => {
           console.log('Lease acquired. Fetching from Reddit...');
           this.fetchAndIngestReddit(sourceId, subreddit);
         },
@@ -543,7 +610,7 @@ export class DiscoverComponent implements OnInit, OnDestroy {
           } else {
             console.error('Lease acquisition failed:', err);
           }
-        }
+        },
       });
     }
   }
@@ -551,9 +618,19 @@ export class DiscoverComponent implements OnInit, OnDestroy {
   private fetchAndIngestReddit(sourceId: string, subreddit: string): void {
     const url = `/reddit-api/r/${subreddit}/hot.json?limit=50`;
     fetch(url)
-      .then(res => res.json())
-      .then(data => {
-        const posts = data?.data?.children?.map((c: any) => c.data) || [];
+      .then((res) => res.json())
+      .then((data: unknown) => {
+        const posts = [];
+        if (typeof data === 'object' && data !== null) {
+          const payload = data as { data?: { children?: unknown[] } };
+          for (const child of payload.data?.children ?? []) {
+            const childRecord = child as { data?: Record<string, unknown> };
+            if (childRecord?.data) {
+              posts.push(childRecord.data);
+            }
+          }
+        }
+
         if (posts.length === 0) return;
 
         this.discoverService.ingestReddit(sourceId, posts).subscribe({
@@ -564,10 +641,10 @@ export class DiscoverComponent implements OnInit, OnDestroy {
               this.loadFeed(false);
             }
           },
-          error: (err) => console.error('Ingestion failed:', err)
+          error: (err) => console.error('Ingestion failed:', err),
         });
       })
-      .catch(err => console.error('Reddit fetch failed:', err));
+      .catch((err) => console.error('Reddit fetch failed:', err));
   }
 
   setSortBy(sort: 'score' | 'recent') {
@@ -613,7 +690,9 @@ export class DiscoverComponent implements OnInit, OnDestroy {
   }
 
   onFeedback(event: { itemId: string; signal: 'up' | 'down'; galleryImageIndex?: number }) {
-    this.discoverService.sendFeedback(event.itemId, event.signal, event.galleryImageIndex).subscribe();
+    this.discoverService
+      .sendFeedback(event.itemId, event.signal, event.galleryImageIndex)
+      .subscribe();
   }
 
   onModalFeedback(signal: 'up' | 'down') {
@@ -677,7 +756,6 @@ export class DiscoverComponent implements OnInit, OnDestroy {
     img.src = url;
     this.preloadedImageUrls.add(url);
   }
-
 
   loadMore() {
     this.loadFeed(true);

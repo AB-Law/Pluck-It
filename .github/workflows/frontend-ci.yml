@@ -2,12 +2,12 @@ name: Frontend CI/CD
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, dev ]
     paths:
       - 'PluckIt.Client/**'
       - '.github/workflows/frontend-ci.yml'
   pull_request:
-    branches: [ main ]
+    branches: [ main, dev ]
     paths:
       - 'PluckIt.Client/**'
       - '.github/workflows/frontend-ci.yml'
@@ -38,7 +38,7 @@ jobs:
       run: npm install
     
     - name: Unit Tests
-      run: npm test -- --no-progress
+      run: npm test -- --no-progress --watch=false
 
     - name: Build Production
       run: npm run build

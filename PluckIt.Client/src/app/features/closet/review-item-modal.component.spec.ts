@@ -49,9 +49,9 @@ describe('ReviewItemModalComponent', () => {
   };
 
   const queryButtons = (root: HTMLElement): HTMLButtonElement[] =>
-    Array.from(root.querySelectorAll('button')) as HTMLButtonElement[];
+    Array.from(root.querySelectorAll('button'));
   const queryInputs = (root: HTMLElement): HTMLInputElement[] =>
-    Array.from(root.querySelectorAll('input')) as HTMLInputElement[];
+    Array.from(root.querySelectorAll('input'));
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
@@ -79,7 +79,7 @@ describe('ReviewItemModalComponent', () => {
   it('clones incoming item on changes to keep mutations isolated', () => {
     setInputItem(BASE_ITEM);
     expect(component.draft).toEqual(expect.objectContaining({ id: BASE_ITEM.id, category: BASE_ITEM.category }));
-    expect(component.draft).not.toBe(component.item as any);
+    expect(component.draft).not.toBe(component.item);
     expect(component.draft?.tags).not.toBe(BASE_ITEM.tags);
     expect(component.draft?.colours).not.toBe(BASE_ITEM.colours);
   });
@@ -173,7 +173,10 @@ describe('ReviewItemModalComponent', () => {
     const cancelled = vi.fn();
     component.cancelled.subscribe(cancelled);
     const target = document.createElement('div');
-    component.onOverlayClick({ target, currentTarget: target } as unknown as MouseEvent);
+    const overlayEvent = new MouseEvent('click');
+    Object.defineProperty(overlayEvent, 'target', { value: target });
+    Object.defineProperty(overlayEvent, 'currentTarget', { value: target });
+    component.onOverlayClick(overlayEvent);
     expect(cancelled).toHaveBeenCalledTimes(1);
   });
 
@@ -197,7 +200,7 @@ describe('ReviewItemModalComponent', () => {
     const root = fixture.nativeElement as HTMLElement;
     const backdrop = root.querySelector('.backdrop-animate') as HTMLDivElement;
     const shell = root.querySelector('.modal-animate') as HTMLDivElement;
-    const closeBtn = root.querySelector('[aria-label="Close"]') as HTMLButtonElement | null;
+    const closeBtn = root.querySelector<HTMLButtonElement>('[aria-label="Close"]');
     const buttons = queryButtons(root);
     const saveBtn = buttons.find(btn => btn.textContent?.trim() === 'Add to Wardrobe') as HTMLButtonElement;
     const cancelBtn = buttons.find(btn => btn.textContent?.trim() === 'Discard') as HTMLButtonElement;
@@ -224,12 +227,12 @@ describe('ReviewItemModalComponent', () => {
     const root = fixture.nativeElement as HTMLElement;
     setInputItem({ ...BASE_ITEM, category: 'Footwear', size: { shoeSize: 9, system: 'US' }, careInfo: [], condition: 'Good' });
 
-    const priceInput = fixture.debugElement.query(By.css('input[placeholder=\"0.00\"]'));
+    const priceInput = fixture.debugElement.query(By.css('input[placeholder="0.00"]'));
     priceInput.triggerEventHandler('ngModelChange', 42);
     fixture.detectChanges();
     expect(component.draft?.price?.amount).toBe(42);
 
-    const shoeInput = fixture.debugElement.query(By.css('input[placeholder=\"e.g. 10.5\"]'));
+    const shoeInput = fixture.debugElement.query(By.css('input[placeholder="e.g. 10.5"]'));
     shoeInput.triggerEventHandler('ngModelChange', 10.5);
     fixture.detectChanges();
     expect(component.draft?.size).toEqual({ shoeSize: 10.5, system: 'US' });

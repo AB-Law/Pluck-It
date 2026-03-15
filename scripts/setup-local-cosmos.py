@@ -16,6 +16,7 @@ import base64
 import hashlib
 import hmac
 import json
+from json import JSONDecodeError
 import subprocess
 import sys
 import urllib.error
@@ -27,12 +28,12 @@ _HTTP_DATE_FMT = "%a, %d %b %Y %H:%M:%S GMT"
 _PK_USER = "/userId"
 
 ENDPOINT = "http://localhost:8081"
-COSMOS_KEY = "C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b5S5O4FhfJLkfB6NWNFNJ+Mfzq8R7uoB8Tg=="
+COSMOS_KEY = "C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b5S5O4FhfJLkfB6NWNFNJ+Mfzq8R7uoB8g=="
 DATABASE = "PluckIt"
 
 CONTAINERS = [
     ("Wardrobe",                      _PK_USER),
-    ("UserProfiles",                  _PK_USER),
+    ("UserProfiles",                  "/id"),
     ("Conversations",                 _PK_USER),
     ("Digests",                       _PK_USER),
     ("Moods",                         "/primaryMood"),
@@ -55,6 +56,16 @@ BLOB_CONTAINERS = ["uploads", "archive"]
 
 # ── Cosmos helpers ─────────────────────────────────────────────────────────────
 
+
+def _parse_response_body(body):
+    if not body:
+        return ""
+    try:
+        return json.loads(body)
+    except JSONDecodeError:
+        return body.decode("utf-8", errors="ignore")
+
+
 def _cosmos_request(method, path, body=None, resource_type="", resource_id=""):
     date = datetime.datetime.now(datetime.timezone.utc).strftime(_HTTP_DATE_FMT)
     string_to_sign = f"{method.lower()}\n{resource_type.lower()}\n{resource_id}\n{date.lower()}\n\n"
@@ -72,9 +83,9 @@ def _cosmos_request(method, path, body=None, resource_type="", resource_id=""):
 
     try:
         with urllib.request.urlopen(req) as resp:
-            return resp.status, json.loads(resp.read())
+            return resp.status, _parse_response_body(resp.read())
     except urllib.error.HTTPError as e:
-        return e.code, json.loads(e.read())
+        return e.code, _parse_response_body(e.read())
 
 
 def create_database():
@@ -125,6 +136,22 @@ def create_blob_containers():
                 print(f"  Blob container '{name}' already exists")
         else:
             print(f"  ERROR creating blob container '{name}': {result.stderr.strip()[:200]}")
+            continue
+
+        # Set public-blob access so the app can serve images without SAS tokens.
+        # (Azurite doesn't support the SDK's SAS API version in local dev.)
+        perm = subprocess.run(
+            [
+                "az", "storage", "container", "set-permission",
+                "--name", name,
+                "--public-access", "blob",
+                "--connection-string", AZURITE_CONN,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if perm.returncode != 0:
+            print(f"  WARN: could not set public access on '{name}': {perm.stderr.strip()[:200]}")
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────

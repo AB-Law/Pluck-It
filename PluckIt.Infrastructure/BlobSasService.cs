@@ -33,6 +33,30 @@ public class BlobSasService : IBlobSasService
         new Uri($"https://{accountName}.blob.core.windows.net"), _credential);
   }
 
+  /// <summary>
+  /// Constructor for local development using Azurite — pass "UseDevelopmentStorage=true".
+  /// Azurite's auth implementation is incompatible with StorageSharedKeyCredential + explicit URI
+  /// when using Azure.Storage.Blobs v12.28+ (API version 2026-02-06).
+  /// </summary>
+  public BlobSasService(string connectionString, string archiveContainer,
+      string uploadsContainer = "uploads")
+  {
+    if (string.IsNullOrWhiteSpace(connectionString))
+      throw new ArgumentNullException(nameof(connectionString));
+    _archiveContainer = archiveContainer ?? throw new ArgumentNullException(nameof(archiveContainer));
+    _uploadsContainer = uploadsContainer;
+    _allowedContainers = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+      _archiveContainer,
+      _uploadsContainer
+    };
+    _serviceClient = new BlobServiceClient(connectionString);
+    // Extract credential from the dev storage connection string for SAS generation.
+    // For Azurite, SAS URLs won't be used externally, so a dummy credential is fine.
+    _credential = new StorageSharedKeyCredential("devstoreaccount1",
+        "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OugushZnRUOkvietl3hGys8uqHFht0YhfB7DPm3bkzrEt5PJBKgIfbI=");
+  }
+
   private BlobContainerClient ArchiveContainer =>
     _serviceClient.GetBlobContainerClient(_archiveContainer);
 
@@ -44,14 +68,12 @@ public class BlobSasService : IBlobSasService
     try
     {
       var uri = new Uri(blobUrl);
-
-      // Path is /{container}/{blob...}
-      var segments = uri.AbsolutePath.TrimStart('/').Split('/', 2);
-      if (segments.Length < 2)
+      // Azurite containers are set to public-blob access in local dev,
+      // and Azurite doesn't support the SDK's SAS API version — skip SAS.
+      if (uri.Host == "127.0.0.1" || uri.Host == "localhost")
         return blobUrl;
 
-      var containerName = segments[0];
-      var blobName = segments[1];
+      var (containerName, blobName) = ParseBlobUri(uri);
       if (!_allowedContainers.Contains(containerName))
         return blobUrl;
 
@@ -85,14 +107,9 @@ public class BlobSasService : IBlobSasService
     try
     {
       var uri = new Uri(blobUrl.Split('?')[0]); // strip any existing SAS token
-      var segments = uri.AbsolutePath.TrimStart('/').Split('/', 2);
-      if (segments.Length < 2) return;
-
-      var containerName = segments[0];
+      var (containerName, blobName) = ParseBlobUri(uri);
       if (!_allowedContainers.Contains(containerName))
         return;
-
-      var blobName = segments[1];
       await _serviceClient.GetBlobContainerClient(containerName).GetBlobClient(blobName)
         .DeleteIfExistsAsync(cancellationToken: cancellationToken);
     }
@@ -147,11 +164,28 @@ public class BlobSasService : IBlobSasService
   public async Task<byte[]> DownloadRawAsync(string blobUrl, CancellationToken cancellationToken = default)
   {
     var uri = new Uri(blobUrl.Split('?')[0]);
-    var segments = uri.AbsolutePath.TrimStart('/').Split('/', 2);
-    var containerName = segments[0];
-    var blobName = segments.Length > 1 ? segments[1] : throw new ArgumentException("Cannot parse blob name from URL.");
+    var (containerName, blobName) = ParseBlobUri(uri);
     var blobClient = _serviceClient.GetBlobContainerClient(containerName).GetBlobClient(blobName);
     var result = await blobClient.DownloadContentAsync(cancellationToken);
     return result.Value.Content.ToArray();
+  }
+
+  /// <summary>
+  /// Parses both subdomain-style (Azure) and path-style (Azurite) blob URLs.
+  /// Azure:   https://{account}.blob.core.windows.net/{container}/{blob}  → path = /{container}/{blob}
+  /// Azurite: http://127.0.0.1:10000/{account}/{container}/{blob}         → path = /{account}/{container}/{blob}
+  /// </summary>
+  private static (string container, string blobName) ParseBlobUri(Uri uri)
+  {
+    var parts = uri.AbsolutePath.TrimStart('/').Split('/', 2);
+    // Path-style: first segment is the storage account name (not a container)
+    if (parts.Length < 2)
+      throw new ArgumentException($"Cannot parse container/blob from URL: {uri}");
+    if (parts[0] == "devstoreaccount1")
+    {
+      var devParts = parts[1].Split('/', 2);
+      return (devParts[0], devParts.Length > 1 ? devParts[1] : string.Empty);
+    }
+    return (parts[0], parts[1]);
   }
 }

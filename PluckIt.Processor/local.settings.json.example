@@ -14,7 +14,7 @@
     "ARCHIVE_CONTAINER_NAME": "archive",
 
     "COSMOS_DB_ENDPOINT": "http://localhost:8081/",
-    "COSMOS_DB_KEY": "C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b5S5O4FhfJLkfB6NWNFNJ+Mfzq8R7uoB8Tg==",
+    "COSMOS_DB_KEY": "C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b5S5O4FhfJLkfB6NWNFNJ+Mfzq8R7uoB8g==",
     "COSMOS_DB_DATABASE": "PluckIt",
     "COSMOS_DB_CONTAINER": "Wardrobe",
     "COSMOS_DB_REFRESH_TOKENS_CONTAINER": "RefreshTokens",
@@ -68,7 +68,10 @@
     "OTEL_SERVICE_NAME": "pluckit-processor-func-local",
 
     "COHERE_ENDPOINT": "",
-    "COHERE_API_KEY": ""
+    "COHERE_API_KEY": "",
+
+    "METADATA_EXTRACT_AUTH_MODE": "api-key",
+    "METADATA_EXTRACT_API_KEY": "local-dev-metadata-key"
   },
   "Host": {
     "LocalHttpPort": 7071,

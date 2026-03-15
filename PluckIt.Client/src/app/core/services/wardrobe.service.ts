@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { tap } from 'rxjs/operators';
@@ -19,11 +19,11 @@ import {
 
 @Injectable({ providedIn: 'root' })
 export class WardrobeService {
+  private readonly http = inject(HttpClient);
+
   private readonly base = environment.apiUrl;
   private static readonly CACHE_TTL_MS = 30_000;
   private _cache: { key: string; result: WardrobePagedResponse; timestamp: number } | null = null;
-
-  constructor(private readonly http: HttpClient) {}
 
   /**
    * Fetch a page of wardrobe items using full multidimensional filter + sort support.
@@ -38,19 +38,20 @@ export class WardrobeService {
 
   private buildParams(query?: WardrobeQuery): HttpParams {
     let qp = new HttpParams().set('pageSize', String(query?.pageSize ?? 24));
-    if (query?.category)             qp = qp.set('category',          query.category);
-    if (query?.brand)                qp = qp.set('brand',             query.brand);
-    if (query?.condition)            qp = qp.set('condition',         query.condition);
-    if (query?.tags?.length)         qp = qp.set('tags',              query.tags.join(','));
-    if (query?.aestheticTags?.length)qp = qp.set('aestheticTags',     query.aestheticTags.join(','));
-    if (query?.priceMin  != null)    qp = qp.set('priceMin',          String(query.priceMin));
-    if (query?.priceMax  != null)    qp = qp.set('priceMax',          String(query.priceMax));
-    if (query?.includeWishlisted != null) qp = qp.set('includeWishlisted', String(query.includeWishlisted));
-    if (query?.minWears  != null)    qp = qp.set('minWears',          String(query.minWears));
-    if (query?.maxWears  != null)    qp = qp.set('maxWears',          String(query.maxWears));
-    if (query?.sortField)            qp = qp.set('sortField',         query.sortField);
-    if (query?.sortDir)              qp = qp.set('sortDir',           query.sortDir);
-    if (query?.continuationToken)    qp = qp.set('continuationToken', query.continuationToken);
+    if (query?.category) qp = qp.set('category', query.category);
+    if (query?.brand) qp = qp.set('brand', query.brand);
+    if (query?.condition) qp = qp.set('condition', query.condition);
+    if (query?.tags?.length) qp = qp.set('tags', query.tags.join(','));
+    if (query?.aestheticTags?.length) qp = qp.set('aestheticTags', query.aestheticTags.join(','));
+    if (query?.priceMin != null) qp = qp.set('priceMin', String(query.priceMin));
+    if (query?.priceMax != null) qp = qp.set('priceMax', String(query.priceMax));
+    if (query?.includeWishlisted != null)
+      qp = qp.set('includeWishlisted', String(query.includeWishlisted));
+    if (query?.minWears != null) qp = qp.set('minWears', String(query.minWears));
+    if (query?.maxWears != null) qp = qp.set('maxWears', String(query.maxWears));
+    if (query?.sortField) qp = qp.set('sortField', query.sortField);
+    if (query?.sortDir) qp = qp.set('sortDir', query.sortDir);
+    if (query?.continuationToken) qp = qp.set('continuationToken', query.continuationToken);
     return qp;
   }
 
@@ -62,15 +63,16 @@ export class WardrobeService {
       if (cached) return of(cached);
     }
 
-    const req$ = this.http.get<WardrobePagedResponse>(
-      `${this.base}/api/wardrobe`,
-      { params: this.buildParams(query) },
-    );
+    const req$ = this.http.get<WardrobePagedResponse>(`${this.base}/api/wardrobe`, {
+      params: this.buildParams(query),
+    });
 
     if (!cacheKey) return req$;
 
     return req$.pipe(
-      tap(res => { this._cache = { key: cacheKey, result: res, timestamp: Date.now() }; }),
+      tap((res) => {
+        this._cache = { key: cacheKey, result: res, timestamp: Date.now() };
+      }),
     );
   }
 
@@ -164,11 +166,16 @@ export class WardrobeService {
     let qp = new HttpParams();
     if (from) qp = qp.set('from', from);
     if (to) qp = qp.set('to', to);
-    return this.http.get<WearHistoryResponse>(`${this.base}/api/wardrobe/${id}/wear-history`, { params: qp });
+    return this.http.get<WearHistoryResponse>(`${this.base}/api/wardrobe/${id}/wear-history`, {
+      params: qp,
+    });
   }
 
   recordStylingActivity(payload: StylingActivityRequest): Observable<StylingActivityResponse> {
-    return this.http.post<StylingActivityResponse>(`${this.base}/api/wardrobe/styling-activity`, payload);
+    return this.http.post<StylingActivityResponse>(
+      `${this.base}/api/wardrobe/styling-activity`,
+      payload,
+    );
   }
 
   getWearSuggestions(): Observable<WearSuggestionsResponse> {
@@ -185,4 +192,3 @@ export class WardrobeService {
     );
   }
 }
-

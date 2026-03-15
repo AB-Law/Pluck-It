@@ -1,5 +1,5 @@
 import { Component, input, output, signal, computed, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { RangeSliderComponent } from '../../shared/range-slider.component';
@@ -9,45 +9,51 @@ import type { WardrobeSortField } from '../../core/models/clothing-item.model';
 export type SmartGroup = 'all' | 'favorites' | 'recent' | 'collections' | 'wishlist';
 
 export interface VaultFilters {
-  group:       SmartGroup;
-  priceRange:  [number, number];
-  minWears:    number;
-  brand?:      string;
-  condition?:  ItemCondition | '';
-  sortField:   WardrobeSortField;
-  sortDir:     'asc' | 'desc';
+  group: SmartGroup;
+  priceRange: [number, number];
+  minWears: number;
+  brand?: string;
+  condition?: ItemCondition | '';
+  sortField: WardrobeSortField;
+  sortDir: 'asc' | 'desc';
 }
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
-  USD: '$', EUR: '€', GBP: '£', INR: '₹', JPY: '¥', CAD: 'C$', AUD: 'A$',
+  USD: '$',
+  EUR: '€',
+  GBP: '£',
+  INR: '₹',
+  JPY: '¥',
+  CAD: 'C$',
+  AUD: 'A$',
 };
 
 interface SortOption {
-  label:     string;
+  label: string;
   sortField: WardrobeSortField;
-  sortDir:   'asc' | 'desc';
+  sortDir: 'asc' | 'desc';
 }
 
 const SORT_OPTIONS: SortOption[] = [
-  { label: 'Newest First',       sortField: 'dateAdded',    sortDir: 'desc' },
-  { label: 'Oldest First',       sortField: 'dateAdded',    sortDir: 'asc'  },
-  { label: 'Most Worn',          sortField: 'wearCount',    sortDir: 'desc' },
-  { label: 'Least Worn',         sortField: 'wearCount',    sortDir: 'asc'  },
+  { label: 'Newest First', sortField: 'dateAdded', sortDir: 'desc' },
+  { label: 'Oldest First', sortField: 'dateAdded', sortDir: 'asc' },
+  { label: 'Most Worn', sortField: 'wearCount', sortDir: 'desc' },
+  { label: 'Least Worn', sortField: 'wearCount', sortDir: 'asc' },
   { label: 'Price: High to Low', sortField: 'price.amount', sortDir: 'desc' },
-  { label: 'Price: Low to High', sortField: 'price.amount', sortDir: 'asc'  },
+  { label: 'Price: Low to High', sortField: 'price.amount', sortDir: 'asc' },
 ];
 
 const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
-  { label: 'New',       value: 'New'       },
+  { label: 'New', value: 'New' },
   { label: 'Excellent', value: 'Excellent' },
-  { label: 'Good',      value: 'Good'      },
-  { label: 'Fair',      value: 'Fair'      },
+  { label: 'Good', value: 'Good' },
+  { label: 'Fair', value: 'Fair' },
 ];
 
 @Component({
   selector: 'app-vault-sidebar',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, RangeSliderComponent],
+  imports: [FormsModule, RouterLink, RangeSliderComponent],
   template: `
     <aside
       class="w-64 flex-shrink-0 flex-col border-r border-border-chrome bg-black p-6 overflow-y-auto"
@@ -75,21 +81,27 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
 
       <!-- Smart Groups -->
       <div class="mb-8">
-        <h3 class="mb-4 text-xs font-bold uppercase tracking-widest text-slate-500">Smart Groups</h3>
+        <h3 class="mb-4 text-xs font-bold uppercase tracking-widest text-slate-500">
+          Smart Groups
+        </h3>
         <nav class="space-y-1">
           @for (g of groups; track g.id) {
             <button
               class="touch-target w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors"
-              [class]="g.id === activeGroup() ? 'bg-primary/10 text-primary' : 'text-slate-400 hover:bg-card-dark hover:text-slate-100'"
+              [class]="
+                g.id === activeGroup()
+                  ? 'bg-primary/10 text-primary'
+                  : 'text-slate-400 hover:bg-card-dark hover:text-slate-100'
+              "
               (click)="selectGroup(g.id)"
             >
               <span class="material-symbols-outlined text-lg">{{ g.icon }}</span>
               {{ g.label }}
             </button>
           }
-            <a
-              routerLink="/collections"
-              class="touch-target w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-400 hover:bg-card-dark hover:text-slate-100 transition-colors"
+          <a
+            routerLink="/collections"
+            class="touch-target w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-400 hover:bg-card-dark hover:text-slate-100 transition-colors"
           >
             <span class="material-symbols-outlined text-lg">folder_special</span>
             Collections
@@ -113,9 +125,10 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
 
       <!-- Range Matrix -->
       <div class="mb-8">
-        <h3 class="mb-4 text-xs font-bold uppercase tracking-widest text-slate-500">The Range Matrix</h3>
+        <h3 class="mb-4 text-xs font-bold uppercase tracking-widest text-slate-500">
+          The Range Matrix
+        </h3>
         <div class="space-y-6 px-1">
-
           <!-- Price Range -->
           <div>
             <div class="mb-3 flex justify-between text-xs font-medium font-mono">
@@ -146,22 +159,25 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
                 class="absolute top-1/2 h-3 w-3 rounded-full border-2 border-primary bg-black cursor-pointer"
                 [style.left.%]="wearPct()"
                 style="transform: translate(-50%, -50%)"
-              class="touch-target cursor-pointer"
-              (pointerdown)="startWearDrag($event)"
-              (document:pointermove)="onWearDrag($event)"
-              (document:pointerup)="stopWearDrag()"
+                class="touch-target cursor-pointer"
+                (pointerdown)="startWearDrag($event)"
+                (document:pointermove)="onWearDrag($event)"
+                (document:pointerup)="stopWearDrag()"
               ></div>
             </div>
           </div>
-
         </div>
       </div>
 
       <!-- Brand Filter -->
       <div class="mb-8">
         <h3 class="mb-4 text-xs font-bold uppercase tracking-widest text-slate-500">Brand</h3>
-        <div class="flex items-center rounded-lg bg-card-dark border border-[#333] focus-within:border-primary/60 transition-colors">
-          <span class="pl-3 text-slate-500 material-symbols-outlined" style="font-size:16px">search</span>
+        <div
+          class="flex items-center rounded-lg bg-card-dark border border-[#333] focus-within:border-primary/60 transition-colors"
+        >
+          <span class="pl-3 text-slate-500 material-symbols-outlined" style="font-size:16px"
+            >search</span
+          >
           <input
             class="w-full bg-transparent text-sm text-white placeholder-slate-500 outline-none py-2 px-2 font-mono"
             placeholder="e.g. Nike, Zara..."
@@ -169,7 +185,10 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
             (ngModelChange)="onBrandChange($event)"
           />
           @if (brandFilter()) {
-            <button class="touch-target pr-3 text-slate-500 hover:text-white" (click)="onBrandChange('')">
+            <button
+              class="touch-target pr-3 text-slate-500 hover:text-white"
+              (click)="onBrandChange('')"
+            >
               <span class="material-symbols-outlined" style="font-size:14px">close</span>
             </button>
           }
@@ -183,9 +202,11 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
           @for (c of conditions; track c.value) {
             <button
               class="touch-target px-3 py-1 rounded-full text-xs font-medium border transition-colors"
-              [class]="activeCondition() === c.value
-                ? 'bg-primary/15 border-primary/50 text-primary'
-                : 'bg-card-dark border-[#333] text-slate-400 hover:border-slate-500 hover:text-white'"
+              [class]="
+                activeCondition() === c.value
+                  ? 'bg-primary/15 border-primary/50 text-primary'
+                  : 'bg-card-dark border-[#333] text-slate-400 hover:border-slate-500 hover:text-white'
+              "
               (click)="toggleCondition(c.value)"
             >
               {{ c.label }}
@@ -203,13 +224,12 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
           Clear All Filters
         </button>
       }
-
     </aside>
   `,
 })
 export class VaultSidebarComponent implements OnInit {
-  maxPrice       = input<number>(5000);
-  currency       = input<string>('USD');
+  maxPrice = input<number>(5000);
+  currency = input<string>('USD');
   /** Seed initial filter state (e.g. restored from URL on parent init). */
   initialFilters = input<Partial<VaultFilters>>({});
   mobileMode = input<boolean>(false);
@@ -217,27 +237,27 @@ export class VaultSidebarComponent implements OnInit {
   /** Emitted only when the sidebar is rendered in mobile mode and user closes it. */
   closed = output<void>();
 
-  filtersChange  = output<VaultFilters>();
+  filtersChange = output<VaultFilters>();
 
-  activeGroup     = signal<SmartGroup>('all');
-  priceRange      = signal<[number, number]>([0, 5000]);
-  minWears        = signal<number>(0);
-  brandFilter     = signal<string>('');
+  activeGroup = signal<SmartGroup>('all');
+  priceRange = signal<[number, number]>([0, 5000]);
+  minWears = signal<number>(0);
+  brandFilter = signal<string>('');
   activeCondition = signal<ItemCondition | ''>('');
-  sortField       = signal<WardrobeSortField>('dateAdded');
-  sortDir         = signal<'asc' | 'desc'>('desc');
+  sortField = signal<WardrobeSortField>('dateAdded');
+  sortDir = signal<'asc' | 'desc'>('desc');
 
   private wearDragging = false;
   private readonly maxWears = 200;
 
   readonly sortOptions = SORT_OPTIONS;
-  readonly conditions  = CONDITIONS;
+  readonly conditions = CONDITIONS;
 
   readonly groups = [
-    { id: 'all'       as SmartGroup, icon: 'grid_view',    label: 'All Items'     },
-    { id: 'favorites' as SmartGroup, icon: 'star',         label: 'Favorites'     },
-    { id: 'recent'    as SmartGroup, icon: 'schedule',     label: 'Worn Recently' },
-    { id: 'wishlist'  as SmartGroup, icon: 'favorite',     label: 'Wishlist'      },
+    { id: 'all' as SmartGroup, icon: 'grid_view', label: 'All Items' },
+    { id: 'favorites' as SmartGroup, icon: 'star', label: 'Favorites' },
+    { id: 'recent' as SmartGroup, icon: 'schedule', label: 'Worn Recently' },
+    { id: 'wishlist' as SmartGroup, icon: 'favorite', label: 'Wishlist' },
   ];
 
   readonly sortKey = computed(() => `${this.sortField()}:${this.sortDir()}`);
@@ -250,25 +270,26 @@ export class VaultSidebarComponent implements OnInit {
 
   readonly wearPct = computed(() => (this.minWears() / this.maxWears) * 100);
 
-  readonly hasActiveFilters = computed(() =>
-    !!this.brandFilter() ||
-    !!this.activeCondition() ||
-    this.priceRange()[0] > 0 ||
-    this.priceRange()[1] < this.maxPrice() ||
-    this.minWears() > 0 ||
-    this.sortField() !== 'dateAdded' ||
-    this.sortDir() !== 'desc'
+  readonly hasActiveFilters = computed(
+    () =>
+      !!this.brandFilter() ||
+      !!this.activeCondition() ||
+      this.priceRange()[0] > 0 ||
+      this.priceRange()[1] < this.maxPrice() ||
+      this.minWears() > 0 ||
+      this.sortField() !== 'dateAdded' ||
+      this.sortDir() !== 'desc',
   );
 
   ngOnInit(): void {
     const init = this.initialFilters();
-    if (init.group)      this.activeGroup.set(init.group);
+    if (init.group) this.activeGroup.set(init.group);
     if (init.priceRange) this.priceRange.set(init.priceRange);
-    if (init.minWears)   this.minWears.set(init.minWears);
-    if (init.brand)      this.brandFilter.set(init.brand);
+    if (init.minWears) this.minWears.set(init.minWears);
+    if (init.brand) this.brandFilter.set(init.brand);
     if (init.condition) this.activeCondition.set(init.condition);
-    if (init.sortField)  this.sortField.set(init.sortField);
-    if (init.sortDir)    this.sortDir.set(init.sortDir);
+    if (init.sortField) this.sortField.set(init.sortField);
+    if (init.sortDir) this.sortDir.set(init.sortDir);
   }
 
   selectGroup(g: SmartGroup): void {
@@ -313,14 +334,16 @@ export class VaultSidebarComponent implements OnInit {
     this.wearDragging = true;
     (e.currentTarget as HTMLElement | null)?.setPointerCapture?.(e.pointerId);
   }
-  stopWearDrag(): void { this.wearDragging = false; }
+  stopWearDrag(): void {
+    this.wearDragging = false;
+  }
 
   onWearDrag(e: PointerEvent): void {
     if (!this.wearDragging) return;
     const thumb = document.elementFromPoint(e.clientX, e.clientY);
-    const track = (thumb?.closest('.relative') as HTMLElement | null);
+    const track = thumb?.closest('.relative') as HTMLElement | null;
     if (!track) return;
-    const rect  = track.getBoundingClientRect();
+    const rect = track.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     this.minWears.set(Math.round(ratio * this.maxWears));
     this.emit();
@@ -328,13 +351,13 @@ export class VaultSidebarComponent implements OnInit {
 
   private emit(): void {
     this.filtersChange.emit({
-      group:      this.activeGroup(),
+      group: this.activeGroup(),
       priceRange: this.priceRange(),
-      minWears:   this.minWears(),
-      brand:      this.brandFilter(),
-      condition:  this.activeCondition(),
-      sortField:  this.sortField(),
-      sortDir:    this.sortDir(),
+      minWears: this.minWears(),
+      brand: this.brandFilter(),
+      condition: this.activeCondition(),
+      sortField: this.sortField(),
+      sortDir: this.sortDir(),
     });
   }
 }

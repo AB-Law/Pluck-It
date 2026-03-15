@@ -902,6 +902,10 @@ def _get_blob_service():
     from azure.storage.blob import BlobServiceClient
     account_name = _get_env("STORAGE_ACCOUNT_NAME")
     account_key = _get_env("STORAGE_ACCOUNT_KEY")
+    # Azurite: use the well-known dev connection string to avoid auth issues
+    # with newer SDK versions (API 2026-02-06) against path-style emulator URLs.
+    if account_name == "devstoreaccount1":
+        return BlobServiceClient.from_connection_string("UseDevelopmentStorage=true")
     conn_str = (
         f"DefaultEndpointsProtocol=https;"
         f"AccountName={account_name};"
