@@ -26,6 +26,38 @@ PHASH_PREFIX_CHARS = 4  # first 16 bits (4 hex chars) of each pHash
 PHASH_PREFIX_BITS = PHASH_PREFIX_CHARS * 4
 
 
+@lru_cache(maxsize=None)
+def _candidate_buckets_cached(bucket: str) -> tuple[str, ...]:
+    """
+    Return all pHash prefix buckets within PHASH_THRESHOLD bit distance.
+
+    Cached at module scope so lookup results do not retain `self` in cache keys.
+    """
+    if len(bucket) < PHASH_PREFIX_CHARS:
+        return (bucket,)
+
+    try:
+        base = int(bucket, 16)
+    except ValueError:
+        return (bucket,)
+    candidates: set[int] = {base}
+    bits = range(PHASH_PREFIX_BITS)
+
+    for distance in range(1, PHASH_THRESHOLD + 1):
+        for flips in combinations(bits, distance):
+            mask = 0
+            for bit in flips:
+                mask |= 1 << bit
+            candidates.add(base ^ mask)
+
+    max_value = (1 << PHASH_PREFIX_BITS) - 1
+    return tuple(
+        f"{value:0{PHASH_PREFIX_CHARS}x}"
+        for value in candidates
+        if value <= max_value
+    )
+
+
 class RunDeduplicator:
     """
     Stateful deduplicator scoped to a single scraper run.
@@ -94,7 +126,7 @@ class RunDeduplicator:
         bucket = self._phash_bucket(phash)
         return any(
             hamming_distance(phash, existing) < PHASH_THRESHOLD
-            for candidate_bucket in self._candidate_buckets(bucket)
+            for candidate_bucket in _candidate_buckets_cached(bucket)
             for existing in self._seen_phashes_by_prefix.get(candidate_bucket, [])
         )
 
@@ -117,27 +149,3 @@ class RunDeduplicator:
         bucket = self._phash_bucket(phash)
         self._seen_phashes_by_prefix.setdefault(bucket, []).append(phash)
 
-    @lru_cache(maxsize=None)
-    def _candidate_buckets(self, bucket: str) -> tuple[str, ...]:
-        """
-        Return all prefix buckets that can still match within PHASH_THRESHOLD bits.
-        """
-        if len(bucket) < PHASH_PREFIX_CHARS:
-            return (bucket,)
-
-        try:
-            base = int(bucket, 16)
-        except ValueError:
-            return (bucket,)
-        candidates: set[int] = {base}
-        bits = range(PHASH_PREFIX_BITS)
-
-        for distance in range(1, PHASH_THRESHOLD + 1):
-            for flips in combinations(bits, distance):
-                mask = 0
-                for bit in flips:
-                    mask |= 1 << bit
-                candidates.add(base ^ mask)
-
-        max_value = (1 << PHASH_PREFIX_BITS) - 1
-        return tuple(f"{value:0{PHASH_PREFIX_CHARS}x}" for value in candidates if value <= max_value)
