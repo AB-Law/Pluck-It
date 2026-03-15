@@ -85,6 +85,44 @@ variable "segmentation_shared_token" {
   default     = ""
 }
 
+variable "metadata_extract_endpoint_url" {
+  description = "Full URL of the Python metadata extraction endpoint."
+  type        = string
+  default     = ""
+}
+
+variable "metadata_extract_auth_mode" {
+  description = "Metadata auth mode: api-key or azureAd."
+  type        = string
+  default     = "api-key"
+}
+
+variable "metadata_extract_api_key" {
+  description = "Shared API key for local/dev mode metadata endpoint auth."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "metadata_extract_azure_ad_scope" {
+  description = "Azure AD scope for metadata endpoint token retrieval when auth mode is azureAd."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "metadata_extract_azure_ad_audience" {
+  description = "Fallback Azure AD audience used to construct scope when scope is not set."
+  type        = string
+  default     = ""
+}
+
+variable "metadata_extract_azure_ad_issuer" {
+  description = "Optional Azure AD token issuer validation value for metadata endpoint (python side)."
+  type        = string
+  default     = ""
+}
+
 variable "admin_user_ids" {
   description = "Comma-separated list of Google User IDs with administrative privileges."
   type        = string

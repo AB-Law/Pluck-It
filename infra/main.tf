@@ -762,6 +762,10 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
   runtime_name    = "dotnet-isolated"
   runtime_version = "10.0"
 
+  identity {
+    type = "SystemAssigned"
+  }
+
   # On-demand only — no always-ready instances. Saves ~$50-60/month.
   # Expect a cold start of ~2-5 s on the first request after idle.
   instance_memory_in_mb = 2048
@@ -817,6 +821,14 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
     "GoogleAuth__ClientId"         = var.google_oauth_client_id
     "GoogleAuth__AllowedClientIds" = var.google_oauth_allowed_client_ids
     "FEATURE_WEAR_SUGGESTIONS"     = "true"
+    "Metadata__EndpointUrl"        = coalesce(
+      var.metadata_extract_endpoint_url,
+      "https://${local.base_name}-processor-func.azurewebsites.net/api/extract-clothing-metadata",
+    )
+    "Metadata__AuthMode"           = var.metadata_extract_auth_mode
+    "Metadata__ApiKey"             = var.metadata_extract_api_key
+    "Metadata__AzureAdScope"       = var.metadata_extract_azure_ad_scope
+    "Metadata__AzureAdAudience"    = var.metadata_extract_azure_ad_audience
   }
 }
 
@@ -873,6 +885,10 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
 
   runtime_name    = "python"
   runtime_version = "3.12"
+
+  identity {
+    type = "SystemAssigned"
+  }
 
   instance_memory_in_mb = 2048
 
@@ -943,5 +959,10 @@ resource "azurerm_function_app_flex_consumption" "pluckit_processor" {
     "LANGFUSE_HOST"             = var.langfuse_host
     "SEGMENTATION_ENDPOINT_URL" = var.segmentation_endpoint_url
     "SEGMENTATION_SHARED_TOKEN" = var.segmentation_shared_token
+    "METADATA_EXTRACT_AUTH_MODE"       = var.metadata_extract_auth_mode
+    "METADATA_EXTRACT_API_KEY"         = var.metadata_extract_api_key
+    "METADATA_EXTRACT_AZURE_AD_SCOPE"  = var.metadata_extract_azure_ad_scope
+    "METADATA_EXTRACT_AZURE_AD_AUDIENCE" = var.metadata_extract_azure_ad_audience
+    "METADATA_EXTRACT_AZURE_AD_ISSUER" = var.metadata_extract_azure_ad_issuer
   }
 }

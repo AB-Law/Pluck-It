@@ -41,6 +41,8 @@ os.environ.setdefault("CORS_ALLOWED_ORIGINS",     "http://localhost:3000")
 os.environ.setdefault("LANGFUSE_PUBLIC_KEY",      "")
 os.environ.setdefault("LANGFUSE_SECRET_KEY",      "")
 os.environ.setdefault("LANGFUSE_HOST",            "https://us.cloud.langfuse.com")
+os.environ.setdefault("METADATA_EXTRACT_AUTH_MODE", "api-key")
+os.environ.setdefault("METADATA_EXTRACT_API_KEY",  "test-metadata-key")
 
 # ── Optional azure sdk stubs for local unit runs without azure packages ─────
 try:

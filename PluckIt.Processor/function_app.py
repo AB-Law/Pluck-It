@@ -6,6 +6,7 @@ Non-HTTP triggers (blob, timer) remain as AsgiFunctionApp decorators.
 
 Endpoints:
     POST /api/process-image               — background removal (existing, now FastAPI)
+    POST /api/extract-clothing-metadata    — clothing metadata extraction (brand/category/tags/colours)
     POST /api/chat                        — SSE streaming stylist agent chat
     GET  /api/chat/memory                 — retrieve user's conversation memory summary
     PUT  /api/chat/memory                 — update user's conversation memory summary
@@ -46,6 +47,8 @@ from urllib.parse import unquote
 import random
 import time
 import uuid
+import requests
+import jwt
 from azure.cosmos.exceptions import CosmosHttpResponseError
 from azure.core import MatchConditions
 from datetime import datetime, timedelta, timezone
@@ -116,6 +119,34 @@ def _verify_google_token(token: str) -> str:
     return _agent_auth._verify_google_token(token)
 
 register_heif_opener()
+
+
+class ClothingColourMetadata(BaseModel):
+    name: str
+    hex: str
+
+
+class ClothingMetadataExtractionRequest(BaseModel):
+    item_id: str
+    image_bytes_base64: str
+    media_type: str = "image/jpeg"
+
+
+class ClothingMetadataExtractionResponse(BaseModel):
+    brand: str | None = None
+    category: str | None = None
+    tags: list[str] = []
+    colours: list[ClothingColourMetadata] = []
+
+
+def _normalise_header_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="ignore").strip()
+    return str(value).strip()
 
 _ERR_SOURCE_NOT_FOUND_MESSAGE = "Source not found."
 _ISO_UTC_SUFFIX = "Z"
@@ -901,6 +932,255 @@ async def _extract_process_image_payload(request: Request) -> tuple[bytes, str]:
     return image_bytes, item_id
 
 
+def _metadata_auth_mode() -> str:
+    return os.getenv("METADATA_EXTRACT_AUTH_MODE", "api-key").strip().lower()
+
+
+def _metadata_azure_ad_audience() -> str:
+    return os.getenv("METADATA_EXTRACT_AZURE_AD_AUDIENCE", "").strip()
+
+
+def _metadata_azure_ad_issuer() -> str:
+    return os.getenv("METADATA_EXTRACT_AZURE_AD_ISSUER", "").strip()
+
+
+def _metadata_api_key() -> str:
+    return os.getenv("METADATA_EXTRACT_API_KEY", "").strip()
+
+
+def _metadata_request_id_from_headers(headers: dict[str, str], request: Request) -> str:
+    return (
+        _normalise_header_value(headers.get("x-request-id"))
+        or _normalise_header_value(request.headers.get("X-Request-Id"))
+        or ""
+    )
+
+
+def _metadata_traceparent_from_headers(headers: dict[str, str], request: Request) -> str:
+    return (
+        _normalise_header_value(headers.get("traceparent"))
+        or _normalise_header_value(request.headers.get("traceparent"))
+        or ""
+    )
+
+
+def _decode_base64_image(image_bytes_base64: str) -> bytes:
+    if not image_bytes_base64:
+        raise HTTPException(status_code=400, detail="image_bytes_base64 is required.")
+    token = image_bytes_base64.strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="image_bytes_base64 is required.")
+    if token.startswith("data:"):
+        token = token.split(",", 1)[-1]
+    try:
+        return base64.b64decode(token, validate=True)
+    except binascii.Error as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid image_bytes_base64 payload: {exc}") from exc
+
+
+def _validate_azure_ad_token(token: str) -> dict[str, Any]:
+    """Validate an Azure AD token against the OIDC discovery document and JWKS."""
+    try:
+        header = jwt.get_unverified_header(token)
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="Unauthorized metadata request.") from exc
+
+    if (header.get("alg") or "").lower() == "none":
+        logger.warning("extract-clothing-metadata: Unsupported JWT algorithm 'none'")
+        raise HTTPException(status_code=401, detail="Unauthorized metadata request.")
+
+    issuer = _metadata_azure_ad_issuer()
+    audience = _metadata_azure_ad_audience()
+    if not issuer:
+        raise HTTPException(status_code=401, detail="Unauthorized metadata request.")
+    if not audience:
+        raise HTTPException(status_code=401, detail="Unauthorized metadata request.")
+
+    discovery_url = f"{issuer.rstrip('/')}/.well-known/openid-configuration"
+    try:
+        discovery_response = requests.get(discovery_url, timeout=5)
+        discovery_response.raise_for_status()
+        discovery = discovery_response.json()
+    except Exception as exc:
+        logger.exception("extract-clothing-metadata: Failed to fetch OIDC discovery document")
+        raise HTTPException(status_code=401, detail="Unauthorized metadata request.") from exc
+
+    jwks_uri = discovery.get("jwks_uri")
+    if not isinstance(jwks_uri, str) or not jwks_uri:
+        logger.warning("extract-clothing-metadata: OIDC discovery response missing jwks_uri")
+        raise HTTPException(status_code=401, detail="Unauthorized metadata request.")
+
+    try:
+        signing_key = jwt.PyJWKClient(jwks_uri).get_signing_key_from_jwt(token)
+        claims = jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["RS256"],
+            audience=audience,
+            issuer=issuer,
+            options={"require": ["exp"]},
+        )
+    except Exception as exc:
+        logger.exception("extract-clothing-metadata: Failed to validate bearer token")
+        raise HTTPException(status_code=401, detail="Unauthorized metadata request.") from exc
+
+    if not isinstance(claims, dict):
+        raise HTTPException(status_code=401, detail="Unauthorized metadata request.")
+    return claims
+
+
+def _validate_metadata_auth_mode(mode: str, headers: dict[str, str]) -> None:
+    if mode == "api-key":
+        expected = _metadata_api_key()
+        if not expected:
+            raise HTTPException(status_code=500, detail="METADATA_EXTRACT_API_KEY is not configured.")
+        supplied = headers.get("x-api-key", "")
+        if _normalise_header_value(supplied) != expected:
+            logger.warning("extract-clothing-metadata: API key authentication failed")
+            raise HTTPException(status_code=401, detail="Unauthorized metadata request.")
+        return
+
+    if mode == "azuread":
+        bearer = _normalise_header_value(headers.get("authorization"))
+        if not bearer.startswith("Bearer "):
+            logger.warning("extract-clothing-metadata: Missing bearer token")
+            raise HTTPException(status_code=401, detail="Unauthorized metadata request.")
+
+        token = bearer.removeprefix("Bearer ").strip()
+        if not token:
+            logger.warning("extract-clothing-metadata: Empty bearer token")
+            raise HTTPException(status_code=401, detail="Unauthorized metadata request.")
+
+        try:
+            _validate_azure_ad_token(token)
+        except Exception as exc:
+            logger.exception("extract-clothing-metadata: Failed to validate bearer token")
+            raise HTTPException(status_code=401, detail="Unauthorized metadata request.") from exc
+
+        return
+
+    logger.warning("extract-clothing-metadata: Unsupported auth mode: %s", mode)
+    raise HTTPException(status_code=500, detail="Invalid metadata auth mode configuration.")
+
+
+def _validate_metadata_payload(raw: Any) -> dict[str, object]:
+    if not isinstance(raw, dict):
+        return {"brand": None, "category": None, "tags": [], "colours": []}
+
+    def _to_text(value: Any) -> str | None:
+        if not isinstance(value, str):
+            return None
+        value = value.strip()
+        return value or None
+
+    def _to_tag_list(value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        tags: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                continue
+            item_value = item.strip()
+            if item_value:
+                tags.append(item_value)
+        return tags
+
+    def _to_colours(value: Any) -> list[dict[str, str]]:
+        if not isinstance(value, list):
+            return []
+        colours: list[dict[str, str]] = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            name = _to_text(item.get("name"))
+            hex_value = _to_text(item.get("hex"))
+            if not name or not hex_value:
+                continue
+            hex_value = hex_value.strip().lower()
+            if not hex_value.startswith("#"):
+                hex_value = f"#{hex_value.lstrip('#')}"
+            if len(hex_value) != 7:
+                logger.info("extract-clothing-metadata: Ignoring invalid colour hex value %s", hex_value)
+                continue
+            colours.append({"name": name, "hex": hex_value})
+        return colours
+
+    return {
+        "brand": _to_text(raw.get("brand")),
+        "category": _to_text(raw.get("category")),
+        "tags": _to_tag_list(raw.get("tags")),
+        "colours": _to_colours(raw.get("colours")),
+    }
+
+
+def _strip_model_code_fence(text: str) -> str:
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    first_newline = stripped.find("\n")
+    last_fence = stripped.rfind("```")
+    if first_newline < 0 or last_fence <= first_newline:
+        return stripped
+    return stripped[first_newline + 1 : last_fence].strip()
+
+
+def _infer_clothing_metadata(image_bytes: bytes, media_type: str, item_id: str) -> dict[str, object]:
+    try:
+        from langchain_openai import AzureChatOpenAI
+        from langchain_core.messages import HumanMessage, SystemMessage
+    except Exception as exc:
+        logger.warning(
+            "extract-clothing-metadata: langchain_openai dependency unavailable for item %s: %s",
+            item_id,
+            exc,
+        )
+        return {"brand": None, "category": None, "tags": [], "colours": []}
+
+    try:
+        endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        api_key = os.getenv("AZURE_OPENAI_API_KEY")
+        deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini")
+        if not endpoint or not api_key:
+            raise RuntimeError("Azure OpenAI credentials are not configured.")
+
+        llm = AzureChatOpenAI(
+            azure_endpoint=endpoint,
+            api_key=api_key,
+            azure_deployment=deployment,
+            api_version="2024-12-01-preview",
+            temperature=0.2,
+        )
+        image_data_uri = f"data:{media_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+        system_prompt = (
+            "You are a clothing metadata extractor. "
+            "Return ONLY a JSON object with fields: "
+            'brand (string or null), category (string or null), tags (array of strings), '
+            "colours (array of objects {name, hex}), and no additional text."
+        )
+        response = llm.invoke(
+            [
+                SystemMessage(content=system_prompt),
+                HumanMessage(
+                    content=[
+                        {
+                            "type": "text",
+                            "text": "Extract deterministic clothing metadata from the image.",
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": image_data_uri},
+                        },
+                    ]
+                ),
+            ]
+        )
+        content = getattr(response, "content", "")
+        return _validate_metadata_payload(json.loads(_strip_model_code_fence(str(content))))
+    except Exception as exc:
+        logger.warning("extract-clothing-metadata: failed for item %s: %s", item_id, exc)
+        return {"brand": None, "category": None, "tags": [], "colours": []}
+
+
 def _get_archive_blob(item_id: str):
     output_blob_name = f"{item_id}{_ARCHIVE_BLOB_SUFFIX}"
     blob_service = _get_blob_service()
@@ -1193,6 +1473,39 @@ async def process_image(request: Request):
 
     logger.info("process-image: item %s → %s (WebP, %d bytes)", item_id, archive_url, len(transparent_webp))
     return {"id": item_id, "imageUrl": archive_url, "mediaType": _WEBP_MEDIA_TYPE}
+
+
+# ── Metadata extraction endpoint (Python service) ─────────────────────────────
+
+
+@fastapi_app.post(
+    "/api/extract-clothing-metadata",
+    response_model=ClothingMetadataExtractionResponse,
+    responses={
+        200: {"description": "Deterministic clothing metadata payload."},
+        400: {"description": "Invalid request payload."},
+        401: {"description": "Unauthorized metadata request."},
+        500: {"description": "Metadata dependency misconfiguration."},
+    },
+)
+async def extract_clothing_metadata(
+    request: Request, payload: ClothingMetadataExtractionRequest
+) -> ClothingMetadataExtractionResponse:
+    headers = {k.lower(): v for k, v in request.headers.items()}
+    mode = _metadata_auth_mode()
+    _validate_metadata_auth_mode(mode, headers)
+
+    request_id = _metadata_request_id_from_headers(headers, request)
+    traceparent = _metadata_traceparent_from_headers(headers, request)
+    if request_id or traceparent:
+        logger.info("extract-clothing-metadata: request_id=%s traceparent=%s", request_id, traceparent)
+
+    image_bytes = _decode_base64_image(payload.image_bytes_base64)
+    metadata_payload = _validate_metadata_payload(
+        _infer_clothing_metadata(image_bytes, payload.media_type, payload.item_id)
+    )
+    response_payload = ClothingMetadataExtractionResponse(**metadata_payload)
+    return response_payload
 
 
 # ── Chat endpoint (SSE streaming) ─────────────────────────────────────────────

@@ -12,8 +12,11 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.43.0" />
+    <PackageReference Include="Azure.Core" Version="1.51.1" />
+    <PackageReference Include="Azure.Identity" Version="1.19.0" />
     <PackageReference Include="Azure.AI.OpenAI" Version="2.1.0" />
     <PackageReference Include="Azure.Storage.Blobs" Version="12.27.0" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.3" />
     <!-- Force patched Newtonsoft version — CosmosDB SDK pulls 10.0.2 transitively which has a known vulnerability -->
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
