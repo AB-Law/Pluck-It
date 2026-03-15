@@ -1,0 +1,78 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AZURE_FUNCTIONS_ENVIRONMENT": "Development",
+
+    "AzureWebJobsStorage": "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OugushZnRUOkvietl3hGys8uqHFht0YhfB7DPm3bkzrEt5PJBKgIfbI=;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;QueueEndpoint=http://127.0.0.1:10001/devstoreaccount1;",
+    "StorageQueue": "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OugushZnRUOkvietl3hGys8uqHFht0YhfB7DPm3bkzrEt5PJBKgIfbI=;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;QueueEndpoint=http://127.0.0.1:10001/devstoreaccount1;",
+    "AzureWebJobsStorageQueue": "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OugushZnRUOkvietl3hGys8uqHFht0YhfB7DPm3bkzrEt5PJBKgIfbI=;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;QueueEndpoint=http://127.0.0.1:10001/devstoreaccount1;",
+
+    "STORAGE_ACCOUNT_NAME": "devstoreaccount1",
+    "STORAGE_ACCOUNT_KEY": "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OugushZnRUOkvietl3hGys8uqHFht0YhfB7DPm3bkzrEt5PJBKgIfbI=",
+    "UPLOADS_CONTAINER_NAME": "uploads",
+    "ARCHIVE_CONTAINER_NAME": "archive",
+
+    "COSMOS_DB_ENDPOINT": "https://localhost:8081/",
+    "COSMOS_DB_KEY": "C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b5S5O4FhfJLkfB6NWNFNJ+Mfzq8R7uoB8Tg==",
+    "COSMOS_DB_DATABASE": "PluckIt",
+    "COSMOS_DB_CONTAINER": "Wardrobe",
+    "COSMOS_DB_REFRESH_TOKENS_CONTAINER": "RefreshTokens",
+    "COSMOS_DB_USER_PROFILES_CONTAINER": "UserProfiles",
+    "COSMOS_DB_CONVERSATIONS_CONTAINER": "Conversations",
+    "COSMOS_DB_DIGESTS_CONTAINER": "Digests",
+    "COSMOS_DB_MOODS_CONTAINER": "Moods",
+    "COSMOS_DB_DIGEST_FEEDBACK_CONTAINER": "DigestFeedback",
+    "COSMOS_DB_WEAR_EVENTS_CONTAINER": "WearEvents",
+    "COSMOS_DB_STYLING_ACTIVITY_CONTAINER": "StylingActivity",
+    "COSMOS_DB_SCRAPER_SOURCES_CONTAINER": "ScraperSources",
+    "COSMOS_DB_SCRAPED_ITEMS_CONTAINER": "ScrapedItems",
+    "COSMOS_DB_USER_SOURCE_SUBSCRIPTIONS_CONTAINER": "UserSourceSubscriptions",
+    "COSMOS_DB_TASTE_CALIBRATION_CONTAINER": "TasteCalibration",
+    "COSMOS_DB_USER_BANS_CONTAINER": "UserBans",
+    "COSMOS_DB_TASTE_JOBS_CONTAINER": "TasteAnalysisJobs",
+    "COSMOS_DB_TASTE_JOB_DEAD_LETTER_CONTAINER": "TasteAnalysisJobDeadLetters",
+
+    "AZURE_OPENAI_ENDPOINT": "https://<your-resource>.openai.azure.com/",
+    "AZURE_OPENAI_API_KEY": "<your-azure-openai-api-key>",
+    "AZURE_OPENAI_DEPLOYMENT": "gpt-4.1-mini",
+    "AZURE_OPENAI_EMBEDDING_DEPLOYMENT": "text-embedding-3-small",
+
+    "GOOGLE_CLIENT_ID": "20801742779-oihk5jfkcio2ulf9uk36ebvgnejbdv0l.apps.googleusercontent.com",
+
+    "LOCAL_DEV_USER_ID": "local-dev-user",
+    "ADMIN_USER_IDS": "local-dev-user",
+
+    "CORS_ALLOWED_ORIGINS": "http://localhost:4200",
+
+    "TASTE_JOB_QUEUE_NAME": "taste-analysis-jobs",
+    "TASTE_JOB_DEAD_LETTER_QUEUE_NAME": "taste-analysis-jobs-poison",
+
+    "SEGMENTATION_ENDPOINT_URL": "https://<your-modal-app>.modal.run",
+    "SEGMENTATION_SHARED_TOKEN": "<random-secret-shared-with-modal-app>",
+
+    "APPLICATIONINSIGHTS_CONNECTION_STRING": "",
+
+    "LANGFUSE_PUBLIC_KEY": "",
+    "LANGFUSE_SECRET_KEY": "",
+    "LANGFUSE_HOST": "https://us.cloud.langfuse.com",
+    "LANGFUSE_BASE_URL": "https://us.cloud.langfuse.com",
+
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "",
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT": "",
+    "OTEL_EXPORTER_OTLP_HEADERS": "",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+    "OTEL_TRACES_EXPORTER": "otlp",
+    "OTEL_METRICS_EXPORTER": "otlp",
+    "OTEL_LOGS_EXPORTER": "otlp",
+    "OTEL_SERVICE_NAME": "pluckit-processor-func-local",
+
+    "COHERE_ENDPOINT": "",
+    "COHERE_API_KEY": ""
+  },
+  "Host": {
+    "LocalHttpPort": 7071,
+    "CORS": "http://localhost:4200",
+    "CORSCredentials": true
+  }
+}
