@@ -309,16 +309,34 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   private recordStylingActivity(itemId: string, source: string): void {
-    const randomUuid = globalThis.crypto?.randomUUID;
-    const randomValues =
-      globalThis.crypto?.getRandomValues ??
-      globalThis.window?.msCrypto?.getRandomValues;
-    const rand =
-      typeof randomUuid === 'function'
-        ? randomUuid()
-        : typeof randomValues === 'function'
-          ? `${Date.now()}-${Array.from(randomValues(new Uint32Array(1)))[0].toString(16)}`
-          : `${Date.now()}-${Math.floor(Math.random() * 0xffffffff).toString(16)}`;
+    const windowCrypto = globalThis.crypto;
+    const windowMsCrypto = (globalThis as { msCrypto?: { getRandomValues: Crypto['getRandomValues'] } })
+      .msCrypto;
+    let rand: string | undefined;
+    let randomSuffix: string | undefined;
+    if (typeof windowCrypto?.randomUUID === 'function' && windowCrypto) {
+      rand = windowCrypto.randomUUID();
+    } else {
+      if (typeof windowCrypto?.getRandomValues === 'function' && windowCrypto) {
+        try {
+          const values = new Uint32Array(1);
+          windowCrypto.getRandomValues.call(windowCrypto, values);
+          randomSuffix = values[0].toString(16);
+        } catch {
+          randomSuffix = undefined;
+        }
+      }
+      if (randomSuffix === undefined && windowMsCrypto?.getRandomValues) {
+        try {
+          const values = new Uint32Array(1);
+          windowMsCrypto.getRandomValues.call(windowMsCrypto, values);
+          randomSuffix = values[0].toString(16);
+        } catch {
+          randomSuffix = undefined;
+        }
+      }
+      rand = `${Date.now()}-${randomSuffix ?? Math.floor(Math.random() * 0xffffffff).toString(16)}`;
+    }
     this.wardrobeService
       .recordStylingActivity({
         itemId,

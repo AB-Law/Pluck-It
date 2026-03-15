@@ -38,7 +38,7 @@ jobs:
       run: npm install
     
     - name: Unit Tests
-      run: npm test -- --no-progress
+      run: npm test -- --no-progress --watch=false
 
     - name: Build Production
       run: npm run build
