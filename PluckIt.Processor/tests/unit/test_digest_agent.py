@@ -499,6 +499,8 @@ def test_load_user_wardrobe_prefetches_ids_and_limits_prompt_items():
     assert "SELECT c.id FROM c WHERE c.userId = @userId" in first_query
     assert {"name": "@userId", "value": "user-1"} in first_params
     assert "ORDER BY c.wearCount DESC" in second_query
+    assert "IS_DEFINED(c.wearCount)" in second_query
+    assert "c.wearCount > 0" in second_query
     assert {"name": "@userId", "value": "user-1"} in second_params
     assert {"name": "@limit", "value": _PROMPT_ITEM_LIMIT} in second_params
 
