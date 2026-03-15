@@ -229,7 +229,6 @@ async def get_wear_patterns(query: str = "", config: RunnableConfig = None) -> s
 
     # ── Build ranked top-N summary ────────────────────────────────────────────
     scored.sort(key=lambda x: x["score"], reverse=True)
-    scored.sort(key=lambda x: x["score"], reverse=True)
     top_items = scored[:_SUMMARY_LIMIT]
 
     # Top occasions and climate conditions (global across all items)
