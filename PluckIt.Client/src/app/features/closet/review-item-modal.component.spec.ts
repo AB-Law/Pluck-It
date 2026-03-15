@@ -79,7 +79,7 @@ describe('ReviewItemModalComponent', () => {
   it('clones incoming item on changes to keep mutations isolated', () => {
     setInputItem(BASE_ITEM);
     expect(component.draft).toEqual(expect.objectContaining({ id: BASE_ITEM.id, category: BASE_ITEM.category }));
-    expect(component.draft).not.toBe(component.item as any);
+    expect(component.draft).not.toBe(component.item);
     expect(component.draft?.tags).not.toBe(BASE_ITEM.tags);
     expect(component.draft?.colours).not.toBe(BASE_ITEM.colours);
   });
@@ -224,12 +224,12 @@ describe('ReviewItemModalComponent', () => {
     const root = fixture.nativeElement as HTMLElement;
     setInputItem({ ...BASE_ITEM, category: 'Footwear', size: { shoeSize: 9, system: 'US' }, careInfo: [], condition: 'Good' });
 
-    const priceInput = fixture.debugElement.query(By.css('input[placeholder=\"0.00\"]'));
+    const priceInput = fixture.debugElement.query(By.css('input[placeholder="0.00"]'));
     priceInput.triggerEventHandler('ngModelChange', 42);
     fixture.detectChanges();
     expect(component.draft?.price?.amount).toBe(42);
 
-    const shoeInput = fixture.debugElement.query(By.css('input[placeholder=\"e.g. 10.5\"]'));
+    const shoeInput = fixture.debugElement.query(By.css('input[placeholder="e.g. 10.5"]'));
     shoeInput.triggerEventHandler('ngModelChange', 10.5);
     fixture.detectChanges();
     expect(component.draft?.size).toEqual({ shoeSize: 10.5, system: 'US' });

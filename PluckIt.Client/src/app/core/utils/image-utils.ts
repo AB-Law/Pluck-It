@@ -39,9 +39,9 @@ export async function resizeImageFile(
   const outH = Math.round(height * scale);
 
   let canvas: OffscreenCanvas | HTMLCanvasElement;
-  const offscreenCanvasCtor = (globalThis as any).OffscreenCanvas as
-    | (new (width: number, height: number) => OffscreenCanvas)
-    | undefined;
+  const offscreenCanvasCtor =
+    (globalThis as { OffscreenCanvas?: new (width: number, height: number) => OffscreenCanvas })
+      .OffscreenCanvas;
   const usingOffscreenCanvas = !!offscreenCanvasCtor;
   let offscreenCanvas: OffscreenCanvas | null = null;
 

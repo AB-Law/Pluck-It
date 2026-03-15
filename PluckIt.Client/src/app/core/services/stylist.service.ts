@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
@@ -19,14 +19,14 @@ export interface OutfitRecommendation {
 
 @Injectable({ providedIn: 'root' })
 export class StylistService {
-  private readonly base = environment.apiUrl;
+  private readonly http = inject(HttpClient);
 
-  constructor(private readonly http: HttpClient) {}
+  private readonly base = environment.apiUrl;
 
   getRecommendations(request: StylistRequest): Observable<OutfitRecommendation[]> {
     return this.http.post<OutfitRecommendation[]>(
       `${this.base}/api/stylist/recommendations`,
-      request
+      request,
     );
   }
 }

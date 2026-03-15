@@ -1,10 +1,19 @@
 import { TestBed } from '@angular/core/testing';
 import { AuthService } from './auth.service';
 import { environment } from '../../../environments/environment';
+import { WritableSignal } from '@angular/core';
 
 describe('AuthService', () => {
   let service: AuthService;
   const originalProduction = environment.production;
+  type AuthServiceInternals = AuthService & {
+    _user: WritableSignal<{ name: string; email: string; userId: string } | null>;
+    _idToken: WritableSignal<string | null>;
+    _tokenExp: WritableSignal<number>;
+    waitForGIS: () => Promise<void>;
+    handleCredentialResponse: (response: { credential: string }) => void;
+  };
+  const asInternal = (): AuthServiceInternals => service as unknown as AuthServiceInternals;
 
   const makeToken = (payload: Record<string, unknown>): string => {
     const base = {
@@ -60,9 +69,9 @@ describe('AuthService', () => {
     const google = { accounts: { id: { prompt, disableAutoSelect: vi.fn(), renderButton: vi.fn() } } };
     Object.defineProperty(window, 'google', { value: google, configurable: true });
 
-    (service as any)._user.set({ name: 'Tester', email: 'a@b.com', userId: 'u-1' });
-    (service as any)._idToken.set('tkn');
-    (service as any)._tokenExp.set(Math.floor(Date.now() / 1000) + 1000);
+    asInternal()._user.set({ name: 'Tester', email: 'a@b.com', userId: 'u-1' });
+    asInternal()._idToken.set('tkn');
+    asInternal()._tokenExp.set(Math.floor(Date.now() / 1000) + 1000);
 
     service.ensureFreshToken();
     expect(prompt).not.toHaveBeenCalled();
@@ -73,8 +82,8 @@ describe('AuthService', () => {
     const google = { accounts: { id: { prompt, disableAutoSelect: vi.fn(), renderButton: vi.fn() } } };
     Object.defineProperty(window, 'google', { value: google, configurable: true });
 
-    (service as any)._user.set({ name: 'Tester', email: 'a@b.com', userId: 'u-1' });
-    (service as any)._tokenExp.set(Math.floor(Date.now() / 1000) + 10);
+    asInternal()._user.set({ name: 'Tester', email: 'a@b.com', userId: 'u-1' });
+    asInternal()._tokenExp.set(Math.floor(Date.now() / 1000) + 10);
     service.ensureFreshToken();
 
     expect(prompt).toHaveBeenCalled();
@@ -120,8 +129,8 @@ describe('AuthService', () => {
       value: { accounts: { id: { disableAutoSelect, initialize: vi.fn(), prompt: vi.fn(), renderButton: vi.fn() } } },
       configurable: true,
     });
-    (service as any)._user.set({ name: 'Tester', email: 'a@b.com', userId: 'u-1' });
-    (service as any)._idToken.set('token');
+    asInternal()._user.set({ name: 'Tester', email: 'a@b.com', userId: 'u-1' });
+    asInternal()._idToken.set('token');
 
     service.logout();
 
@@ -162,7 +171,7 @@ describe('AuthService', () => {
     const prompt = vi.fn((callback: (notification: { isNotDisplayed: () => boolean; isSkippedMoment: () => boolean }) => void) => {
       callback({ isNotDisplayed: () => true, isSkippedMoment: () => false });
     });
-    vi.spyOn(service as any, 'waitForGIS').mockResolvedValue(undefined);
+    vi.spyOn(asInternal(), 'waitForGIS').mockResolvedValue(undefined);
     Object.defineProperty(window, 'google', {
       value: { accounts: { id: { initialize, prompt, disableAutoSelect: vi.fn(), renderButton: vi.fn() } } },
       configurable: true,

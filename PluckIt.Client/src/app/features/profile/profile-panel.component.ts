@@ -1,10 +1,4 @@
-import {
-  Component,
-  EventEmitter,
-  OnInit,
-  Output,
-  signal,
-} from '@angular/core';
+import { Component, EventEmitter, OnInit, Output, signal, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { UserProfile, UserProfileService } from '../../core/services/user-profile.service';
 import { NetworkService } from '../../core/services/network.service';
@@ -27,27 +21,47 @@ const CURRENCIES = [
 const SIZE_SYSTEMS = ['US', 'EU', 'UK'];
 
 const STYLE_OPTIONS = [
-  'streetwear', 'minimalist', 'preppy', 'smart casual',
-  'athleisure', 'bohemian', 'classic', 'techwear', 'y2k', 'vintage',
+  'streetwear',
+  'minimalist',
+  'preppy',
+  'smart casual',
+  'athleisure',
+  'bohemian',
+  'classic',
+  'techwear',
+  'y2k',
+  'vintage',
 ];
 
 @Component({
   selector: 'app-profile-panel',
   standalone: true,
   imports: [FormsModule],
-  styles: [`
-    @keyframes slide-in {
-      from { transform: translateX(100%); opacity: 0; }
-      to   { transform: translateX(0);    opacity: 1; }
-    }
-    .panel-animate {
-      animation: slide-in 0.22s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
-    }
-    /* Remove number input spinners */
-    input[type="number"]::-webkit-outer-spin-button,
-    input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
-    input[type="number"] { -moz-appearance: textfield; }
-  `],
+  styles: [
+    `
+      @keyframes slide-in {
+        from {
+          transform: translateX(100%);
+          opacity: 0;
+        }
+        to {
+          transform: translateX(0);
+          opacity: 1;
+        }
+      }
+      .panel-animate {
+        animation: slide-in 0.22s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+      }
+      /* Remove number input spinners */
+      input[type='number']::-webkit-outer-spin-button,
+      input[type='number']::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+      }
+      input[type='number'] {
+        -moz-appearance: textfield;
+      }
+    `,
+  ],
   template: `
     <!-- Backdrop -->
     <div
@@ -59,18 +73,26 @@ const STYLE_OPTIONS = [
     <!-- Slide-over panel -->
     <aside
       class="panel-animate fixed top-0 right-0 z-50 h-full w-full max-w-full md:max-w-sm bg-black border-l border-[#1F1F1F] flex flex-col shadow-2xl"
-      role="dialog" aria-modal="true" aria-labelledby="profile-panel-title"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="profile-panel-title"
       (click)="$event.stopPropagation()"
     >
       <!-- Header -->
       <div class="flex items-center justify-between px-4 py-4 border-b border-[#1F1F1F] shrink-0">
         <div>
-          <h2 id="profile-panel-title" class="text-white font-bold text-base uppercase tracking-tight">Profile & Settings</h2>
+          <h2
+            id="profile-panel-title"
+            class="text-white font-bold text-base uppercase tracking-tight"
+          >
+            Profile & Settings
+          </h2>
           <p class="text-xs text-slate-500 font-mono mt-0.5">Body stats · Currency · Size system</p>
         </div>
         <button
           class="touch-target h-10 w-10 flex items-center justify-center rounded-lg text-slate-500 hover:text-white transition-colors"
-          (click)="closed.emit()" aria-label="Close"
+          (click)="closed.emit()"
+          aria-label="Close"
         >
           <span class="material-symbols-outlined">close</span>
         </button>
@@ -78,10 +100,11 @@ const STYLE_OPTIONS = [
 
       <!-- Body -->
       <div class="flex-1 overflow-y-auto px-4 py-4 md:px-6 md:py-6 space-y-8">
-
         @if (saving()) {
           <div class="flex items-center gap-2 text-primary text-xs font-mono">
-            <span class="material-symbols-outlined animate-spin" style="font-size:16px">progress_activity</span>
+            <span class="material-symbols-outlined animate-spin" style="font-size:16px"
+              >progress_activity</span
+            >
             Saving…
           </div>
         }
@@ -91,9 +114,10 @@ const STYLE_OPTIONS = [
 
         <!-- ── Display preferences ──────────────────────────────────── -->
         <section>
-          <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-4">Preferences</h3>
+          <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-4">
+            Preferences
+          </h3>
           <div class="space-y-5">
-
             <!-- Currency -->
             <div>
               <label class="block text-xs text-slate-500 font-mono mb-2">Currency</label>
@@ -106,95 +130,152 @@ const STYLE_OPTIONS = [
                     <option [value]="c.code" class="bg-black">{{ c.label }}</option>
                   }
                 </select>
-                <span class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" style="font-size:18px">expand_more</span>
+                <span
+                  class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none"
+                  style="font-size:18px"
+                  >expand_more</span
+                >
               </div>
             </div>
 
             <!-- Size system -->
             <div>
-              <label class="block text-xs text-slate-500 font-mono mb-2">Preferred Size System</label>
+              <label class="block text-xs text-slate-500 font-mono mb-2"
+                >Preferred Size System</label
+              >
               <div class="flex border border-[#1F1F1F] touch-target">
                 @for (sys of sizeSystems; track sys; let last = $last) {
                   <button
                     type="button"
                     [class]="sysClass(sys, last)"
                     (click)="draft.preferredSizeSystem = sys"
-                  >{{ sys }}</button>
+                  >
+                    {{ sys }}
+                  </button>
                 }
               </div>
             </div>
-
           </div>
         </section>
 
         <!-- ── Body measurements ────────────────────────────────────── -->
         <section>
-          <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-4">Body Measurements</h3>
-          <p class="text-[11px] text-slate-600 font-mono mb-4">All values in centimetres. Used by the stylist for personalised fits.</p>
+          <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-4">
+            Body Measurements
+          </h3>
+          <p class="text-[11px] text-slate-600 font-mono mb-4">
+            All values in centimetres. Used by the stylist for personalised fits.
+          </p>
 
           <div class="grid grid-cols-2 gap-4">
-
             <div>
               <label class="block text-[10px] text-slate-500 font-mono mb-1.5">HEIGHT (cm)</label>
-              <input type="number" [(ngModel)]="draft.heightCm" min="50" max="250" step="0.5" placeholder="e.g. 175"
-                class="w-full bg-transparent border border-[#1F1F1F] focus:border-primary focus:outline-none text-white font-mono h-10 px-3 text-sm transition-colors placeholder-slate-600" />
+              <input
+                type="number"
+                [(ngModel)]="draft.heightCm"
+                min="50"
+                max="250"
+                step="0.5"
+                placeholder="e.g. 175"
+                class="w-full bg-transparent border border-[#1F1F1F] focus:border-primary focus:outline-none text-white font-mono h-10 px-3 text-sm transition-colors placeholder-slate-600"
+              />
             </div>
 
             <div>
               <label class="block text-[10px] text-slate-500 font-mono mb-1.5">WEIGHT (kg)</label>
-              <input type="number" [(ngModel)]="draft.weightKg" min="20" max="300" step="0.5" placeholder="e.g. 70"
-                class="w-full bg-transparent border border-[#1F1F1F] focus:border-primary focus:outline-none text-white font-mono h-10 px-3 text-sm transition-colors placeholder-slate-600" />
+              <input
+                type="number"
+                [(ngModel)]="draft.weightKg"
+                min="20"
+                max="300"
+                step="0.5"
+                placeholder="e.g. 70"
+                class="w-full bg-transparent border border-[#1F1F1F] focus:border-primary focus:outline-none text-white font-mono h-10 px-3 text-sm transition-colors placeholder-slate-600"
+              />
             </div>
 
             <div>
               <label class="block text-[10px] text-slate-500 font-mono mb-1.5">CHEST (cm)</label>
-              <input type="number" [(ngModel)]="draft.chestCm" min="50" max="200" step="0.5" placeholder="e.g. 96"
-                class="w-full bg-transparent border border-[#1F1F1F] focus:border-primary focus:outline-none text-white font-mono h-10 px-3 text-sm transition-colors placeholder-slate-600" />
+              <input
+                type="number"
+                [(ngModel)]="draft.chestCm"
+                min="50"
+                max="200"
+                step="0.5"
+                placeholder="e.g. 96"
+                class="w-full bg-transparent border border-[#1F1F1F] focus:border-primary focus:outline-none text-white font-mono h-10 px-3 text-sm transition-colors placeholder-slate-600"
+              />
             </div>
 
             <div>
               <label class="block text-[10px] text-slate-500 font-mono mb-1.5">WAIST (cm)</label>
-              <input type="number" [(ngModel)]="draft.waistCm" min="40" max="200" step="0.5" placeholder="e.g. 81"
-                class="w-full bg-transparent border border-[#1F1F1F] focus:border-primary focus:outline-none text-white font-mono h-10 px-3 text-sm transition-colors placeholder-slate-600" />
+              <input
+                type="number"
+                [(ngModel)]="draft.waistCm"
+                min="40"
+                max="200"
+                step="0.5"
+                placeholder="e.g. 81"
+                class="w-full bg-transparent border border-[#1F1F1F] focus:border-primary focus:outline-none text-white font-mono h-10 px-3 text-sm transition-colors placeholder-slate-600"
+              />
             </div>
 
             <div>
               <label class="block text-[10px] text-slate-500 font-mono mb-1.5">HIPS (cm)</label>
-              <input type="number" [(ngModel)]="draft.hipsCm" min="50" max="200" step="0.5" placeholder="e.g. 101"
-                class="w-full bg-transparent border border-[#1F1F1F] focus:border-primary focus:outline-none text-white font-mono h-10 px-3 text-sm transition-colors placeholder-slate-600" />
+              <input
+                type="number"
+                [(ngModel)]="draft.hipsCm"
+                min="50"
+                max="200"
+                step="0.5"
+                placeholder="e.g. 101"
+                class="w-full bg-transparent border border-[#1F1F1F] focus:border-primary focus:outline-none text-white font-mono h-10 px-3 text-sm transition-colors placeholder-slate-600"
+              />
             </div>
 
             <div>
               <label class="block text-[10px] text-slate-500 font-mono mb-1.5">INSEAM (cm)</label>
-              <input type="number" [(ngModel)]="draft.inseamCm" min="40" max="120" step="0.5" placeholder="e.g. 76"
-                class="w-full bg-transparent border border-[#1F1F1F] focus:border-primary focus:outline-none text-white font-mono h-10 px-3 text-sm transition-colors placeholder-slate-600" />
+              <input
+                type="number"
+                [(ngModel)]="draft.inseamCm"
+                min="40"
+                max="120"
+                step="0.5"
+                placeholder="e.g. 76"
+                class="w-full bg-transparent border border-[#1F1F1F] focus:border-primary focus:outline-none text-white font-mono h-10 px-3 text-sm transition-colors placeholder-slate-600"
+              />
             </div>
-
           </div>
         </section>
 
         <!-- ── Style identity ──────────────────────────────────────── -->
         <section>
-          <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-4">Style Identity</h3>
-          <p class="text-[11px] text-slate-600 font-mono mb-4">Your personal aesthetics — the stylist agent uses these to personalise suggestions.</p>
+          <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-widest mb-4">
+            Style Identity
+          </h3>
+          <p class="text-[11px] text-slate-600 font-mono mb-4">
+            Your personal aesthetics — the stylist agent uses these to personalise suggestions.
+          </p>
 
           <!-- Style preference chips -->
           <div class="mb-5">
-            <label class="block text-[10px] text-slate-500 font-mono mb-2">AESTHETICS (pick all that apply)</label>
+            <label class="block text-[10px] text-slate-500 font-mono mb-2"
+              >AESTHETICS (pick all that apply)</label
+            >
             <div class="flex flex-wrap gap-2">
               @for (style of styleOptions; track style) {
-                <button
-                  type="button"
-                  [class]="styleChipClass(style)"
-                  (click)="toggleStyle(style)"
-                >{{ style }}</button>
+                <button type="button" [class]="styleChipClass(style)" (click)="toggleStyle(style)">
+                  {{ style }}
+                </button>
               }
             </div>
           </div>
 
           <!-- Favourite brands -->
           <div class="mb-5">
-            <label class="block text-[10px] text-slate-500 font-mono mb-2">FAVOURITE BRANDS (comma-separated)</label>
+            <label class="block text-[10px] text-slate-500 font-mono mb-2"
+              >FAVOURITE BRANDS (comma-separated)</label
+            >
             <input
               type="text"
               [value]="draft.favoriteBrands.join(', ')"
@@ -206,7 +287,9 @@ const STYLE_OPTIONS = [
 
           <!-- Preferred colours -->
           <div class="mb-5">
-            <label class="block text-[10px] text-slate-500 font-mono mb-2">PREFERRED COLOURS (comma-separated)</label>
+            <label class="block text-[10px] text-slate-500 font-mono mb-2"
+              >PREFERRED COLOURS (comma-separated)</label
+            >
             <input
               type="text"
               [value]="draft.preferredColours.join(', ')"
@@ -218,7 +301,9 @@ const STYLE_OPTIONS = [
 
           <!-- Location city -->
           <div>
-            <label class="block text-[10px] text-slate-500 font-mono mb-2">CITY (for weather-aware suggestions)</label>
+            <label class="block text-[10px] text-slate-500 font-mono mb-2"
+              >CITY (for weather-aware suggestions)</label
+            >
             <input
               type="text"
               [(ngModel)]="draft.locationCity"
@@ -231,7 +316,9 @@ const STYLE_OPTIONS = [
           <div class="flex items-center justify-between pt-1">
             <div>
               <p class="text-[11px] text-slate-200 font-semibold">AI Personalisation</p>
-              <p class="text-[10px] text-slate-500 font-mono mt-0.5">Enable weekly digest &amp; wear-based recommendations</p>
+              <p class="text-[10px] text-slate-500 font-mono mt-0.5">
+                Enable weekly digest &amp; wear-based recommendations
+              </p>
             </div>
             <button
               type="button"
@@ -239,7 +326,9 @@ const STYLE_OPTIONS = [
               [attr.aria-checked]="draft.recommendationOptIn !== false"
               class="relative w-10 h-6 rounded-full transition-colors shrink-0 focus:outline-none"
               [class]="draft.recommendationOptIn !== false ? 'bg-primary' : 'bg-[#333]'"
-              (click)="draft.recommendationOptIn = draft.recommendationOptIn === false ? true : false"
+              (click)="
+                draft.recommendationOptIn = draft.recommendationOptIn === false ? true : false
+              "
             >
               <span
                 class="absolute top-1 left-1 h-4 w-4 rounded-full bg-white shadow transition-transform"
@@ -248,7 +337,6 @@ const STYLE_OPTIONS = [
             </button>
           </div>
         </section>
-
       </div>
 
       <!-- Footer -->
@@ -257,21 +345,29 @@ const STYLE_OPTIONS = [
           type="button"
           class="touch-target flex-1 h-11 text-xs font-bold uppercase tracking-widest text-slate-400 hover:text-white border border-[#1F1F1F] hover:border-slate-500 transition-colors"
           (click)="closed.emit()"
-        >Cancel</button>
+        >
+          Cancel
+        </button>
         <button
           type="button"
           class="touch-target flex-1 bg-primary hover:bg-blue-500 transition-colors h-11 text-xs font-bold uppercase tracking-widest text-white shadow-lg shadow-primary/20 disabled:opacity-50"
           [disabled]="saving()"
           (click)="save()"
-        >Save</button>
+        >
+          Save
+        </button>
       </div>
     </aside>
   `,
 })
 export class ProfilePanelComponent implements OnInit {
+  private readonly profileService = inject(UserProfileService);
+  private readonly networkService = inject(NetworkService);
+  private readonly offlineQueue = inject(OfflineQueueService);
+
   @Output() closed = new EventEmitter<void>();
 
-  readonly saving    = signal(false);
+  readonly saving = signal(false);
   readonly saveError = signal<string | null>(null);
 
   draft: UserProfile = {
@@ -282,15 +378,9 @@ export class ProfilePanelComponent implements OnInit {
     preferredColours: [],
   };
 
-  readonly currencies   = CURRENCIES;
-  readonly sizeSystems  = SIZE_SYSTEMS;
+  readonly currencies = CURRENCIES;
+  readonly sizeSystems = SIZE_SYSTEMS;
   readonly styleOptions = STYLE_OPTIONS;
-
-  constructor(
-    private readonly profileService: UserProfileService,
-    private readonly networkService: NetworkService,
-    private readonly offlineQueue: OfflineQueueService,
-  ) {}
 
   ngOnInit(): void {
     const current = this.profileService.profile();
@@ -298,8 +388,12 @@ export class ProfilePanelComponent implements OnInit {
       this.draft = { ...current };
     } else {
       this.profileService.load().subscribe({
-        next: p => { this.draft = { ...p }; },
-        error: () => { /* use defaults */ }
+        next: (p) => {
+          this.draft = { ...p };
+        },
+        error: () => {
+          /* use defaults */
+        },
       });
     }
   }
@@ -307,18 +401,26 @@ export class ProfilePanelComponent implements OnInit {
   save(): void {
     if (!this.networkService.isCurrentlyOnline()) {
       this.offlineQueue.enqueue('profile/save', this.draft);
-      this.saveError.set(showOfflineBlockMessage('Profile save', 'Changes were queued and will be sent when you reconnect.'));
+      this.saveError.set(
+        showOfflineBlockMessage(
+          'Profile save',
+          'Changes were queued and will be sent when you reconnect.',
+        ),
+      );
       this.saving.set(false);
       return;
     }
     this.saving.set(true);
     this.saveError.set(null);
     this.profileService.update(this.draft).subscribe({
-      next: () => { this.saving.set(false); this.closed.emit(); },
-      error: err => {
+      next: () => {
+        this.saving.set(false);
+        this.closed.emit();
+      },
+      error: (err) => {
         this.saving.set(false);
         this.saveError.set(err?.error?.error ?? err?.message ?? 'Save failed. Please try again.');
-      }
+      },
     });
   }
 
@@ -327,18 +429,30 @@ export class ProfilePanelComponent implements OnInit {
     const idx = prefs.indexOf(style);
     this.draft = {
       ...this.draft,
-      stylePreferences: idx >= 0 ? prefs.filter(s => s !== style) : [...prefs, style],
+      stylePreferences: idx >= 0 ? prefs.filter((s) => s !== style) : [...prefs, style],
     };
   }
 
   parseBrands(event: Event): void {
     const val = (event.target as HTMLInputElement).value;
-    this.draft = { ...this.draft, favoriteBrands: val.split(',').map(s => s.trim()).filter(Boolean) };
+    this.draft = {
+      ...this.draft,
+      favoriteBrands: val
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    };
   }
 
   parseColours(event: Event): void {
     const val = (event.target as HTMLInputElement).value;
-    this.draft = { ...this.draft, preferredColours: val.split(',').map(s => s.trim()).filter(Boolean) };
+    this.draft = {
+      ...this.draft,
+      preferredColours: val
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    };
   }
 
   styleChipClass(style: string): string {
@@ -352,9 +466,10 @@ export class ProfilePanelComponent implements OnInit {
   }
 
   sysClass(sys: string, isLast: boolean): string {
-    const active = this.draft.preferredSizeSystem === sys
-      ? 'bg-white text-black'
-      : 'text-slate-400 hover:bg-white hover:text-black';
+    const active =
+      this.draft.preferredSizeSystem === sys
+        ? 'bg-white text-black'
+        : 'text-slate-400 hover:bg-white hover:text-black';
     const border = isLast ? '' : 'border-r border-[#1F1F1F]';
     return `flex-1 py-2.5 text-xs font-bold uppercase transition-colors ${active} ${border}`.trim();
   }

@@ -15,7 +15,9 @@ import { RouterLink } from '@angular/router';
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink],
   template: `
-    <header class="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle bg-black px-4 py-3 md:px-6 md:py-4 shrink-0 z-50">
+    <header
+      class="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle bg-black px-4 py-3 md:px-6 md:py-4 shrink-0 z-50"
+    >
       <div class="flex items-center gap-3 min-w-0">
         <a
           routerLink="/"
@@ -23,17 +25,16 @@ import { RouterLink } from '@angular/router';
           title="Open your dashboard"
           aria-label="Open your dashboard"
         >
-          <span
-            class="material-symbols-outlined text-primary"
-            style="font-size:30px"
-          >
+          <span class="material-symbols-outlined text-primary" style="font-size:30px">
             checkroom
           </span>
           <h2 class="text-white text-base md:text-xl font-bold tracking-tight">Pluck-It</h2>
         </a>
 
         <label class="hidden md:flex flex-col min-w-[260px] lg:min-w-[320px]">
-          <div class="flex w-full items-center rounded-lg bg-card-dark border border-[#333] focus-within:border-primary/60 transition-colors">
+          <div
+            class="flex w-full items-center rounded-lg bg-card-dark border border-[#333] focus-within:border-primary/60 transition-colors"
+          >
             <div class="flex items-center justify-center pl-3 text-slate-text">
               <span class="material-symbols-outlined" style="font-size:20px">search</span>
             </div>
@@ -98,15 +99,16 @@ import { RouterLink } from '@angular/router';
           </button>
         }
 
-        <a
-          *ngIf="showBackShortcut"
-          routerLink="/"
-          class="hidden md:flex h-10 w-10 items-center justify-center rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] transition-colors touch-target"
-          title="{{ backShortcutLabel }}"
-          aria-label="{{ backShortcutLabel }}"
-        >
-          <span class="material-symbols-outlined" style="font-size:20px">home</span>
-        </a>
+        @if (showBackShortcut) {
+          <a
+            routerLink="/"
+            class="hidden md:flex h-10 w-10 items-center justify-center rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] transition-colors touch-target"
+            title="{{ backShortcutLabel }}"
+            aria-label="{{ backShortcutLabel }}"
+          >
+            <span class="material-symbols-outlined" style="font-size:20px">home</span>
+          </a>
+        }
 
         <a
           routerLink="/vault"
@@ -172,7 +174,9 @@ import { RouterLink } from '@angular/router';
 
       @if (searchOpen()) {
         <label class="w-full md:hidden">
-          <div class="mt-2 flex w-full items-center rounded-lg bg-card-dark border border-[#333] focus-within:border-primary/60 transition-colors">
+          <div
+            class="mt-2 flex w-full items-center rounded-lg bg-card-dark border border-[#333] focus-within:border-primary/60 transition-colors"
+          >
             <div class="flex items-center justify-center pl-3 text-slate-text">
               <span class="material-symbols-outlined" style="font-size:20px">search</span>
             </div>
@@ -216,7 +220,7 @@ export class AppHeaderComponent {
   @Output() searchValueChange = new EventEmitter<string>();
   @Output() uploadRequested = new EventEmitter<void>();
   /** Backward-compatible event alias for older lowercase templates. */
-  @Output('uploadrequest') readonly uploadrequest = this.uploadRequested;
+  @Output() readonly uploadrequest = this.uploadRequested;
   @Output() digestRequested = new EventEmitter<void>();
   @Output() notificationsRequested = new EventEmitter<void>();
   @Output() settingsRequested = new EventEmitter<void>();
@@ -236,6 +240,6 @@ export class AppHeaderComponent {
   }
 
   protected toggleSearch(): void {
-    this.searchOpen.update(open => !open);
+    this.searchOpen.update((open) => !open);
   }
 }

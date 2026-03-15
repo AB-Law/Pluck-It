@@ -3,6 +3,8 @@ import { ActivatedRoute } from '@angular/router';
 import { TasteQuizComponent } from './taste-quiz.component';
 import { TasteQuizService } from '../../core/services/taste-quiz.service';
 import { of, throwError } from 'rxjs';
+import { WritableSignal } from '@angular/core';
+import { QuizSession, TasteProfile } from '../../core/models/scraped-item.model';
 
 describe('TasteQuizComponent', () => {
   let component: TasteQuizComponent;
@@ -12,8 +14,19 @@ describe('TasteQuizComponent', () => {
     respond: ReturnType<typeof vi.fn>;
     complete: ReturnType<typeof vi.fn>;
   };
+  type TasteQuizComponentInternals = TasteQuizComponent & {
+    loading: WritableSignal<boolean>;
+    session: WritableSignal<QuizSession | null>;
+    responding: WritableSignal<boolean>;
+    currentIndex: WritableSignal<number>;
+    tasteProfile: WritableSignal<TasteProfile | null>;
+    currentCard: () => QuizSession['cards'][number] | null;
+    dragOffsetY: WritableSignal<number>;
+    dragging: WritableSignal<boolean>;
+  };
+  const asInternal = (): TasteQuizComponentInternals => component as unknown as TasteQuizComponentInternals;
 
-  const SESSION_PHASE_1 = {
+  const SESSION_PHASE_1: QuizSession = {
     id: 'session-1',
     userId: 'u-1',
     phase: 1,
@@ -29,7 +42,7 @@ describe('TasteQuizComponent', () => {
     createdAt: '2026-03-11T00:00:00Z',
   };
 
-  const SESSION_PHASE_2 = {
+  const SESSION_PHASE_2: QuizSession = {
     id: 'session-2',
     userId: 'u-1',
     phase: 2,
@@ -70,8 +83,8 @@ describe('TasteQuizComponent', () => {
   });
 
   it('loads a normalized phase-1 session and sets loading false', () => {
-    expect((component as any).loading()).toBe(false);
-    expect((component as any).session()).toEqual(expect.objectContaining({
+    expect(asInternal().loading()).toBe(false);
+    expect(asInternal().session()).toEqual(expect.objectContaining({
       id: 'session-1',
       userId: 'u-1',
       phase: 1,
@@ -100,11 +113,11 @@ describe('TasteQuizComponent', () => {
     vi.useFakeTimers();
     component.onChoice('up');
     expect(tasteService.respond).toHaveBeenCalledWith('session-1', { cardPrimaryMood: 'bold', signal: 'up' });
-    expect((component as any).responding()).toBe(true);
+    expect(asInternal().responding()).toBe(true);
 
     vi.advanceTimersByTime(400);
-    expect((component as any).currentIndex()).toBe(1);
-    expect((component as any).responding()).toBe(false);
+    expect(asInternal().currentIndex()).toBe(1);
+    expect(asInternal().responding()).toBe(false);
     vi.useRealTimers();
   });
 
@@ -112,7 +125,7 @@ describe('TasteQuizComponent', () => {
     tasteService.getOrCreateSession.mockReturnValueOnce(of(SESSION_PHASE_2));
     component.onRetake();
 
-    expect((component as any).session()!.phase).toBe(2);
+    expect(asInternal().session()!.phase).toBe(2);
     expect(component.currentCard()!.id).toBe('item-1');
 
     component.onChoice('down');
@@ -131,7 +144,7 @@ describe('TasteQuizComponent', () => {
     vi.useFakeTimers();
     component.onChoice('up');
     vi.advanceTimersByTime(400);
-    expect((component as any).responding()).toBe(false);
+    expect(asInternal().responding()).toBe(false);
     expect(tasteService.complete).toHaveBeenCalledWith('session-1');
     vi.useRealTimers();
   });
@@ -140,19 +153,19 @@ describe('TasteQuizComponent', () => {
     tasteService.respond.mockReturnValueOnce(throwError(() => new Error('net')));
     component.onChoice('down');
     expect(tasteService.respond).toHaveBeenCalledWith('session-1', { cardPrimaryMood: 'bold', signal: 'down' });
-    expect((component as any).responding()).toBe(false);
+    expect(asInternal().responding()).toBe(false);
   });
 
   it('handles swipe gestures with threshold branches', () => {
     component.onCardPointerDown({ clientY: 100 } as PointerEvent);
-    expect((component as any).dragging()).toBe(true);
+    expect(asInternal().dragging()).toBe(true);
 
     component.onCardPointerMove({ clientY: 120 } as PointerEvent);
-    expect((component as any).dragOffsetY()).toBe(20);
+    expect(asInternal().dragOffsetY()).toBe(20);
 
     component.onCardPointerUp();
-    expect((component as any).dragOffsetY()).toBe(0);
-    expect((component as any).responding()).toBe(false);
+    expect(asInternal().dragOffsetY()).toBe(0);
+    expect(asInternal().responding()).toBe(false);
 
     component.onCardPointerDown({ clientY: 100 } as PointerEvent);
     component.onCardPointerMove({ clientY: 200 } as PointerEvent);
@@ -163,8 +176,8 @@ describe('TasteQuizComponent', () => {
   it('resets quiz state on retake and reloads session', () => {
     vi.spyOn(tasteService, 'getOrCreateSession').mockReturnValueOnce(of(SESSION_PHASE_2));
     component.onRetake();
-    expect((component as any).tasteProfile()).toBe(null);
-    expect((component as any).currentIndex()).toBe(0);
-    expect((component as any).session()!.phase).toBe(2);
+    expect(asInternal().tasteProfile()).toBe(null);
+    expect(asInternal().currentIndex()).toBe(0);
+    expect(asInternal().session()!.phase).toBe(2);
   });
 });

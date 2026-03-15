@@ -3,6 +3,9 @@ import { OfflineQueueService } from './offline-queue.service';
 
 describe('OfflineQueueService', () => {
   let service: OfflineQueueService;
+  type OfflineQueueServiceInternals = OfflineQueueService & {
+    _supportsIndexedDb: () => boolean;
+  };
 
   beforeEach(() => {
     TestBed.configureTestingModule({
@@ -67,7 +70,10 @@ describe('OfflineQueueService', () => {
 
   it('falls back to localStorage for non-upload actions', async () => {
     const queueKey = 'pluckit_offline_queue_fallback_v1';
-    const supportsIndexedDb = vi.spyOn(OfflineQueueService.prototype as any, '_supportsIndexedDb').mockReturnValue(false);
+    const supportsIndexedDb = vi.spyOn(
+      OfflineQueueService.prototype as unknown as OfflineQueueServiceInternals,
+      '_supportsIndexedDb',
+    ).mockReturnValue(false);
     const fallbackOnly = new OfflineQueueService();
     await fallbackOnly.initialize();
     fallbackOnly.enqueue('profile/save', { user: 'abc' }, 1700000000000);
@@ -82,7 +88,10 @@ describe('OfflineQueueService', () => {
     globalThis.localStorage?.setItem('pluckit_offline_queue_fallback_v1', JSON.stringify([
       { id: 'q1', type: 'profile/save', payload: { user: 'abc' }, timestamp: now },
     ]));
-    const supportsIndexedDb = vi.spyOn(OfflineQueueService.prototype as any, '_supportsIndexedDb').mockReturnValue(false);
+    const supportsIndexedDb = vi.spyOn(
+      OfflineQueueService.prototype as unknown as OfflineQueueServiceInternals,
+      '_supportsIndexedDb',
+    ).mockReturnValue(false);
     const rehydrated = new OfflineQueueService();
     await rehydrated.initialize();
     expect(rehydrated.drain()).toEqual([

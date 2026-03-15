@@ -23,7 +23,7 @@ describe('ChatService', () => {
 
   const streamFromLines = (lines: string[]) => {
     return new ReadableStream({
-      start(controller) {
+      start(controller: ReadableStreamDefaultController<Uint8Array>) {
         for (const line of lines) {
           controller.enqueue(encoder.encode(line));
         }
@@ -50,10 +50,10 @@ describe('ChatService', () => {
     });
 
     const events: ChatEvent[] = [];
-    await new Promise<void>((resolve, reject) => {
+    await new Promise<void>((resolve, reject: (reason?: unknown) => void) => {
       service.streamMessage('show me style', [], ['item-1']).subscribe({
         next: (evt) => events.push(evt),
-        error: err => reject(err),
+        error: (err: unknown) => reject(err),
         complete: () => resolve(),
       });
     });
@@ -85,10 +85,10 @@ describe('ChatService', () => {
     });
 
     const events: ChatEvent[] = [];
-    await new Promise<void>((resolve, reject) => {
+    await new Promise<void>((resolve, reject: (reason?: unknown) => void) => {
       service.streamMessage('show me style', [], ['item-1']).subscribe({
         next: (evt) => events.push(evt),
-        error: err => reject(err),
+        error: (err: unknown) => reject(err),
         complete: () => resolve(),
       });
     });
@@ -104,7 +104,7 @@ describe('ChatService', () => {
     } as Response);
 
     await expect(
-      new Promise((_, reject) => {
+      new Promise<void>((_, reject: (reason?: unknown) => void) => {
         service.streamMessage('hey', []).subscribe({ error: reject });
       }),
     ).rejects.toThrow('Chat API error: HTTP 503');
@@ -114,7 +114,7 @@ describe('ChatService', () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'));
 
     await expect(
-      new Promise((_, reject) => {
+      new Promise<void>((_, reject: (reason?: unknown) => void) => {
         service.streamMessage('test', []).subscribe({ error: reject });
       }),
     ).rejects.toThrow('network down');
@@ -126,7 +126,7 @@ describe('ChatService', () => {
       json: vi.fn().mockResolvedValue(payload),
     } as unknown as Response);
 
-    const data = await new Promise<any>((resolve) => {
+    const data = await new Promise<Record<string, unknown>>((resolve) => {
       service.getMemory().subscribe((memory) => resolve(memory));
     });
 
@@ -150,7 +150,7 @@ describe('ChatService', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: false, status: 403 } as Response);
 
     await expect(
-      new Promise((_, reject) => {
+      new Promise<void>((_, reject: (reason?: unknown) => void) => {
         service.updateMemory('x').subscribe({ error: reject });
       }),
     ).rejects.toThrow('HTTP 403');

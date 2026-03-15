@@ -5,7 +5,7 @@ import { CollectionService } from '../../core/services/collection.service';
 import { WardrobeService } from '../../core/services/wardrobe.service';
 import { AuthService } from '../../core/services/auth.service';
 import { Observable, of } from 'rxjs';
-import { signal } from '@angular/core';
+import { signal, WritableSignal } from '@angular/core';
 import { Collection } from '../../core/models/collection.model';
 import { ClothingItem } from '../../core/models/clothing-item.model';
 import { MobileNavState } from '../../shared/layout/mobile-nav.state';
@@ -29,8 +29,26 @@ describe('CollectionsComponent', () => {
     removeItem: ReturnType<typeof vi.fn>,
   };
   let wardrobeService: { getAll: ReturnType<typeof vi.fn> };
-  let route: { snapshot: { queryParamMap: ReturnType<typeof convertToParamMap> }; queryParamMap: any };
-let mobileNavState: MobileNavState;
+  let route: {
+    snapshot: { queryParamMap: ReturnType<typeof convertToParamMap> };
+    queryParamMap: Observable<ReturnType<typeof convertToParamMap>>;
+  };
+  let mobileNavState: MobileNavState;
+  type CollectionsComponentInternals = CollectionsComponent & {
+    loading: () => boolean;
+    activeCollection: WritableSignal<Collection | null>;
+    showCreateModal: WritableSignal<boolean>;
+    shareLabel: WritableSignal<string>;
+    collectionItemsMap: WritableSignal<Record<string, ClothingItem[]>>;
+    settingsOpen: WritableSignal<boolean>;
+    collectionItems: () => ClothingItem[];
+    closeSettingsPanel: () => void;
+    openSettings: () => void;
+    onWindowResize: () => void;
+    selectCollection: (col: Collection) => void;
+  };
+  const asInternal = (): CollectionsComponentInternals =>
+    component as unknown as CollectionsComponentInternals;
 
   const COLLECTION: Collection = {
     id: 'c-1',
@@ -114,7 +132,7 @@ let mobileNavState: MobileNavState;
   });
 
   it('loads collections on init and removes loading indicator', () => {
-    expect((component as any).loading()).toBe(false);
+    expect(asInternal().loading()).toBe(false);
     expect(component.collections()).toEqual([COLLECTION]);
   });
 
@@ -122,13 +140,13 @@ let mobileNavState: MobileNavState;
     component.selectCollection(COLLECTION);
     expect(wardrobeService.getAll).toHaveBeenCalledWith({ pageSize: 200 });
     expect(component.collectionItems()).toEqual([ITEM]);
-    expect((component as any).activeCollection()?.id).toBe('c-1');
+    expect(asInternal().activeCollection()?.id).toBe('c-1');
   });
 
   it('handles create flow and selected collection', () => {
     component.onCollectionCreated(COLLECTION);
-    expect((component as any).showCreateModal()).toBe(false);
-    expect((component as any).activeCollection()?.id).toBe('c-1');
+    expect(asInternal().showCreateModal()).toBe(false);
+    expect(asInternal().activeCollection()?.id).toBe('c-1');
   });
 
   it('copies share link with optimistic label updates', async () => {
@@ -141,9 +159,9 @@ let mobileNavState: MobileNavState;
     component.copyShareLink(COLLECTION);
     await Promise.resolve();
     expect(writeText).toHaveBeenCalledWith(`${globalThis.location.origin}/collections?join=c-1`);
-    expect((component as any).shareLabel()).toBe('Copied!');
+    expect(asInternal().shareLabel()).toBe('Copied!');
     vi.advanceTimersByTime(2000);
-    expect((component as any).shareLabel()).toBe('Copy Link');
+    expect(asInternal().shareLabel()).toBe('Copy Link');
   });
 
   it('prevents destructive actions unless confirmed and removes items when removed from collection', () => {
@@ -152,7 +170,7 @@ let mobileNavState: MobileNavState;
     expect(collectionService.delete).not.toHaveBeenCalled();
 
     component.selectCollection(COLLECTION);
-    (component as any).collectionItemsMap.set({ 'c-1': [ITEM] });
+    asInternal().collectionItemsMap.set({ 'c-1': [ITEM] });
     component.removeItemFromCollection(COLLECTION, 'item-1');
     expect(wardrobeService.getAll).toHaveBeenCalledTimes(1);
     expect(collectionService.removeItem).toHaveBeenCalledWith('c-1', 'item-1');
@@ -171,7 +189,7 @@ let mobileNavState: MobileNavState;
     fixture.detectChanges();
 
     expect(collectionService.join).toHaveBeenCalledWith('c-1');
-    expect((component as any).activeCollection()?.id).toBe('c-1');
+    expect(asInternal().activeCollection()?.id).toBe('c-1');
     expect(router.navigate).toHaveBeenCalledWith([], { queryParams: {} });
   });
 
@@ -218,14 +236,14 @@ let mobileNavState: MobileNavState;
     component.leaveCollection(COLLECTION);
     expect(collectionService.delete).not.toHaveBeenCalled();
     expect(collectionService.leave).not.toHaveBeenCalled();
-    expect((component as any).activeCollection()).toEqual(COLLECTION);
+    expect(asInternal().activeCollection()).toEqual(COLLECTION);
 
     confirmSpy.mockReturnValue(true);
     component.deleteCollection(COLLECTION);
     component.leaveCollection(COLLECTION);
     expect(collectionService.delete).toHaveBeenCalledWith('c-1');
     expect(collectionService.leave).toHaveBeenCalledWith('c-1');
-    expect((component as any).activeCollection()).toBeNull();
+    expect(asInternal().activeCollection()).toBeNull();
   });
 
   it('renders owner and non-owner collection actions appropriately', () => {
@@ -275,27 +293,27 @@ let mobileNavState: MobileNavState;
     component.selectCollection(emptyItemsCollection);
     fixture.detectChanges();
 
-    expect((component as any).collectionItems()).toEqual([]);
+    expect(asInternal().collectionItems()).toEqual([]);
     expect(fixture.nativeElement.textContent).toContain('No items in this collection yet.');
 
-    (component as any).showCreateModal.set(true);
+    asInternal().showCreateModal.set(true);
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('app-create-collection-modal')).toBeTruthy();
   });
 
   it('routes settings open to shell profile panel on mobile and local panel on desktop', () => {
     Object.defineProperty(globalThis.window, 'innerWidth', { value: 390, configurable: true });
-    (component as any).onWindowResize();
+    asInternal().onWindowResize();
     mobileNavState.closePanel();
-    (component as any).openSettings();
+    asInternal().openSettings();
     expect(mobileNavState.activePanel()).toBe('profile');
-    expect((component as any).settingsOpen()).toBe(false);
+    expect(asInternal().settingsOpen()).toBe(false);
 
     mobileNavState.closePanel();
     Object.defineProperty(globalThis.window, 'innerWidth', { value: 1200, configurable: true });
-    (component as any).onWindowResize();
-    (component as any).openSettings();
-    expect((component as any).settingsOpen()).toBe(true);
+    asInternal().onWindowResize();
+    asInternal().openSettings();
+    expect(asInternal().settingsOpen()).toBe(true);
     expect(mobileNavState.activePanel()).toBe('none');
   });
 
@@ -305,8 +323,8 @@ let mobileNavState: MobileNavState;
       'focus',
     );
 
-    (component as any).settingsOpen.set(true);
-    (component as any).closeSettingsPanel();
+    asInternal().settingsOpen.set(true);
+    asInternal().closeSettingsPanel();
 
     await Promise.resolve();
     expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true });
@@ -314,11 +332,11 @@ let mobileNavState: MobileNavState;
 
   it('clears stale mobile panel before opening settings', () => {
     Object.defineProperty(globalThis.window, 'innerWidth', { value: 390, configurable: true });
-    (component as any).onWindowResize();
+    asInternal().onWindowResize();
     mobileNavState.openDigest();
     const closeSpy = vi.spyOn(mobileNavState, 'closePanel');
 
-    (component as any).openSettings();
+    asInternal().openSettings();
 
     expect(closeSpy).toHaveBeenCalled();
     expect(mobileNavState.activePanel()).toBe('profile');

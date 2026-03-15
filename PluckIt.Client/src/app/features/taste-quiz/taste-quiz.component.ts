@@ -1,5 +1,5 @@
-import { Component, OnInit, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, OnInit, signal, computed, inject } from '@angular/core';
+
 import { RouterModule } from '@angular/router';
 import { TasteQuizService } from '../../core/services/taste-quiz.service';
 import { QuizCard, QuizSession, TasteProfile } from '../../core/models/scraped-item.model';
@@ -10,51 +10,72 @@ type SwipeDir = 'up' | 'down' | null;
 @Component({
   selector: 'app-taste-quiz',
   standalone: true,
-  imports: [CommonModule, RouterModule, QuizResultsComponent],
-  styles: [`
-    @keyframes swipe-out-up {
-      to { transform: translateY(-100%) rotate(-8deg); opacity: 0; }
-    }
-    @keyframes swipe-out-down {
-      to { transform: translateY(100%) rotate(8deg); opacity: 0; }
-    }
-    @keyframes card-in {
-      from { transform: scale(0.92) translateY(20px); opacity: 0; }
-      to   { transform: scale(1)    translateY(0);    opacity: 1; }
-    }
-    .card-in   { animation: card-in 0.3s cubic-bezier(0.23,1,0.32,1) both; }
-    .like-out  { animation: swipe-out-up   0.35s cubic-bezier(0.55,0,1,0.45) forwards; }
-    .skip-out  { animation: swipe-out-down 0.35s cubic-bezier(0.55,0,1,0.45) forwards; }
-  `],
+  imports: [RouterModule, QuizResultsComponent],
+  styles: [
+    `
+      @keyframes swipe-out-up {
+        to {
+          transform: translateY(-100%) rotate(-8deg);
+          opacity: 0;
+        }
+      }
+      @keyframes swipe-out-down {
+        to {
+          transform: translateY(100%) rotate(8deg);
+          opacity: 0;
+        }
+      }
+      @keyframes card-in {
+        from {
+          transform: scale(0.92) translateY(20px);
+          opacity: 0;
+        }
+        to {
+          transform: scale(1) translateY(0);
+          opacity: 1;
+        }
+      }
+      .card-in {
+        animation: card-in 0.3s cubic-bezier(0.23, 1, 0.32, 1) both;
+      }
+      .like-out {
+        animation: swipe-out-up 0.35s cubic-bezier(0.55, 0, 1, 0.45) forwards;
+      }
+      .skip-out {
+        animation: swipe-out-down 0.35s cubic-bezier(0.55, 0, 1, 0.45) forwards;
+      }
+    `,
+  ],
   template: `
     <div class="relative flex min-h-screen flex-col items-center bg-black text-slate-100 px-4 py-6">
-
       <!-- Back / close -->
       <div class="flex w-full max-w-sm items-center justify-between mb-6">
         <a routerLink="/discover" class="text-slate-500 hover:text-slate-300 transition-colors">
           <span class="material-symbols-outlined">arrow_back</span>
         </a>
-        <span class="text-xs font-bold uppercase tracking-widest text-slate-500">Style Calibration</span>
+        <span class="text-xs font-bold uppercase tracking-widest text-slate-500"
+          >Style Calibration</span
+        >
         <div class="w-6"></div>
       </div>
 
       <!-- Show results when done -->
       @if (tasteProfile()) {
-        <app-quiz-results
-          [profile]="tasteProfile()!"
-          (retake)="onRetake()"
-        />
+        <app-quiz-results [profile]="tasteProfile()!" (retake)="onRetake()" />
       } @else if (loading()) {
         <div class="flex flex-col items-center justify-center flex-1 gap-4">
-          <span class="material-symbols-outlined text-4xl text-slate-600 animate-spin">progress_activity</span>
+          <span class="material-symbols-outlined text-4xl text-slate-600 animate-spin"
+            >progress_activity</span
+          >
           <p class="text-xs text-slate-500">Loading your style quiz…</p>
         </div>
-
       } @else if (session()) {
         <!-- Progress bar -->
         <div class="w-full max-w-sm mb-4">
           <div class="flex items-center justify-between mb-1.5">
-            <span class="text-[10px] text-slate-500">{{ currentIndex() + 1 }} / {{ itemCount() }}</span>
+            <span class="text-[10px] text-slate-500"
+              >{{ currentIndex() + 1 }} / {{ itemCount() }}</span
+            >
             <span class="text-[10px] text-slate-500">Phase {{ session()!.phase }}</span>
           </div>
           <div class="h-1 w-full rounded-full bg-zinc-800">
@@ -67,10 +88,11 @@ type SwipeDir = 'up' | 'down' | null;
 
         <!-- Card stack -->
         <div class="relative w-full max-w-sm flex-1 flex flex-col items-center justify-center">
-
           @if (currentCard()) {
             <!-- Background hint card -->
-            <div class="absolute inset-x-4 top-2 h-full rounded-2xl bg-zinc-900 border border-border-chrome scale-95 opacity-40"></div>
+            <div
+              class="absolute inset-x-4 top-2 h-full rounded-2xl bg-zinc-900 border border-border-chrome scale-95 opacity-40"
+            ></div>
 
             <!-- Main card -->
             <div
@@ -93,11 +115,13 @@ type SwipeDir = 'up' | 'down' | null;
                   }
                   <div class="flex flex-wrap justify-center gap-1.5 mt-2">
                     @for (tag of currentCard()!.tags.slice(0, 5); track tag) {
-                      <span class="rounded-full bg-zinc-800 px-2.5 py-1 text-[10px] text-slate-400">{{ tag }}</span>
+                      <span
+                        class="rounded-full bg-zinc-800 px-2.5 py-1 text-[10px] text-slate-400"
+                        >{{ tag }}</span
+                      >
                     }
                   </div>
                 </div>
-
               } @else {
                 <!-- Phase 2: image card -->
                 <div class="relative w-full" style="padding-bottom: 125%">
@@ -108,12 +132,18 @@ type SwipeDir = 'up' | 'down' | null;
                     (error)="onImgError($event)"
                   />
                   <!-- Gradient overlay -->
-                  <div class="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent"></div>
+                  <div
+                    class="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent"
+                  ></div>
                   <div class="absolute bottom-0 left-0 right-0 p-4">
-                    <p class="text-xs font-semibold text-slate-200 line-clamp-2">{{ currentCard()!.title }}</p>
+                    <p class="text-xs font-semibold text-slate-200 line-clamp-2">
+                      {{ currentCard()!.title }}
+                    </p>
                     <div class="flex flex-wrap gap-1 mt-1">
                       @for (tag of currentCard()!.tags.slice(0, 3); track tag) {
-                        <span class="rounded bg-black/50 px-1.5 py-0.5 text-[9px] text-slate-300">{{ tag }}</span>
+                        <span class="rounded bg-black/50 px-1.5 py-0.5 text-[9px] text-slate-300">{{
+                          tag
+                        }}</span>
                       }
                     </div>
                   </div>
@@ -149,11 +179,12 @@ type SwipeDir = 'up' | 'down' | null;
               <span class="text-[10px] text-slate-600">Skip</span>
               <span class="text-[10px] text-slate-600">Love it</span>
             </div>
-
           } @else {
             <!-- All done — completing -->
             <div class="flex flex-col items-center justify-center flex-1 gap-4">
-              <span class="material-symbols-outlined text-4xl text-primary animate-spin">progress_activity</span>
+              <span class="material-symbols-outlined text-4xl text-primary animate-spin"
+                >progress_activity</span
+              >
               <p class="text-xs text-slate-500">Building your taste profile…</p>
             </div>
           }
@@ -163,6 +194,8 @@ type SwipeDir = 'up' | 'down' | null;
   `,
 })
 export class TasteQuizComponent implements OnInit {
+  private readonly quizService = inject(TasteQuizService);
+
   protected loading = signal(true);
   protected responding = signal(false);
   protected session = signal<QuizSession | null>(null);
@@ -209,11 +242,9 @@ export class TasteQuizComponent implements OnInit {
     return `translateY(${y}px) rotate(${rot}deg)`;
   });
 
-  constructor(private readonly quizService: TasteQuizService) {}
-
   ngOnInit() {
     this.quizService.getOrCreateSession().subscribe({
-      next: session => {
+      next: (session) => {
         this.session.set(session);
         this.loading.set(false);
       },
@@ -261,7 +292,7 @@ export class TasteQuizComponent implements OnInit {
       if (next >= this.itemCount()) {
         // Complete the quiz
         this.quizService.complete(s.id).subscribe({
-          next: profile => this.tasteProfile.set(profile),
+          next: (profile) => this.tasteProfile.set(profile),
         });
       } else {
         this.currentIndex.set(next);
@@ -275,7 +306,7 @@ export class TasteQuizComponent implements OnInit {
     this.currentIndex.set(0);
     this.loading.set(true);
     this.quizService.getOrCreateSession().subscribe({
-      next: session => {
+      next: (session) => {
         this.session.set(session);
         this.loading.set(false);
       },

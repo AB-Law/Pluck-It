@@ -2,6 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { MobileShellComponent } from './mobile-shell.component';
 import { MobileNavState } from './mobile-nav.state';
+import { WritableSignal } from '@angular/core';
 
 describe('MobileShellComponent', () => {
   let fixture: ComponentFixture<MobileShellComponent>;
@@ -9,6 +10,12 @@ describe('MobileShellComponent', () => {
   let mobileState: MobileNavState;
   let body: HTMLElement;
   let root: HTMLElement;
+  type MobileShellComponentInternals = MobileShellComponent & {
+    mobileState: {
+      activePanel: WritableSignal<'none' | 'profile' | 'wardrobe' | 'digest' | 'stylist' | 'collections'>;
+    };
+  };
+  const asInternal = (): MobileShellComponentInternals => component as unknown as MobileShellComponentInternals;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
@@ -54,7 +61,7 @@ describe('MobileShellComponent', () => {
     expect(root.style.overflow).toBe('hidden');
     expect(body.style.touchAction).toBe('none');
     expect(root.style.touchAction).toBe('none');
-    expect((component as any).mobileState.activePanel()).toBe('profile');
+    expect(asInternal().mobileState.activePanel()).toBe('profile');
 
     mobileState.closePanel();
     fixture.detectChanges();

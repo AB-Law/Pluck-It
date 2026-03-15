@@ -1,22 +1,28 @@
 import { Component, input, output, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ClothingItem } from '../../core/models/clothing-item.model';
 import { CpwBadgeLevel } from '../../core/models/vault-insights.model';
 
 @Component({
   selector: 'app-vault-card',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   template: `
     <div
       class="group relative flex flex-col rounded-xl border bg-card-dark p-4 cursor-pointer transition-all"
-      [class]="isSelected() ? 'border-primary shadow-[0_0_15px_rgba(37,141,244,0.15)]' : 'border-border-chrome hover:border-primary/50'"
+      [class]="
+        isSelected()
+          ? 'border-primary shadow-[0_0_15px_rgba(37,141,244,0.15)]'
+          : 'border-border-chrome hover:border-primary/50'
+      "
       (click)="selectToggled.emit(item().id)"
       draggable="true"
       (dragstart)="onDragStart($event)"
     >
       <!-- Image area -->
-      <div class="relative mb-4 flex aspect-[4/5] items-center justify-center overflow-hidden rounded-lg bg-black">
+      <div
+        class="relative mb-4 flex aspect-[4/5] items-center justify-center overflow-hidden rounded-lg bg-black"
+      >
         <img
           [src]="item().imageUrl"
           [alt]="item().brand || item().category || 'Clothing item'"
@@ -28,7 +34,9 @@ import { CpwBadgeLevel } from '../../core/models/vault-insights.model';
 
         <!-- CPW Badge or SELECTED badge -->
         @if (isSelected()) {
-          <div class="absolute left-2 top-2 rounded bg-primary px-2 py-1 text-[10px] font-bold text-white">
+          <div
+            class="absolute left-2 top-2 rounded bg-primary px-2 py-1 text-[10px] font-bold text-white"
+          >
             SELECTED
           </div>
         } @else {
@@ -56,7 +64,9 @@ import { CpwBadgeLevel } from '../../core/models/vault-insights.model';
           {{ item().brand || 'Unknown Brand' }}
         </h5>
         @if (aestheticTag()) {
-          <span class="text-[10px] font-mono font-bold text-slate-500 shrink-0">[{{ aestheticTag() }}]</span>
+          <span class="text-[10px] font-mono font-bold text-slate-500 shrink-0"
+            >[{{ aestheticTag() }}]</span
+          >
         }
       </div>
       <div class="flex items-center justify-between text-xs font-mono">
@@ -64,7 +74,9 @@ import { CpwBadgeLevel } from '../../core/models/vault-insights.model';
         <span class="text-slate-500">{{ item().wearCount }} Wears</span>
       </div>
       @if (breakEvenReached()) {
-        <div class="mt-2 rounded bg-emerald-900/40 px-2 py-1 text-[10px] font-mono text-emerald-300 border border-emerald-700/50">
+        <div
+          class="mt-2 rounded bg-emerald-900/40 px-2 py-1 text-[10px] font-mono text-emerald-300 border border-emerald-700/50"
+        >
           You’ve broken even on this item
         </div>
       }
@@ -72,12 +84,12 @@ import { CpwBadgeLevel } from '../../core/models/vault-insights.model';
   `,
 })
 export class VaultCardComponent {
-  item       = input.required<ClothingItem>();
-  currency   = input<string>('USD');
+  item = input.required<ClothingItem>();
+  currency = input<string>('USD');
   isSelected = input<boolean>(false);
-  cpwBadge   = input<CpwBadgeLevel>('unknown');
+  cpwBadge = input<CpwBadgeLevel>('unknown');
   breakEvenReached = input<boolean>(false);
-  priority         = input<boolean>(false);
+  priority = input<boolean>(false);
 
   selectToggled = output<string>();
   wearIncrementRequested = output<ClothingItem>();

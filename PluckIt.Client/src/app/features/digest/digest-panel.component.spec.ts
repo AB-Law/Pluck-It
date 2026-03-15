@@ -4,6 +4,7 @@ import { DigestService } from '../../core/services/digest.service';
 import { OfflineQueueService } from '../../core/services/offline-queue.service';
 import { NetworkService } from '../../core/services/network.service';
 import { throwError, of } from 'rxjs';
+import { WritableSignal } from '@angular/core';
 
 describe('DigestPanelComponent', () => {
   let component: DigestPanelComponent;
@@ -21,6 +22,11 @@ describe('DigestPanelComponent', () => {
     drain: ReturnType<typeof vi.fn>,
     persistOfflineUploads: ReturnType<typeof vi.fn>,
   };
+  type DigestPanelComponentInternals = DigestPanelComponent & {
+    _drainOfflineDigestFeedback: () => Promise<void>;
+    feedbackSent: WritableSignal<('up' | 'down' | null)[]>;
+  };
+  const asInternal = (): DigestPanelComponentInternals => component as unknown as DigestPanelComponentInternals;
 
   const DIGEST = {
     id: 'd-1',
@@ -132,7 +138,7 @@ describe('DigestPanelComponent', () => {
     ]);
     networkService.isCurrentlyOnline.mockReturnValue(true);
 
-    await (component as any)._drainOfflineDigestFeedback();
+    await asInternal()._drainOfflineDigestFeedback();
 
     expect(digestService.sendFeedback).toHaveBeenCalledWith({
       digestId: 'd-1',
@@ -154,7 +160,7 @@ describe('DigestPanelComponent', () => {
       },
     ]);
 
-    await (component as any)._drainOfflineDigestFeedback();
+    await asInternal()._drainOfflineDigestFeedback();
 
     expect(digestService.sendFeedback).not.toHaveBeenCalled();
     expect(offlineQueue.persistOfflineUploads).toHaveBeenCalledWith([]);

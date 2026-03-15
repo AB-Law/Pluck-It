@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 import { TasteQuizService } from './taste-quiz.service';
+import { TasteProfile } from '../models/scraped-item.model';
 
 describe('TasteQuizService', () => {
   let service: TasteQuizService;
@@ -83,7 +84,7 @@ describe('TasteQuizService', () => {
       brands: ['Acme'],
       inferredFrom: 'mood_cards',
     };
-    let emitted: any = null;
+    let emitted: TasteProfile | null = null;
 
     service.complete('session-1').subscribe(profile => {
       emitted = profile;
