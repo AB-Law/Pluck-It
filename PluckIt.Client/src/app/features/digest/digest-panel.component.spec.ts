@@ -22,7 +22,7 @@ describe('DigestPanelComponent', () => {
     drain: ReturnType<typeof vi.fn>,
     persistOfflineUploads: ReturnType<typeof vi.fn>,
   };
-  type DigestPanelComponentInternals = DigestPanelComponent & {
+  type DigestPanelComponentInternals = {
     _drainOfflineDigestFeedback: () => Promise<void>;
     feedbackSent: WritableSignal<('up' | 'down' | null)[]>;
   };

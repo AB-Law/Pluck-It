@@ -10,7 +10,7 @@ describe('MobileShellComponent', () => {
   let mobileState: MobileNavState;
   let body: HTMLElement;
   let root: HTMLElement;
-  type MobileShellComponentInternals = MobileShellComponent & {
+  type MobileShellComponentInternals = {
     mobileState: {
       activePanel: WritableSignal<'none' | 'profile' | 'wardrobe' | 'digest' | 'stylist' | 'collections'>;
     };

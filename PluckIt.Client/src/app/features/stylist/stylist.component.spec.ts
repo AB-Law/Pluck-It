@@ -15,14 +15,29 @@ describe('StylistPanelComponent', () => {
   let component: StylistPanelComponent;
   let fixture: ComponentFixture<StylistPanelComponent>;
   let chatService: MockChatService;
-  type StylistComponentInternals = StylistPanelComponent & {
+  type StylistComponentInternals = {
+    inputText: string;
+    sendMessage: () => void;
     networkService: { isCurrentlyOnline: () => boolean };
     offlineQueue: { enqueue: (key: string, payload: Record<string, unknown>) => void };
     debugEnabled: WritableSignal<boolean>;
     debugModel: WritableSignal<string | null>;
     debugTokenCount: WritableSignal<number | null>;
     debugToolLatencyMs: WritableSignal<number | null>;
-    handleEvent: (event: { type: string; content?: string; traceId?: string; runId?: string; model?: string; tokenCount?: number; name?: string; toolLatencyMs?: number }, userText: string) => void;
+    handleEvent: (
+      event: {
+        type: string;
+        content?: string;
+        traceId?: string;
+        runId?: string;
+        model?: string;
+        tokenCount?: number;
+        name?: string;
+        summary?: string;
+        toolLatencyMs?: number;
+      },
+      userText: string,
+    ) => void;
     chatHistory: { role: string; content: string }[];
   };
   const asInternal = (): StylistComponentInternals => component as unknown as StylistComponentInternals;
@@ -36,7 +51,7 @@ describe('StylistPanelComponent', () => {
     }).compileComponents();
     fixture = TestBed.createComponent(StylistPanelComponent);
     component = fixture.componentInstance;
-    chatService = TestBed.inject(ChatService) as MockChatService;
+    chatService = TestBed.inject(ChatService) as unknown as MockChatService;
     fixture.detectChanges();
   });
 

@@ -49,9 +49,9 @@ describe('ReviewItemModalComponent', () => {
   };
 
   const queryButtons = (root: HTMLElement): HTMLButtonElement[] =>
-    Array.from(root.querySelectorAll('button')) as HTMLButtonElement[];
+    Array.from(root.querySelectorAll('button'));
   const queryInputs = (root: HTMLElement): HTMLInputElement[] =>
-    Array.from(root.querySelectorAll('input')) as HTMLInputElement[];
+    Array.from(root.querySelectorAll('input'));
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
@@ -173,7 +173,10 @@ describe('ReviewItemModalComponent', () => {
     const cancelled = vi.fn();
     component.cancelled.subscribe(cancelled);
     const target = document.createElement('div');
-    component.onOverlayClick({ target, currentTarget: target } as unknown as MouseEvent);
+    const overlayEvent = new MouseEvent('click');
+    Object.defineProperty(overlayEvent, 'target', { value: target });
+    Object.defineProperty(overlayEvent, 'currentTarget', { value: target });
+    component.onOverlayClick(overlayEvent);
     expect(cancelled).toHaveBeenCalledTimes(1);
   });
 
@@ -197,7 +200,7 @@ describe('ReviewItemModalComponent', () => {
     const root = fixture.nativeElement as HTMLElement;
     const backdrop = root.querySelector('.backdrop-animate') as HTMLDivElement;
     const shell = root.querySelector('.modal-animate') as HTMLDivElement;
-    const closeBtn = root.querySelector('[aria-label="Close"]') as HTMLButtonElement | null;
+    const closeBtn = root.querySelector<HTMLButtonElement>('[aria-label="Close"]');
     const buttons = queryButtons(root);
     const saveBtn = buttons.find(btn => btn.textContent?.trim() === 'Add to Wardrobe') as HTMLButtonElement;
     const cancelBtn = buttons.find(btn => btn.textContent?.trim() === 'Discard') as HTMLButtonElement;

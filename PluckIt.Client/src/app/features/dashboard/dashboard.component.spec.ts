@@ -11,7 +11,13 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
 describe('DashboardComponent', () => {
   let component: DashboardComponent;
   let fixture: ComponentFixture<DashboardComponent>;
-  let wardrobeService: { [key: string]: ReturnType<typeof vi.fn> };
+  let wardrobeService: {
+    getAll: ReturnType<typeof vi.fn>;
+    update: ReturnType<typeof vi.fn>;
+    delete: ReturnType<typeof vi.fn>;
+    getDrafts: ReturnType<typeof vi.fn>;
+    recordStylingActivity: ReturnType<typeof vi.fn>;
+  };
   let authService: { logout: ReturnType<typeof vi.fn>; user: ReturnType<typeof vi.fn> };
   let mobileNavState: MobileNavState;
   let queryParamMap$: BehaviorSubject<ReturnType<typeof convertToParamMap>>;
@@ -25,7 +31,7 @@ describe('DashboardComponent', () => {
     serializeUrl: ReturnType<typeof vi.fn>;
     isActive: ReturnType<typeof vi.fn>;
   };
-  type DashboardComponentInternals = DashboardComponent & {
+  type DashboardComponentInternals = {
     dragOver: WritableSignal<boolean>;
     onWindowResize: () => void;
     openSettings: () => void;
@@ -36,7 +42,7 @@ describe('DashboardComponent', () => {
     stylistOpen: WritableSignal<boolean>;
     uploadOfflineNotice: WritableSignal<string | null>;
   };
-  const asInternal = (): DashboardComponentInternals => component as DashboardComponentInternals;
+  const asInternal = (): DashboardComponentInternals => component as unknown as DashboardComponentInternals;
 
   beforeEach(async () => {
     const initialQueryParams = convertToParamMap({});

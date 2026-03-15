@@ -86,8 +86,9 @@ describe('VaultCardComponent', () => {
   });
 
   it('stops propagation when quick wear is clicked', () => {
-    const stopPropagation = vi.fn();
-    component.onQuickWear({ stopPropagation } as unknown as MouseEvent);
+    const quickWearEvent = new MouseEvent('click');
+    const stopPropagation = vi.spyOn(quickWearEvent, 'stopPropagation');
+    component.onQuickWear(quickWearEvent);
     expect(stopPropagation).toHaveBeenCalled();
   });
 });

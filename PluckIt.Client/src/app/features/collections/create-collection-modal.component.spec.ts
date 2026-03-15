@@ -9,7 +9,7 @@ describe('CreateCollectionModalComponent', () => {
   let fixture: ComponentFixture<CreateCollectionModalComponent>;
   let component: CreateCollectionModalComponent;
   let collectionService: { create: ReturnType<typeof vi.fn> };
-  type CreateCollectionModalComponentInternals = CreateCollectionModalComponent & {
+  type CreateCollectionModalComponentInternals = {
     saving: WritableSignal<boolean>;
     error: WritableSignal<string | null>;
     save: () => void;
@@ -88,7 +88,10 @@ describe('CreateCollectionModalComponent', () => {
     let cancelled = 0;
     component.cancelled.subscribe(() => { cancelled += 1; });
     const target = { id: 'target' } as HTMLElement;
-    component.onBackdropClick({ target, currentTarget: target } as MouseEvent);
+    const backdropEvent = new MouseEvent('click');
+    Object.defineProperty(backdropEvent, 'target', { value: target });
+    Object.defineProperty(backdropEvent, 'currentTarget', { value: target });
+    component.onBackdropClick(backdropEvent);
     expect(cancelled).toBe(1);
   });
 
@@ -97,7 +100,10 @@ describe('CreateCollectionModalComponent', () => {
     component.cancelled.subscribe(() => { cancelled += 1; });
     const target = { id: 'child' } as HTMLElement;
     const currentTarget = { id: 'container' } as HTMLElement;
-    component.onBackdropClick({ target, currentTarget } as MouseEvent);
+    const backdropEvent = new MouseEvent('click');
+    Object.defineProperty(backdropEvent, 'target', { value: target });
+    Object.defineProperty(backdropEvent, 'currentTarget', { value: currentTarget });
+    component.onBackdropClick(backdropEvent);
     expect(cancelled).toBe(0);
   });
 });

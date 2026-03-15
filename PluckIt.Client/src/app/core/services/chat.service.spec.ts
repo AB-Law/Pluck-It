@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { AuthService } from './auth.service';
-import { ChatEvent, ChatService } from './chat.service';
+import { ChatEvent, ChatService, ConversationMemory } from './chat.service';
 
 const encoder = new TextEncoder();
 
@@ -126,7 +126,7 @@ describe('ChatService', () => {
       json: vi.fn().mockResolvedValue(payload),
     } as unknown as Response);
 
-    const data = await new Promise<Record<string, unknown>>((resolve) => {
+    const data = await new Promise<ConversationMemory>((resolve) => {
       service.getMemory().subscribe((memory) => resolve(memory));
     });
 

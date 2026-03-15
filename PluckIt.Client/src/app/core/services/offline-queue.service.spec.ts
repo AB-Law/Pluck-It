@@ -3,7 +3,7 @@ import { OfflineQueueService } from './offline-queue.service';
 
 describe('OfflineQueueService', () => {
   let service: OfflineQueueService;
-  type OfflineQueueServiceInternals = OfflineQueueService & {
+  type OfflineQueueServiceInternals = {
     _supportsIndexedDb: () => boolean;
   };
 

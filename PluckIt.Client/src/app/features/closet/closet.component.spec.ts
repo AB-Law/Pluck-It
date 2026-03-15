@@ -2,11 +2,10 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { WritableSignal } from '@angular/core';
 import { ActivatedRoute, ParamMap, Router, convertToParamMap } from '@angular/router';
 import { By } from '@angular/platform-browser';
-import { of, throwError } from 'rxjs';
+import { of, throwError, Observable } from 'rxjs';
 import { WardrobeComponent } from './closet.component';
 import { WardrobeService } from '../../core/services/wardrobe.service';
 import { ClothingItem } from '../../core/models/clothing-item.model';
-import { Observable } from 'rxjs';
 
 describe('WardrobeComponent', () => {
   let component: WardrobeComponent;
@@ -23,7 +22,7 @@ describe('WardrobeComponent', () => {
   };
   let router: { navigate: ReturnType<typeof vi.fn> };
   let route: { snapshot: { queryParamMap: ParamMap }; queryParamMap: Observable<ParamMap> };
-  type ClosetComponentInternals = WardrobeComponent & {
+  type ClosetComponentInternals = {
     _dispatchPendingUploads: () => void;
     _drainOfflineQueue: () => void;
     _onUploadAccepted: (qi: unknown, resolve: () => void, result: ClothingItem) => void;
@@ -62,7 +61,7 @@ describe('WardrobeComponent', () => {
     onDeleteItem: (item: ClothingItem) => void;
     triggerUpload: () => void;
   };
-  const asInternal = (): ClosetComponentInternals => component as ClosetComponentInternals;
+  const asInternal = (): ClosetComponentInternals => component as unknown as ClosetComponentInternals;
 
   const BASE_ITEM: ClothingItem = {
     id: 'item-1',
@@ -161,9 +160,7 @@ describe('WardrobeComponent', () => {
       fileSize: 3,
     } as Record<string, unknown>);
 
-    const dispatchSpy = vi
-      .spyOn(asInternal(), '_dispatchPendingUploads' as never)
-      .mockImplementation(() => undefined);
+    const dispatchSpy = vi.spyOn(asInternal(), '_dispatchPendingUploads').mockImplementation(() => undefined);
 
     asInternal()._drainOfflineQueue();
     expect(offlineQueue.count()).toBe(1);
@@ -879,7 +876,7 @@ describe('WardrobeComponent', () => {
     });
 
     const localFixture = TestBed.createComponent(WardrobeComponent);
-    const localComponent = localFixture.componentInstance as ClosetComponentInternals;
+    const localComponent = localFixture.componentInstance as unknown as ClosetComponentInternals;
     const refreshSpy = vi.spyOn(localComponent, 'refreshDrafts');
 
     localFixture.detectChanges();
@@ -901,7 +898,7 @@ describe('WardrobeComponent', () => {
     vi.useFakeTimers();
     try {
       const localFixture = TestBed.createComponent(WardrobeComponent);
-      const localComponent = localFixture.componentInstance as ClosetComponentInternals;
+      const localComponent = localFixture.componentInstance as unknown as ClosetComponentInternals;
       const refreshSpy = vi.spyOn(localComponent, 'refreshDrafts');
 
       localFixture.detectChanges();
@@ -948,7 +945,7 @@ describe('WardrobeComponent', () => {
       { localId: 'q-upload', file: new File(['a'], 'queued.jpg'), status: 'queued' },
       { localId: 'q-held', file: new File(['b'], 'hold.jpg'), status: 'processing', draftId: 'draft-held' },
     ]);
-    const uploadSpy = vi.spyOn(asInternal(), '_uploadSingle' as never).mockResolvedValue(undefined);
+    const uploadSpy = vi.spyOn(asInternal(), '_uploadSingle').mockResolvedValue(undefined);
 
     asInternal()._dispatchPendingUploads();
 

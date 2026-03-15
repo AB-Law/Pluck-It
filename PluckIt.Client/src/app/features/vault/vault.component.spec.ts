@@ -44,8 +44,8 @@ describe('VaultComponent', () => {
     queryParamMap: Observable<ReturnType<typeof convertToParamMap>>;
   };
   let mobileNavState: MobileNavState;
-  type VaultComponentInternals = VaultComponent & {
-    loading: () => boolean;
+  type VaultComponentInternals = {
+    loading: WritableSignal<boolean>;
     loadingInsights: WritableSignal<boolean>;
     loadingMore: WritableSignal<boolean>;
     hasMore: WritableSignal<boolean>;
@@ -65,8 +65,9 @@ describe('VaultComponent', () => {
     onWindowResize: () => void;
     openSettings: () => void;
     closeSettingsPanel: () => void;
+    knownBrands: () => string[];
   };
-  const asInternal = (): VaultComponentInternals => component as VaultComponentInternals;
+  const asInternal = (): VaultComponentInternals => component as unknown as VaultComponentInternals;
   const ITEM = {
     id: 'i-1',
     imageUrl: '/img/1.jpg',
@@ -452,15 +453,17 @@ describe('VaultComponent', () => {
     asInternal().allItems.set([{ ...ITEM, price: { amount: 120, originalCurrency: 'USD' }, wearCount: 2 }]);
     expect(component.avgCpwDisplay()).toBe('$60.00');
 
-    asInternal().allItems.set([{ ...ITEM, price: undefined, wearCount: 0 }]);
+    asInternal().allItems.set([{ ...ITEM, price: null, wearCount: 0 }]);
     expect(component.avgCpwDisplay()).toBe('N/A');
 
     asInternal().insights.set({
-      topWornBrands: ['UNQ'],
+      generatedAt: new Date().toISOString(),
+      currency: 'USD',
+      insufficientData: false,
       behavioralInsights: { topColorWearShare: { color: 'black', pct: 10 }, unworn90dPct: 0, mostExpensiveUnworn: { itemId: 'x', amount: 10, currency: 'USD' } },
-      cpwIntel: [{ itemId: 'i-1', badge: 'great', breakEvenReached: true }],
+      cpwIntel: [{ itemId: 'i-1', badge: 'low', breakEvenReached: true, breakEvenTargetCpw: 42 }],
     });
-    expect(component.cpwBadgeFor('i-1')).toBe('great');
+    expect(component.cpwBadgeFor('i-1')).toBe('low');
     expect(component.breakEvenFor('i-1')).toBe(true);
     expect(component.cpwBadgeFor('missing')).toBe('unknown');
   });
@@ -544,7 +547,7 @@ describe('VaultComponent', () => {
 
   it('covers load-more loading state, selected-item branch, and card selection toggles', () => {
     const localItems = [
-      { ...ITEM, id: 'a', price: { amount: 10, originalCurrency: 'USD' }, brand: undefined, wearCount: 1 },
+      { ...ITEM, id: 'a', price: { amount: 10, originalCurrency: 'USD' }, brand: null, wearCount: 1 },
       { ...ITEM, id: 'b', price: { amount: 120, originalCurrency: 'USD' }, wearCount: 2 },
     ];
     asInternal().allItems.set(localItems);
@@ -633,7 +636,7 @@ describe('VaultComponent', () => {
     asInternal().allItems.set([
       { ...ITEM, id: 'x', price: { amount: 9000, originalCurrency: 'USD' }, brand: 'Alpha' },
       { ...ITEM, id: 'y', price: undefined, brand: 'Beta' },
-      { ...ITEM, id: 'z', price: { amount: 420, originalCurrency: 'USD' }, brand: undefined },
+      { ...ITEM, id: 'z', price: { amount: 420, originalCurrency: 'USD' }, brand: null },
       { ...ITEM, id: 'w', price: { amount: 7200, originalCurrency: 'USD' }, brand: 'Alpha' },
     ] as ClothingItem[]);
     expect(component.maxItemPrice()).toBe(9000);

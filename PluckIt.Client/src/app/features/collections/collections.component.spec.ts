@@ -34,7 +34,7 @@ describe('CollectionsComponent', () => {
     queryParamMap: Observable<ReturnType<typeof convertToParamMap>>;
   };
   let mobileNavState: MobileNavState;
-  type CollectionsComponentInternals = CollectionsComponent & {
+  type CollectionsComponentInternals = {
     loading: () => boolean;
     activeCollection: WritableSignal<Collection | null>;
     showCreateModal: WritableSignal<boolean>;

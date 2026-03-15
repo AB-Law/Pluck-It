@@ -1,12 +1,10 @@
-import { signal } from '@angular/core';
+import { signal, WritableSignal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { throwError, of } from 'rxjs';
 import { CollectionService } from '../../core/services/collection.service';
 import { ClothingItem } from '../../core/models/clothing-item.model';
 import { AddToCollectionModalComponent } from './add-to-collection-modal.component';
 import { Collection } from '../../core/models/collection.model';
-import { WritableSignal } from '@angular/core';
-
 const ITEM: ClothingItem = {
   id: 'item-1',
   imageUrl: '/assets/item-1.jpg',
@@ -54,7 +52,7 @@ describe('AddToCollectionModalComponent', () => {
     loadAll: ReturnType<typeof vi.fn>;
     addItem: ReturnType<typeof vi.fn>;
   };
-  type AddToCollectionModalComponentInternals = AddToCollectionModalComponent & {
+  type AddToCollectionModalComponentInternals = {
     loading: WritableSignal<boolean>;
     saving: WritableSignal<boolean>;
     selectedIds: WritableSignal<Set<string>>;
@@ -178,7 +176,10 @@ describe('AddToCollectionModalComponent', () => {
     component.closed.subscribe(closed);
 
     const target = document.createElement('div');
-    component.onBackdropClick({ target, currentTarget: target } as unknown as MouseEvent);
+    const backdropEvent = new MouseEvent('click');
+    Object.defineProperty(backdropEvent, 'target', { value: target });
+    Object.defineProperty(backdropEvent, 'currentTarget', { value: target });
+    component.onBackdropClick(backdropEvent);
 
     expect(closed).toHaveBeenCalledTimes(1);
   });

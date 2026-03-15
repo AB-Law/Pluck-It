@@ -27,7 +27,7 @@ describe('ItemDetailDrawerComponent', () => {
   let component: ItemDetailDrawerComponent;
   let wardrobeService: Pick<WardrobeService, 'logWear' | 'getWearHistory'>;
 let logWearCalls = 0;
-  type ItemDetailDrawerComponentInternals = ItemDetailDrawerComponent & {
+  type ItemDetailDrawerComponentInternals = {
     logWearWorking: WritableSignal<boolean>;
     wearHistoryEvents: WritableSignal<unknown[]>;
   };
@@ -79,7 +79,8 @@ let logWearCalls = 0;
     component.shareToCollection.subscribe((item) => { shareItem = item; });
     component.editRequested.subscribe((item) => { editItem = item; });
 
-    const buttons = Array.from(fixture.nativeElement.querySelectorAll('button')) as HTMLButtonElement[];
+    const host = fixture.nativeElement as HTMLElement;
+    const buttons = Array.from(host.querySelectorAll<HTMLButtonElement>('button'));
     const closeBtn = buttons.find(btn => btn.textContent?.trim() !== 'Log Wear (+1)' && btn.textContent?.trim() !== 'Logging…' && !btn.textContent?.includes('Share to Collection') && !btn.textContent?.includes('Edit Metadata'));
     closeBtn?.click();
     expect(closed).toBe(1);
@@ -97,7 +98,9 @@ let logWearCalls = 0;
     let logged: ClothingItem | null = null;
     component.wearLogged.subscribe(item => { logged = item; });
 
-    const buttons = Array.from(fixture.nativeElement.querySelectorAll('button[aria-label="Log Wear"]')) as HTMLButtonElement[];
+    const buttons = Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('button[aria-label="Log Wear"]')
+    );
     buttons[0].click();
 
     expect(logWearCalls).toBe(1);
@@ -111,7 +114,9 @@ let logWearCalls = 0;
 
   it('clears working state when logging fails', () => {
     (wardrobeService.logWear as ReturnType<typeof vi.fn>).mockReturnValueOnce(throwError(() => new Error('nope')));
-    const buttons = Array.from(fixture.nativeElement.querySelectorAll('button[aria-label="Log Wear"]')) as HTMLButtonElement[];
+    const buttons = Array.from(
+      (fixture.nativeElement as HTMLElement).querySelectorAll<HTMLButtonElement>('button[aria-label="Log Wear"]')
+    );
     buttons[0].click();
     expect(asInternal().logWearWorking()).toBe(false);
   });

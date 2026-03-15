@@ -6,7 +6,7 @@ import { WritableSignal } from '@angular/core';
 describe('AuthService', () => {
   let service: AuthService;
   const originalProduction = environment.production;
-  type AuthServiceInternals = AuthService & {
+  type AuthServiceInternals = {
     _user: WritableSignal<{ name: string; email: string; userId: string } | null>;
     _idToken: WritableSignal<string | null>;
     _tokenExp: WritableSignal<number>;

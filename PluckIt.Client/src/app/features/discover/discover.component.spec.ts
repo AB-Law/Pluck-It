@@ -2,12 +2,11 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { WritableSignal } from '@angular/core';
 import { DiscoverComponent } from './discover.component';
 import { DiscoverService } from '../../core/services/discover.service';
-import { ScrapedItem } from '../../core/models/scraped-item.model';
+import { ScrapedItem, ScraperSource } from '../../core/models/scraped-item.model';
 import { Observable, of, throwError } from 'rxjs';
 import { By } from '@angular/platform-browser';
 import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
 import { MobileNavState } from '../../shared/layout/mobile-nav.state';
-import { ScraperSource } from '../../core/models/scraped-item.model';
 
 describe('DiscoverComponent', () => {
   let component: DiscoverComponent;
@@ -28,7 +27,7 @@ describe('DiscoverComponent', () => {
     isActive: ReturnType<typeof vi.fn>;
   };
   let mobileNavState: MobileNavState;
-  type DiscoverComponentInternals = DiscoverComponent & {
+  type DiscoverComponentInternals = {
     selectedItem: WritableSignal<ScrapedItem | null>;
     galleryIndex: WritableSignal<number>;
     modalVoted: WritableSignal<'up' | 'down' | null>;
@@ -45,6 +44,7 @@ describe('DiscoverComponent', () => {
     desktopLayout: WritableSignal<boolean>;
     allItems: WritableSignal<ScrapedItem[]>;
     loadFeed: (append?: boolean) => void;
+    filteredItems: () => ScrapedItem[];
     checkForClientScrape: () => void;
     onWindowResize: () => void;
     openSources: () => void;
@@ -57,13 +57,13 @@ describe('DiscoverComponent', () => {
     openSettings: () => void;
     isDesktopLayout: () => boolean;
   };
-  const asInternal = (): DiscoverComponentInternals => component as DiscoverComponentInternals;
+  const asInternal = (): DiscoverComponentInternals => component as unknown as DiscoverComponentInternals;
   const route = {
     snapshot: { queryParamMap: convertToParamMap({}) },
     queryParamMap: of(convertToParamMap({})),
   };
 
-  const SOURCES = [
+  const SOURCES: ScraperSource[] = [
     { id: 'all', name: 'All', sourceType: 'reddit', isGlobal: true, isActive: true, config: {}, createdAt: '2026-03-11T00:00:00Z' },
     { id: 'src-1', name: 'Yup', sourceType: 'brand', isGlobal: false, isActive: true, config: {}, createdAt: '2026-03-11T00:00:00Z' },
   ];
@@ -159,8 +159,10 @@ describe('DiscoverComponent', () => {
 
   it('loads source-specific feed and opens selected item in modal', () => {
     component.onSourceSelected('src-1');
-    const query = discoverService.getFeed.mock.calls.at(-1)[0];
-    expect(query.sourceIds).toEqual(['src-1']);
+    const lastFeedCall = discoverService.getFeed.mock.calls.at(-1);
+    expect(lastFeedCall).toBeDefined();
+    const query = lastFeedCall?.[0];
+    expect(query?.sourceIds).toEqual(['src-1']);
 
     component.onCardClick(ITEM);
     expect(asInternal().selectedItem()).toEqual(ITEM);
@@ -238,7 +240,7 @@ describe('DiscoverComponent', () => {
   });
 
   it('loads more results for reddit sources that require client ingest', async () => {
-    const redditSource = {
+    const redditSource: ScraperSource = {
       id: 'reddit-src',
       name: 'Reddit',
       sourceType: 'reddit',
@@ -279,7 +281,7 @@ describe('DiscoverComponent', () => {
   });
 
   it('does not launch client scrape if Reddit source was scraped recently', async () => {
-    const redditSource = {
+    const redditSource: ScraperSource = {
       id: 'reddit-src',
       name: 'Reddit',
       sourceType: 'reddit',
@@ -562,7 +564,7 @@ describe('DiscoverComponent', () => {
   });
 
   it('covers reddit scrape guard and empty-response branches', async () => {
-    const noRedditConfigSource = {
+    const noRedditConfigSource: ScraperSource = {
       id: 'reddit-no-sub',
       name: 'Reddit No Sub',
       sourceType: 'reddit',
@@ -577,7 +579,7 @@ describe('DiscoverComponent', () => {
     asInternal().activeSourceId.set('reddit-no-sub');
     discoverService.acquireLease.mockClear();
     discoverService.ingestReddit.mockClear();
-    await asInternal().checkForClientScrape();
+    asInternal().checkForClientScrape();
     expect(discoverService.acquireLease).not.toHaveBeenCalled();
     expect(discoverService.ingestReddit).not.toHaveBeenCalled();
 
@@ -591,7 +593,7 @@ describe('DiscoverComponent', () => {
       configurable: true,
     });
     discoverService.acquireLease.mockReturnValueOnce(of({ status: 'acquired', expiresAt: '2026-03-11T00:00:00Z' }));
-    await asInternal().checkForClientScrape();
+    asInternal().checkForClientScrape();
     await Promise.resolve();
     await Promise.resolve();
     expect(discoverService.ingestReddit).not.toHaveBeenCalled();
@@ -599,7 +601,7 @@ describe('DiscoverComponent', () => {
   });
 
   it('covers reddit lease error branches for 409 and 500 paths', async () => {
-    const redditSource = {
+    const redditSource: ScraperSource = {
       id: 'reddit-client-err',
       name: 'Reddit',
       sourceType: 'reddit',
@@ -619,11 +621,11 @@ describe('DiscoverComponent', () => {
     discoverService.ingestReddit.mockClear();
 
     discoverService.acquireLease.mockReturnValueOnce(throwError(() => ({ status: 409 })));
-    await asInternal().checkForClientScrape();
+    asInternal().checkForClientScrape();
     expect(consoleInfoSpy).toHaveBeenCalledWith('Another user is already scraping this source.');
 
     discoverService.acquireLease.mockReturnValueOnce(throwError(() => ({ status: 500 })));
-    await asInternal().checkForClientScrape();
+    asInternal().checkForClientScrape();
     expect(consoleWarnSpy).toHaveBeenCalledWith('Lease acquisition failed:', expect.anything());
 
     getItemSpy.mockRestore();
