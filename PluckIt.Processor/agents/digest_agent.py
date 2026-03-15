@@ -189,15 +189,15 @@ def _load_user_wardrobe(user_id: str) -> Optional[dict]:
             parameters=[{"name": "@userId", "value": user_id}],
         ):
             ids.append(item["id"])
-        items = [
-            item for item in container.query_items(
+        items = list(
+            container.query_items(
                 query="SELECT c.id, c.category, c.colours, c.tags, c.brand, c.aestheticTags, "
                       "c.wearCount, c.lastWornAt, c.wearEvents, c.price "
                       "FROM c WHERE c.userId = @userId "
-                      "ORDER BY c.wearCount DESC, c.lastWornAt DESC OFFSET 0 LIMIT 50",
+                      "ORDER BY c.wearCount DESC, c.lastWornAt DESC, c.id OFFSET 0 LIMIT 50",
                 parameters=[{"name": "@userId", "value": user_id}],
             )
-        ]
+        )
         return {"items": items, "item_ids": ids}
     except Exception as exc:
         logger.warning("Digest: failed to load wardrobe for %s: %s", user_id, exc)
