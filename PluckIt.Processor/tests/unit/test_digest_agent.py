@@ -58,9 +58,12 @@ def test_load_user_wardrobe_fetches_ids_then_top_scored_items():
     assert wardrobe_data["item_ids"] == ["item-1", "item-2", "item-3"]
     assert len(wardrobe_data["items"]) == 2
     assert wardrobe_data["items"][0]["id"] in {"item-1", "item-2"}
-    query = sync_wardrobe.query_items.call_args_list[1][1]["query"]
+    second_call_args = sync_wardrobe.query_items.call_args_list[1][1]
+    query = second_call_args["query"]
+    params = second_call_args["parameters"]
     assert "ORDER BY c.wearCount DESC" in query
-    assert "OFFSET 0 LIMIT 50" in query
+    assert "OFFSET 0 LIMIT @limit" in query
+    assert {"name": "@limit", "value": _PROMPT_ITEM_LIMIT} in params
 
 
 @pytest.mark.unit
