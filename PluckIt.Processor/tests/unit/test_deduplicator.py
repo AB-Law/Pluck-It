@@ -51,6 +51,14 @@ def test_phash_dedup_very_different_hash():
     assert dedup.is_duplicate("https://reddit.com/new", phash=candidate) is False
 
 
+def test_phash_dedup_nearby_prefix_variation_is_detected():
+    """Flipping a top-bit prefix still counts as duplicate at threshold 5."""
+    existing = "1111111111111111"
+    candidate = f"{int(existing, 16) ^ (1 << 60):016x}"  # diff = 1 bit, different prefix
+    dedup = _make_dedup_with_phash(existing)
+    assert dedup.is_duplicate("https://reddit.com/new", phash=candidate) is True
+
+
 def test_phash_dedup_none_skipped():
     """None pHash should never cause a false positive."""
     dedup = RunDeduplicator()
