@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 # Minimum items with wear history before we consider the signals meaningful.
 _SPARSE_THRESHOLD = 5
+_WARDROBE_SCAN_LIMIT = 500
+_RECENT_WEAR_EVENTS_LIMIT = 10
 
 # Cap on items included in the ranked summary to limit prompt tokens while
 # still surfacing the most relevant items for recommendation.
@@ -67,15 +69,27 @@ def _score_item(wear_count: int, days_since_worn: Optional[int]) -> float:
     return round(wear_count * recency_factor, 3)
 
 
+def _most_recent_wear_events(wear_events: Any, max_events: int = _RECENT_WEAR_EVENTS_LIMIT) -> list[dict[str, Any]]:
+    """Return the most recent wear events, capped to avoid heavy payloads."""
+    if not isinstance(wear_events, list):
+        return []
+
+    parsed_events = [event for event in wear_events if isinstance(event, dict)]
+    parsed_events.sort(key=lambda event: event.get("occurredAt") or "", reverse=True)
+    return parsed_events[:max_events]
+
+
 async def _load_wardrobe_items(user_id: str) -> list[dict[str, Any]]:
     container = get_wardrobe_container()
     items: list[dict[str, Any]] = []
 
     async for item in container.query_items(
         query="SELECT c.id, c.category, c.brand, c.aestheticTags, c.tags, "
-        "c.wearCount, c.lastWornAt, c.wearEvents, c.price FROM c WHERE c.userId = @userId",
+        "c.wearCount, c.lastWornAt, c.wearEvents, c.price FROM c WHERE c.userId = @userId "
+        f"OFFSET 0 LIMIT {_WARDROBE_SCAN_LIMIT}",
         parameters=[{"name": "@userId", "value": user_id}],
     ):
+        item["wearEvents"] = _most_recent_wear_events(item.get("wearEvents"))
         items.append(item)
 
     return items
@@ -86,12 +100,7 @@ def _update_event_context(
     occasions_counter: Counter,
     climate_counter: Counter,
 ) -> None:
-    sorted_wear_events = sorted(
-        wear_events,
-        key=lambda e: e.get("occurredAt") or "",
-        reverse=True,
-    )
-    for event in sorted_wear_events[:10]:
+    for event in wear_events:
         occasion = event.get("occasion")
         if occasion:
             occasions_counter[occasion.lower()] += 1
@@ -219,7 +228,6 @@ async def get_wear_patterns(query: str = "", config: RunnableConfig = None) -> s
         })
 
     # ── Build ranked top-N summary ────────────────────────────────────────────
-    scored.sort(key=lambda x: x["score"], reverse=True)
     scored.sort(key=lambda x: x["score"], reverse=True)
     top_items = scored[:_SUMMARY_LIMIT]
 
