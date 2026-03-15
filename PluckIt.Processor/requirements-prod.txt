@@ -26,6 +26,8 @@ langchain
 langfuse
 # HTTP client for Open-Meteo weather API (no API key needed)
 httpx
+PyJWT>=2.8.0
+requests>=2.31.0
 
 # Google ID token validation (used to authenticate Angular clients directly)
 google-auth

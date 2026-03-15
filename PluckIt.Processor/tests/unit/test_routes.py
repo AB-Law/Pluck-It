@@ -10,6 +10,10 @@ Unit tests for FastAPI routes in function_app.py:
   - POST /api/digest/feedback
 """
 import asyncio
+import base64
+import json
+import os
+import time
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
@@ -27,11 +31,200 @@ def _async_query(items: list[dict]) -> Callable[..., AsyncGenerator[dict, None]]
     return _query
 
 
+def _build_test_jwt(audience: str, issuer: str, alg: str, exp_offset: int = 300) -> str:
+    header = base64.urlsafe_b64encode(json.dumps({"alg": alg, "typ": "JWT"}).encode("ascii")).decode("ascii").rstrip("=")
+    payload = base64.urlsafe_b64encode(
+        json.dumps({"aud": audience, "iss": issuer, "exp": int(time.time()) + exp_offset}).encode("ascii")
+    ).decode("ascii").rstrip("=")
+    signature = base64.urlsafe_b64encode(b"signature").decode("ascii").rstrip("=")
+    return f"{header}.{payload}.{signature}"
+
+
 @pytest.mark.unit
 async def test_health_endpoint(async_client):
     response = await async_client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+@pytest.mark.unit
+async def test_post_extract_metadata_valid_payload_returns_deterministic_shape(async_client):
+    async_image = base64.b64encode(b"fake-image").decode("ascii")
+
+    with patch("function_app._infer_clothing_metadata") as mock_infer:
+        mock_infer.return_value = {
+            "brand": "Acme",
+            "category": "Outerwear",
+            "tags": ["cotton", "oversized", "casual"],
+            "colours": [{"name": "Navy", "hex": "#001122"}],
+        }
+        response = await async_client.post(
+            "/api/extract-clothing-metadata",
+            headers={"X-API-Key": "test-metadata-key"},
+            json={
+                "item_id": "item-1",
+                "image_bytes_base64": async_image,
+                "media_type": "image/jpeg",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["brand"] == "Acme"
+    assert payload["category"] == "Outerwear"
+    assert payload["tags"] == ["cotton", "oversized", "casual"]
+    assert payload["colours"] == [{"name": "Navy", "hex": "#001122"}]
+
+
+@pytest.mark.unit
+async def test_post_extract_metadata_returns_400_on_invalid_payload(async_client):
+    response = await async_client.post(
+        "/api/extract-clothing-metadata",
+        headers={"X-API-Key": "test-metadata-key"},
+        json={
+            "item_id": "item-1",
+            "media_type": "image/jpeg",
+            "image_bytes_base64": "%%%invalid%%",
+        },
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.unit
+async def test_post_extract_metadata_rejects_invalid_api_key(async_client):
+    response = await async_client.post(
+        "/api/extract-clothing-metadata",
+        headers={"X-API-Key": "wrong"},
+        json={
+            "item_id": "item-1",
+            "image_bytes_base64": base64.b64encode(b"fake-image").decode("ascii"),
+            "media_type": "image/jpeg",
+        },
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.unit
+async def test_post_extract_metadata_invalid_model_payload_normalises_to_empty(async_client):
+    async_image = base64.b64encode(b"fake-image").decode("ascii")
+    with patch("function_app._infer_clothing_metadata") as mock_infer:
+        mock_infer.return_value = {
+            "brand": 42,
+            "category": None,
+            "tags": "not-a-list",
+            "colours": [{"name": "Navy", "hex": "#001122"}, {"name": "", "hex": "#123456"}, {"name": "X", "hex": "bad"}],
+        }
+        response = await async_client.post(
+            "/api/extract-clothing-metadata",
+            headers={"X-API-Key": "test-metadata-key"},
+            json={
+                "item_id": "item-1",
+                "image_bytes_base64": async_image,
+                "media_type": "image/jpeg",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["brand"] is None
+    assert payload["category"] is None
+    assert payload["tags"] == []
+    assert payload["colours"] == [{"name": "Navy", "hex": "#001122"}]
+
+
+@pytest.mark.unit
+async def test_post_extract_metadata_azuread_mode_accepts_valid_bearer_token(async_client):
+    audience = "metadata-api-access"
+    issuer = "https://login.microsoftonline.com/test-issuer/v2.0"
+    token = _build_test_jwt(audience=audience, issuer=issuer, alg="RS256")
+    discovery_payload = {"jwks_uri": "https://login.microsoftonline.com/common/discovery/v2.0/keys"}
+    jwks_key_payload = {"kty": "RSA", "kid": "test-kid", "n": "AQAB", "e": "AQAB"}
+
+    with patch.dict(
+        os.environ,
+        {
+            "METADATA_EXTRACT_AUTH_MODE": "azuread",
+            "METADATA_EXTRACT_AZURE_AD_AUDIENCE": audience,
+            "METADATA_EXTRACT_AZURE_AD_ISSUER": issuer,
+        },
+    ), patch(
+        "function_app._fetch_oidc_discovery_async", return_value=discovery_payload
+    ) as mock_discovery, patch(
+        "function_app._fetch_jwks_keys_async", return_value=[jwks_key_payload]
+    ) as mock_jwks, patch(
+        "function_app.jwt.algorithms.RSAAlgorithm.from_jwk", return_value="public-key"
+    ) as mock_from_jwk, patch(
+        "function_app.jwt.decode", return_value={"aud": audience, "iss": issuer, "exp": int(time.time()) + 300}
+    ) as mock_jwt_decode, patch(
+        "function_app._infer_clothing_metadata"
+    ) as mock_infer:
+        mock_infer.return_value = {"brand": None, "category": None, "tags": [], "colours": []}
+        response = await async_client.post(
+            "/api/extract-clothing-metadata",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "item_id": "item-1",
+                "image_bytes_base64": base64.b64encode(b"fake-image").decode("ascii"),
+                "media_type": "image/jpeg",
+            },
+        )
+
+    assert response.status_code == 200
+    mock_discovery.assert_called_once_with(issuer)
+    mock_jwks.assert_called_once_with(discovery_payload["jwks_uri"])
+    mock_from_jwk.assert_called_once_with(json.dumps(jwks_key_payload))
+    mock_jwt_decode.assert_called_once_with(
+        token,
+        "public-key",
+        algorithms=["RS256"],
+        audience=audience,
+        issuer=issuer,
+        options={"require": ["exp"]},
+    )
+    mock_infer.assert_called_once()
+
+
+@pytest.mark.unit
+async def test_post_extract_metadata_azuread_mode_rejects_none_algorithm(async_client):
+    audience = "metadata-api-access"
+    issuer = "https://login.microsoftonline.com/test-issuer/v2.0"
+    token = _build_test_jwt(audience=audience, issuer=issuer, alg="none")
+
+    with patch.dict(
+        os.environ,
+        {
+            "METADATA_EXTRACT_AUTH_MODE": "azuread",
+            "METADATA_EXTRACT_AZURE_AD_AUDIENCE": audience,
+            "METADATA_EXTRACT_AZURE_AD_ISSUER": issuer,
+        },
+    ), patch("function_app._infer_clothing_metadata") as mock_infer:
+        response = await async_client.post(
+            "/api/extract-clothing-metadata",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "item_id": "item-1",
+                "image_bytes_base64": base64.b64encode(b"fake-image").decode("ascii"),
+                "media_type": "image/jpeg",
+            },
+        )
+
+    assert response.status_code == 401
+    mock_infer.assert_not_called()
+
+
+@pytest.mark.unit
+async def test_post_extract_metadata_azuread_mode_rejects_missing_bearer(async_client):
+    with patch.dict(os.environ, {"METADATA_EXTRACT_AUTH_MODE": "azuread"}):
+        response = await async_client.post(
+            "/api/extract-clothing-metadata",
+            headers={"X-API-Key": "irrelevant"},
+            json={
+                "item_id": "item-1",
+                "image_bytes_base64": base64.b64encode(b"fake-image").decode("ascii"),
+                "media_type": "image/jpeg",
+            },
+        )
+    assert response.status_code == 401
 
 
 # ── Chat endpoint ─────────────────────────────────────────────────────────────

@@ -58,6 +58,8 @@ jobs:
           LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
           LANGFUSE_HOST: ${{ secrets.LANGFUSE_HOST }}
           GOOGLE_OAUTH_ALLOWED_CLIENT_IDS: ${{ secrets.GOOGLE_OAUTH_ALLOWED_CLIENT_IDS }}
+          METADATA_EXTRACT_AUTH_MODE: ${{ vars.METADATA_EXTRACT_AUTH_MODE }}
+          METADATA_EXTRACT_API_KEY: ${{ secrets.METADATA_EXTRACT_API_KEY }}
         run: |
           cat > terraform.auto.tfvars <<'OUTER'
           subscription_id = "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
@@ -90,6 +92,10 @@ jobs:
           fi
           if [ -n "$GRAFANA_CLOUD_OTEL_SERVICE_NAME_API" ]; then
             echo "grafana_cloud_api_service_name = \"$GRAFANA_CLOUD_OTEL_SERVICE_NAME_API\"" >> terraform.auto.tfvars
+          fi
+          echo "metadata_extract_auth_mode = \"${METADATA_EXTRACT_AUTH_MODE:-api-key}\"" >> terraform.auto.tfvars
+          if [ -n "$METADATA_EXTRACT_API_KEY" ]; then
+            python3 -c "import json, os; open('terraform.auto.tfvars','a').write('metadata_extract_api_key = '+json.dumps(''.join(os.environ['METADATA_EXTRACT_API_KEY'].splitlines()))+'\\n')"
           fi
           python3 - <<'PY'
           import json

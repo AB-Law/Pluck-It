@@ -14,6 +14,7 @@ public sealed class FakeClothingMetadataService : IClothingMetadataService
         Tags:     ["casual", "cotton"],
         Colours:  [new ClothingColour("White", "#FFFFFF")]
     );
+    public bool ThrowOnCall { get; set; }
 
     /// <summary>Number of times <see cref="ExtractMetadataAsync"/> was called.</summary>
     public int CallCount { get; private set; }
@@ -24,6 +25,10 @@ public sealed class FakeClothingMetadataService : IClothingMetadataService
         CancellationToken cancellationToken = default)
     {
         CallCount++;
+        if (ThrowOnCall)
+        {
+            throw new InvalidOperationException("Metadata extraction failed.");
+        }
         return Task.FromResult(Response);
     }
 }

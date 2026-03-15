@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure;
 using Azure.AI.OpenAI;
+using Azure.Identity;
 using Azure.Storage.Queues;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Azure.Functions.Worker;
@@ -141,17 +142,44 @@ var host = new HostBuilder()
         var aiKey = config["AI:ApiKey"]
             ?? throw new InvalidOperationException("Required env var 'AI__ApiKey' is not set.");
         var aiDeployment = config["AI:Deployment"] ?? "gpt-4.1-mini";
-        var visionDeployment = config["AI:VisionDeployment"] ?? aiDeployment;
 
         services.AddSingleton(_ =>
             new AzureOpenAIClient(new Uri(aiEndpoint), new AzureKeyCredential(aiKey)));
         services.AddSingleton<IStylistService>(sp =>
             new StylistService(sp.GetRequiredService<AzureOpenAIClient>(), aiDeployment));
+        var processorBaseUrl = config["Processor:BaseUrl"] ?? "http://localhost:7071";
+        var metadataEndpointUrl = config["Metadata:EndpointUrl"] ?? $"{processorBaseUrl}/api/extract-clothing-metadata";
+        var metadataAuthMode = config["Metadata:AuthMode"] ?? "api-key";
+        var metadataApiKey = config["Metadata:ApiKey"] ?? string.Empty;
+        var metadataAzureAdScope = config["Metadata:AzureAdScope"] ?? string.Empty;
+        var metadataAzureAdAudience = config["Metadata:AzureAdAudience"] ?? string.Empty;
+        if (!string.Equals(metadataAuthMode, "azuread", StringComparison.OrdinalIgnoreCase))
+        {
+            metadataAzureAdScope = string.Empty;
+            metadataAzureAdAudience = string.Empty;
+        }
+
+        Azure.Core.TokenCredential? metadataTokenCredential = string.Equals(
+            metadataAuthMode,
+            "azuread",
+            StringComparison.OrdinalIgnoreCase)
+            ? new Azure.Identity.DefaultAzureCredential()
+            : null;
         services.AddSingleton<IClothingMetadataService>(sp =>
-            new ClothingMetadataService(sp.GetRequiredService<AzureOpenAIClient>(), visionDeployment));
+            new PythonClothingMetadataService(
+                sp.GetRequiredService<IHttpClientFactory>(),
+                metadataEndpointUrl,
+                metadataAuthMode,
+                new PythonClothingMetadataServiceOptions
+                {
+                    ApiKey = metadataApiKey,
+                    AzureAdScope = metadataAzureAdScope,
+                    AzureAdAudience = metadataAzureAdAudience,
+                    TokenCredential = metadataTokenCredential,
+                    Logger = sp.GetRequiredService<ILogger<PythonClothingMetadataService>>(),
+                }));
 
         // ── Python Processor HTTP forwarding ──────────────────────────────────
-        var processorBaseUrl = config["Processor:BaseUrl"] ?? "http://localhost:7071";
         services.AddHttpClient("processor", client =>
         {
             client.BaseAddress = new Uri(processorBaseUrl);
@@ -321,9 +349,8 @@ static string? BuildSignalEndpoint(string? baseOrSignalEndpoint, string signalPa
         return normalized;
     }
 
-    var matchingSignalPath = signalPaths
-        .Where(knownSignalPath => normalized.EndsWith(knownSignalPath, StringComparison.OrdinalIgnoreCase))
-        .FirstOrDefault();
+    var matchingSignalPath = signalPaths.FirstOrDefault(
+        knownSignalPath => normalized.EndsWith(knownSignalPath, StringComparison.OrdinalIgnoreCase));
 
     if (string.IsNullOrEmpty(matchingSignalPath))
     {

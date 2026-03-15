@@ -32,6 +32,12 @@ google_oauth_client_id = "YOUR_CLIENT_ID.apps.googleusercontent.com"
 segmentation_endpoint_url = "https://your-modal-endpoint.modal.run"
 segmentation_shared_token = "your-shared-bearer-token-here"
 
+# Metadata extraction endpoint auth mode
+# Use "api-key" for simple shared-key auth, or "azuread" for bearer token auth.
+metadata_extract_auth_mode = "api-key"
+# Required when metadata_extract_auth_mode = "api-key"
+metadata_extract_api_key = "your-metadata-api-key"
+
 # Grafana Cloud OpenTelemetry (production)
 # Endpoint example:
 # https://otlp-gateway-prod-ap-south-1.grafana.net/otlp

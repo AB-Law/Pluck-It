@@ -209,4 +209,30 @@ public sealed class ImageProcessingWorkerTests
         // The InMemoryWardrobeRepository stub ignores metadata, so we just verify the service was called
         _metadataService.CallCount.ShouldBe(1);
     }
+
+    [Fact]
+    public async Task Run_MetadataServiceFailure_StillMarksReady()
+    {
+        var draft = new ClothingItem { Id = "item", UserId = "user", DraftStatus = DraftStatus.Processing };
+        _repo.WithItems(draft);
+
+        // Ensure SAS download succeeds
+        _sasService.UploadedBlobs["raw-blob"] = new byte[] { 0x1, 0x2 };
+
+        // Processor succeeds, metadata call throws but should not block readiness
+        var processorRes = new ProcessorResult("fake-id", "https://processed.blob", "image/webp");
+        var sut = CreateSut(CreateMockHttp(HttpStatusCode.OK, processorRes));
+        _metadataService.ThrowOnCall = true;
+
+        var msg = new ImageProcessingMessage("item", "user", "https://fake.blob/raw-blob", 0, DateTimeOffset.UtcNow);
+        var json = JsonSerializer.Serialize(msg, PluckItJsonContext.Default.ImageProcessingMessage);
+
+        await sut.Run(json);
+
+        var updated = _repo.AllItems[0];
+        updated.DraftError.ShouldBeNull();
+        updated.DraftStatus.ShouldBe(DraftStatus.Ready);
+        updated.ImageUrl.ShouldBe("https://processed.blob");
+        _metadataService.CallCount.ShouldBe(1);
+    }
 }
