@@ -5,6 +5,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Azure.AI.OpenAI;
 using OpenAI.Chat;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using PluckIt.Core;
 
 namespace PluckIt.Infrastructure;
@@ -12,13 +14,30 @@ namespace PluckIt.Infrastructure;
 public class ClothingMetadataService : IClothingMetadataService
 {
   private readonly ChatClient _chatClient;
+  private readonly ILogger<ClothingMetadataService> _logger;
+  private const string UncategorisedCategory = "Uncategorised";
 
   public ClothingMetadataService(AzureOpenAIClient client, string deploymentName)
+    : this(client, deploymentName, NullLogger<ClothingMetadataService>.Instance)
+  {
+  }
+
+  public ClothingMetadataService(
+    AzureOpenAIClient client,
+    string deploymentName,
+    ILogger<ClothingMetadataService>? logger)
   {
     if (client is null) throw new ArgumentNullException(nameof(client));
     if (deploymentName is null) throw new ArgumentNullException(nameof(deploymentName));
     _chatClient = client.GetChatClient(deploymentName);
+    _logger = logger ?? NullLogger<ClothingMetadataService>.Instance;
   }
+
+  private static readonly HashSet<string> _allowedCategories = new(StringComparer.OrdinalIgnoreCase)
+  {
+    "Tops", "Bottoms", "Outerwear", "Footwear", "Accessories",
+    "Knitwear", "Dresses", "Activewear", "Swimwear", "Underwear",
+  };
 
   // Azure OpenAI vision only accepts these four MIME types.
   private static readonly HashSet<string> _supportedMediaTypes = new(StringComparer.OrdinalIgnoreCase)
@@ -35,7 +54,8 @@ public class ClothingMetadataService : IClothingMetadataService
     {
       var raw = await FetchMetadataTextAsync(imageData, mediaType, cancellationToken);
       var normalized = StripCodeFence(raw);
-      return ParseMetadata(normalized);
+      var metadata = ParseMetadata(normalized);
+      return EnsureAllowedCategory(metadata);
     }
     catch
     {
@@ -90,6 +110,22 @@ public class ClothingMetadataService : IClothingMetadataService
       ReadTags(root),
       ReadColours(root));
   }
+
+  private ClothingMetadata EnsureAllowedCategory(ClothingMetadata metadata)
+  {
+    if (IsCategoryAllowed(metadata.Category))
+      return metadata;
+
+    _logger.LogWarning(
+      "LLM returned unexpected category '{Category}'. Falling back to {FallbackCategory}.",
+      metadata.Category ?? "<null>",
+      UncategorisedCategory);
+
+    return metadata with { Category = UncategorisedCategory };
+  }
+
+  private static bool IsCategoryAllowed(string? category) =>
+    _allowedCategories.Contains(category ?? string.Empty);
 
   private static string? GetOptionalString(JsonElement root, string propertyName)
   {
