@@ -14,15 +14,79 @@ public class WardrobeRepository : IWardrobeRepository
   private readonly CosmosClient _client;
   private readonly string _databaseName;
   private readonly string _containerName;
+  private readonly string? _imageCleanupIndexContainerName;
+  private Container? _imageCleanupIndexContainer;
 
-  public WardrobeRepository(CosmosClient client, string databaseName, string containerName)
+  public WardrobeRepository(
+    CosmosClient client,
+    string databaseName,
+    string containerName,
+    string? imageCleanupIndexContainerName = null)
   {
     _client = client ?? throw new ArgumentNullException(nameof(client));
     _databaseName = databaseName ?? throw new ArgumentNullException(nameof(databaseName));
     _containerName = containerName ?? throw new ArgumentNullException(nameof(containerName));
+    _imageCleanupIndexContainerName = string.IsNullOrWhiteSpace(imageCleanupIndexContainerName)
+      ? null
+      : imageCleanupIndexContainerName;
   }
 
   private Container Container => _client.GetContainer(_databaseName, _containerName);
+  private Container? ImageCleanupIndexContainer => _imageCleanupIndexContainerName is null
+    ? null
+    : _imageCleanupIndexContainer ??= _client.GetContainer(_databaseName, _imageCleanupIndexContainerName);
+
+  private static string BuildCleanupIndexId(string userId, string itemId) => $"{userId}:{itemId}";
+
+  private async Task SyncImageCleanupIndexAsync(ClothingItem item, CancellationToken cancellationToken)
+  {
+    var indexContainer = ImageCleanupIndexContainer;
+    if (indexContainer is null)
+    {
+      return;
+    }
+
+    if (string.IsNullOrWhiteSpace(item.ImageUrl))
+    {
+      await DeleteImageCleanupIndexAsync(item.UserId, item.Id, cancellationToken);
+      return;
+    }
+
+    await indexContainer.UpsertItemAsync(
+      new ClothingImageCleanupIndexEntry
+      {
+        Id = BuildCleanupIndexId(item.UserId, item.Id),
+        ItemId = item.Id,
+        UserId = item.UserId,
+        Partition = WardrobeImageCleanupIndex.PartitionKeyValue,
+      },
+      new PartitionKey(WardrobeImageCleanupIndex.PartitionKeyValue),
+      cancellationToken: cancellationToken);
+  }
+
+  private async Task DeleteImageCleanupIndexAsync(
+    string userId,
+    string itemId,
+    CancellationToken cancellationToken)
+  {
+    var indexContainer = ImageCleanupIndexContainer;
+    if (indexContainer is null)
+    {
+      return;
+    }
+
+    try
+    {
+      await indexContainer.DeleteItemAsync<ClothingImageCleanupIndexEntry>(
+        BuildCleanupIndexId(userId, itemId),
+        new PartitionKey(WardrobeImageCleanupIndex.PartitionKeyValue),
+        cancellationToken: cancellationToken);
+    }
+    catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+    {
+      // already absent
+    }
+  }
 
   // Maps the allowlisted sort-field identifiers to Cosmos SQL field references.
   private static readonly Dictionary<string, string> SortFieldMap =
@@ -170,6 +234,7 @@ public class WardrobeRepository : IWardrobeRepository
       item,
       new PartitionKey(item.UserId),
       cancellationToken: cancellationToken);
+    await SyncImageCleanupIndexAsync(item, cancellationToken);
   }
 
     public async Task DeleteAsync(
@@ -183,9 +248,11 @@ public class WardrobeRepository : IWardrobeRepository
         id,
         new PartitionKey(userId),
         cancellationToken: cancellationToken);
+      await DeleteImageCleanupIndexAsync(userId, id, cancellationToken);
     }
     catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
     {
+      await DeleteImageCleanupIndexAsync(userId, id, cancellationToken);
       // Already deleted — treat as success
     }
   }
@@ -308,8 +375,9 @@ public class WardrobeRepository : IWardrobeRepository
 
     try
     {
-      await Container.PatchItemAsync<ClothingItem>(
+      var response = await Container.PatchItemAsync<ClothingItem>(
         itemId, new PartitionKey(userId), ops, options, cancellationToken);
+      await SyncImageCleanupIndexAsync(response.Resource, cancellationToken);
       return true;
     }
     catch (CosmosException ex) when (ex.StatusCode == HttpStatusCode.PreconditionFailed)
@@ -391,5 +459,16 @@ public class WardrobeRepository : IWardrobeRepository
       results.AddRange(page);
     }
     return results;
+  }
+
+  /// <summary>
+  /// Lightweight record stored in the cleanup-index Cosmos container.
+  /// </summary>
+  public sealed class ClothingImageCleanupIndexEntry
+  {
+    public string Id { get; init; } = string.Empty;
+    public string ItemId { get; init; } = string.Empty;
+    public string UserId { get; init; } = string.Empty;
+    public string Partition { get; init; } = string.Empty;
   }
 }

@@ -13,6 +13,7 @@ public sealed class WardrobeRepositoryTests
 {
     private const string DatabaseName = "test-db";
     private const string ContainerName = "wardrobe";
+    private const string ImageCleanupIndexContainerName = "wardrobe-image-cleanup";
 
     private readonly Mock<CosmosClient> _mockClient = new(MockBehavior.Strict);
     private readonly Mock<Container> _mockContainer = new(MockBehavior.Strict);
@@ -36,6 +37,25 @@ public sealed class WardrobeRepositoryTests
             WearCount = wearCount,
             WearEvents = events.ToList(),
         };
+
+    private static (WardrobeRepository Sut, Mock<CosmosClient> Client, Mock<Container> WardrobeContainer, Mock<Container> CleanupContainer)
+      CreateRepositoryWithImageIndex()
+    {
+      var client = new Mock<CosmosClient>(MockBehavior.Strict);
+      var wardrobeContainer = new Mock<Container>(MockBehavior.Strict);
+      var cleanupContainer = new Mock<Container>(MockBehavior.Loose);
+
+      client.Setup(c => c.GetContainer(DatabaseName, ContainerName)).Returns(wardrobeContainer.Object);
+      client.Setup(c => c.GetContainer(DatabaseName, ImageCleanupIndexContainerName)).Returns(cleanupContainer.Object);
+
+      var sut = new WardrobeRepository(
+        client.Object,
+        DatabaseName,
+        ContainerName,
+        ImageCleanupIndexContainerName);
+
+      return (sut, client, wardrobeContainer, cleanupContainer);
+    }
 
     [Fact]
     public void Ctor_RejectsNullClient()
@@ -159,6 +179,65 @@ public sealed class WardrobeRepositoryTests
     }
 
     [Fact]
+    public async Task UpsertAsync_WithImageUrl_UpdatesImageCleanupIndex()
+    {
+        var (sut, _, wardrobeContainer, cleanupContainer) = CreateRepositoryWithImageIndex();
+        var item = MakeItem("with-image", "user");
+
+        wardrobeContainer
+            .Setup(c => c.UpsertItemAsync(item, new PartitionKey("user"), null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CosmosTestHelpers.CreateItemResponse(item).Object);
+        cleanupContainer
+            .Setup(c => c.UpsertItemAsync(
+                It.IsAny<WardrobeRepository.ClothingImageCleanupIndexEntry>(),
+                new PartitionKey(WardrobeImageCleanupIndex.PartitionKeyValue),
+                null,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CosmosTestHelpers.CreateItemResponse(new WardrobeRepository.ClothingImageCleanupIndexEntry
+            {
+                Id = $"{item.UserId}:{item.Id}",
+                ItemId = item.Id,
+                UserId = item.UserId,
+                Partition = WardrobeImageCleanupIndex.PartitionKeyValue,
+            }).Object);
+
+        await sut.UpsertAsync(item, CancellationToken.None);
+
+        cleanupContainer.Invocations.ShouldContain(i => i.Method.Name == nameof(Container.UpsertItemAsync));
+        cleanupContainer.Invocations.ShouldNotContain(i => i.Method.Name == nameof(Container.DeleteItemAsync));
+    }
+
+    [Fact]
+    public async Task UpsertAsync_WithoutImageUrl_RemovesImageCleanupIndex()
+    {
+        var (sut, _, wardrobeContainer, cleanupContainer) = CreateRepositoryWithImageIndex();
+        var item = MakeItem("without-image", "user");
+        item.ImageUrl = null;
+
+        wardrobeContainer
+            .Setup(c => c.UpsertItemAsync(item, new PartitionKey("user"), null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CosmosTestHelpers.CreateItemResponse(item).Object);
+        cleanupContainer
+            .Setup(c => c.DeleteItemAsync<WardrobeRepository.ClothingImageCleanupIndexEntry>(
+                $"{item.UserId}:{item.Id}",
+                new PartitionKey(WardrobeImageCleanupIndex.PartitionKeyValue),
+                null,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CosmosTestHelpers.CreateItemResponse(new WardrobeRepository.ClothingImageCleanupIndexEntry
+            {
+                Id = $"{item.UserId}:{item.Id}",
+                ItemId = item.Id,
+                UserId = item.UserId,
+                Partition = WardrobeImageCleanupIndex.PartitionKeyValue,
+            }).Object);
+
+        await sut.UpsertAsync(item, CancellationToken.None);
+
+        cleanupContainer.Invocations.ShouldContain(i => i.Method.Name == nameof(Container.DeleteItemAsync));
+        cleanupContainer.Invocations.ShouldNotContain(i => i.Method.Name == nameof(Container.UpsertItemAsync));
+    }
+
+    [Fact]
     public async Task DeleteAsync_NotFoundIsSwallowed()
     {
         _mockContainer
@@ -170,6 +249,39 @@ public sealed class WardrobeRepositoryTests
         _mockContainer.Verify(
             c => c.DeleteItemAsync<ClothingItem>("missing", new PartitionKey("user"), null, It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_RemovesImageCleanupIndexEntry()
+    {
+        var (sut, _, wardrobeContainer, cleanupContainer) = CreateRepositoryWithImageIndex();
+
+        wardrobeContainer
+            .Setup(c => c.DeleteItemAsync<ClothingItem>(
+                "to-delete",
+                new PartitionKey("user"),
+                null,
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult(
+                CosmosTestHelpers.CreateItemResponse(new ClothingItem { Id = "to-delete", UserId = "user" }).Object));
+        cleanupContainer
+            .Setup(c => c.DeleteItemAsync<WardrobeRepository.ClothingImageCleanupIndexEntry>(
+                "user:to-delete",
+                new PartitionKey(WardrobeImageCleanupIndex.PartitionKeyValue),
+                null,
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult(
+                CosmosTestHelpers.CreateItemResponse(new WardrobeRepository.ClothingImageCleanupIndexEntry
+                {
+                    Id = "user:to-delete",
+                    ItemId = "to-delete",
+                    UserId = "user",
+                    Partition = WardrobeImageCleanupIndex.PartitionKeyValue,
+                }).Object));
+
+        await sut.DeleteAsync("to-delete", "user", CancellationToken.None);
+
+        cleanupContainer.Invocations.ShouldContain(i => i.Method.Name == nameof(Container.DeleteItemAsync));
     }
 
     [Fact]
