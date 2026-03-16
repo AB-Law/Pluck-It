@@ -110,29 +110,9 @@ def _get_llm() -> AzureChatOpenAI:
     )
 
 
-def _normalise_query_text(query: str) -> str:
-    return " ".join((query or "").lower().split())
-
-
 def _normalise_term(raw: str) -> str:
     safe = "".join(ch if ch.isalnum() or ch.isspace() else " " for ch in (raw or "").lower())
     return " ".join(safe.split())
-
-
-def _get_cache_scope(config: RunnableConfig) -> str:
-    user_id = _require_user_id(config)
-    configurable = config.get("configurable") or {}
-    session_id = (
-        configurable.get("session_id")
-        or configurable.get("sessionId")
-        or configurable.get("thread_id")
-        or configurable.get("threadId")
-        or configurable.get("conversation_id")
-        or configurable.get("conversationId")
-    )
-    if session_id is None:
-        return f"user:{user_id}"
-    return f"user:{user_id}:session:{session_id}"
 
 
 def _require_user_id(config: RunnableConfig) -> str:
@@ -309,18 +289,18 @@ async def _load_candidates(container, query: str, parameters: list[dict]) -> lis
     return items
 
 
-async def _expand_query_cached(query: str, config: RunnableConfig) -> list[str]:
-    norm_query = _normalise_query_text(query)
-    cache_key = f"{_get_cache_scope(config)}::{norm_query}"
+async def _expand_query_cached(query: str) -> list[str]:
+    # Cache expansion results by canonical query text to share across users/sessions.
+    cache_key = _normalise_term(query)
     cached_terms = _get_cached_query_terms(cache_key)
     if cached_terms is not None:
-        logger.info("search_wardrobe: expansion cache hit for user/session")
+        logger.info("search_wardrobe: query expansion cache hit for shared query key")
         return cached_terms
 
     terms = await _expand_query(query)
     now = time.monotonic()
     _set_cached_query_terms(cache_key, terms, now)
-    logger.info("search_wardrobe: expansion cache miss for user/session")
+    logger.info("search_wardrobe: query expansion cache miss for shared query key")
     return terms
 
 
@@ -385,7 +365,7 @@ async def search_wardrobe(query: str, config: RunnableConfig) -> str:
     user_id = _require_user_id(config)
 
     # Expand query via LLM to canonical wardrobe terms
-    terms = await _expand_query_cached(query, config)
+    terms = await _expand_query_cached(query)
     logger.info("search_wardrobe: query=%r expanded_terms=%s", query, terms)
 
     category_terms, condition_terms, text_terms = _extract_filter_terms(terms)
