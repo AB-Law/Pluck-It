@@ -11,10 +11,9 @@
   ],
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": ["/assets/*", "*.{css,js,ico,png,svg,woff,woff2}"]
+    "exclude": ["/assets/*", "*.{css,js,ico,png,svg,woff,woff2}", "/robots.txt", "/.well-known/*"]
   },
   "globalHeaders": {
-    "Cache-Control": "no-store",
     "Cross-Origin-Opener-Policy": "same-origin-allow-popups"
   }
 }

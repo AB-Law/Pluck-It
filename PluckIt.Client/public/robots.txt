@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://pluckit.omakashay.com/sitemap.xml

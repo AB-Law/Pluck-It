@@ -47,6 +47,7 @@ export class MobileShellComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
   private bodyLockSnapshot: MobileBodyLockSnapshot | null = null;
+  private readonly materialSymbolFontLinkId = 'pluckit-material-symbols-font';
 
   protected readonly showShell = signal(true);
 
@@ -64,6 +65,22 @@ export class MobileShellComponent implements OnInit {
   protected readonly hasMobileOverlay = computed(() =>
     this.mobileState.activePanel() !== 'none' && this.showShell(),
   );
+
+  private ensureMaterialSymbolsFont(): void {
+    if (typeof document === 'undefined') {
+      return;
+    }
+
+    if (document.getElementById(this.materialSymbolFontLinkId)) {
+      return;
+    }
+
+    const link = document.createElement('link');
+    link.id = this.materialSymbolFontLinkId;
+    link.rel = 'stylesheet';
+    link.href = 'https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&display=swap';
+    document.head.appendChild(link);
+  }
 
   private setBodyScrollLock(locked: boolean): void {
     if (typeof document === 'undefined') {
@@ -140,6 +157,8 @@ export class MobileShellComponent implements OnInit {
 
     if (!allowShell) {
       this.mobileState.closePanel();
+    } else {
+      this.ensureMaterialSymbolsFont();
     }
   }
 

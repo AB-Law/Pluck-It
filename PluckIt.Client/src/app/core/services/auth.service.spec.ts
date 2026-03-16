@@ -10,7 +10,7 @@ describe('AuthService', () => {
     _user: WritableSignal<{ name: string; email: string; userId: string } | null>;
     _idToken: WritableSignal<string | null>;
     _tokenExp: WritableSignal<number>;
-    waitForGIS: () => Promise<void>;
+    waitForGoogleIdentityScript: () => Promise<boolean>;
     handleCredentialResponse: (response: { credential: string }) => void;
   };
   const asInternal = (): AuthServiceInternals => service as unknown as AuthServiceInternals;
@@ -77,16 +77,16 @@ describe('AuthService', () => {
     expect(prompt).not.toHaveBeenCalled();
   });
 
-  it('ensureFreshToken calls prompt when token is near expiry', () => {
+  it('ensureFreshToken calls prompt when token is near expiry', async () => {
     const prompt = vi.fn();
-    const google = { accounts: { id: { prompt, disableAutoSelect: vi.fn(), renderButton: vi.fn() } } };
+    const initialize = vi.fn();
+    const google = { accounts: { id: { prompt, disableAutoSelect: vi.fn(), renderButton: vi.fn(), initialize } } };
     Object.defineProperty(window, 'google', { value: google, configurable: true });
 
     asInternal()._user.set({ name: 'Tester', email: 'a@b.com', userId: 'u-1' });
     asInternal()._tokenExp.set(Math.floor(Date.now() / 1000) + 10);
     service.ensureFreshToken();
-
-    expect(prompt).toHaveBeenCalled();
+    await vi.waitFor(() => expect(prompt).toHaveBeenCalled());
   });
 
   it('initialize() restores a valid production session from localStorage', async () => {
@@ -111,16 +111,21 @@ describe('AuthService', () => {
     expect(service.getIdToken()).toBe(token);
   });
 
-  it('renderButton forwards call to GIS', () => {
-    const renderButton = vi.fn();
+  it('login forwards to GIS prompt when available', async () => {
+    const prompt = vi.fn();
+    const initialize = vi.fn();
     Object.defineProperty(window, 'google', {
-      value: { accounts: { id: { renderButton, prompt: vi.fn(), disableAutoSelect: vi.fn() } } },
+      value: { accounts: { id: { prompt, disableAutoSelect: vi.fn(), initialize } } },
       configurable: true,
     });
-    const element = document.createElement('div');
-    element.getBoundingClientRect = vi.fn().mockReturnValue({ width: 320 } as DOMRect);
-    service.renderButton(element);
-    expect(renderButton).toHaveBeenCalledWith(element, expect.anything());
+
+    service.login();
+    await vi.waitFor(() => expect(prompt).toHaveBeenCalled());
+  });
+
+  it('login() does not throw when GIS is unavailable', () => {
+    Object.defineProperty(window, 'google', { value: undefined, configurable: true });
+    expect(() => service.login()).not.toThrow();
   });
 
   it('logout() disables GIS auto-select and clears auth state', () => {
@@ -165,13 +170,13 @@ describe('AuthService', () => {
     expect(service.isAuthenticated()).toBe(false);
   });
 
-  it('initialize() handles invalid stored auth payload and continues auth bootstrap', async () => {
+  it('initialize() handles invalid stored auth payload without GIS bootstrap', async () => {
     environment.production = true;
     const initialize = vi.fn();
     const prompt = vi.fn((callback: (notification: { isNotDisplayed: () => boolean; isSkippedMoment: () => boolean }) => void) => {
       callback({ isNotDisplayed: () => true, isSkippedMoment: () => false });
     });
-    vi.spyOn(asInternal(), 'waitForGIS').mockResolvedValue(undefined);
+    vi.spyOn(asInternal(), 'waitForGoogleIdentityScript').mockResolvedValue(true);
     Object.defineProperty(window, 'google', {
       value: { accounts: { id: { initialize, prompt, disableAutoSelect: vi.fn(), renderButton: vi.fn() } } },
       configurable: true,
@@ -183,18 +188,8 @@ describe('AuthService', () => {
     await service.initialize();
 
     expect(removeItemSpy).toHaveBeenCalledWith('pluckit_auth');
-    expect(initialize).toHaveBeenCalled();
-    expect(prompt).toHaveBeenCalled();
+    expect(initialize).not.toHaveBeenCalled();
+    expect(prompt).not.toHaveBeenCalled();
   });
 
-  it('login() forwards to GIS prompt when available', () => {
-    const prompt = vi.fn();
-    Object.defineProperty(window, 'google', {
-      value: { accounts: { id: { prompt, disableAutoSelect: vi.fn(), initialize: vi.fn(), renderButton: vi.fn() } } },
-      configurable: true,
-    });
-
-    service.login();
-    expect(prompt).toHaveBeenCalled();
-  });
 });
