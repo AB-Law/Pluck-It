@@ -43,6 +43,11 @@ if app_type == "dotnet":
 		"Cosmos__Key": pick("COSMOS_KEY", "AZURE_COSMOS_KEY", "Cosmos__Key"),
 		"Cosmos__Database": pick("COSMOS_DATABASE", "Cosmos__Database", default="PluckIt"),
 		"Cosmos__Container": pick("COSMOS_CONTAINER", "Cosmos__Container", default="Wardrobe"),
+		"Cosmos__ImageCleanupIndexContainer": pick(
+			"COSMOS_IMAGE_CLEANUP_INDEX_CONTAINER",
+			"Cosmos__ImageCleanupIndexContainer",
+			default="WardrobeImageCleanupIndex",
+		),
 		"AI__Endpoint": pick("AZURE_OPENAI_ENDPOINT", "AI__Endpoint"),
 		"AI__ApiKey": pick("AZURE_OPENAI_API_KEY", "AI__ApiKey"),
 		"AI__Deployment": pick("AZURE_OPENAI_DEPLOYMENT", "AI__Deployment", default="gpt-4.1-mini"),

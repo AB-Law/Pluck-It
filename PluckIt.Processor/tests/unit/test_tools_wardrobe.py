@@ -244,7 +244,7 @@ def _build_large_wardrobe_items(count: int) -> list[dict]:
 
 @pytest.mark.unit
 async def test_search_wardrobe_query_cache_reduces_latency_for_repeated_prompts():
-    """Repeated identical prompts should use cached expansions and avoid repeated calls."""
+    """The same normalised query should reuse the expansion cache across users/sessions."""
     from langchain_core.runnables import RunnableConfig
     from agents.tools.wardrobe import search_wardrobe
 
@@ -263,22 +263,23 @@ async def test_search_wardrobe_query_cache_reduces_latency_for_repeated_prompts(
     mock_container = AsyncMock()
     mock_container.query_items = _query_items
 
-    async def _timed_search(session_id: str) -> None:
+    async def _timed_search(user_id: str, session_id: str, query: str) -> None:
         await search_wardrobe.ainvoke(
-            input={"query": "blue denim tops"},
-            config=RunnableConfig(configurable={"user_id": "perf-user", "session_id": session_id}),
+            input={"query": query},
+            config=RunnableConfig(configurable={"user_id": user_id, "session_id": session_id}),
         )
 
     with (
         patch("agents.tools.wardrobe._expand_query", side_effect=_slow_expand_query),
         patch("agents.tools.wardrobe.get_wardrobe_container", return_value=mock_container),
     ):
+        await _timed_search("user-a", "session-a", "Blue Denim Tops")
+        await _timed_search("user-b", "session-b", "blue denim tops")
+        await _timed_search("user-c", "session-c", "blue denim tops!")
+
+        # Seeded by first request, warm on all users/sessions.
+        await _timed_search("user-d", "session-d", "blue denim tops")
         for idx in range(5):
-            await _timed_search(f"cold-{idx}")
+            await _timed_search(f"user-repeat-{idx}", f"session-repeat-{idx}", "blue denim tops")
 
-        # Seed cache once, then measure warm path.
-        await _timed_search("steady")
-        for _ in range(5):
-            await _timed_search("steady")
-
-    assert calls["count"] == 6
+    assert calls["count"] == 1
