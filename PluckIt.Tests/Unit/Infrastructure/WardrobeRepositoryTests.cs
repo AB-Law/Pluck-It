@@ -291,7 +291,11 @@ public sealed class WardrobeRepositoryTests
     [Fact]
     public async Task AppendWearEventAsync_ReturnsExistingWhenIdempotent()
     {
-        var existing = MakeItem("item", "user", wearCount: 2, new WearEvent(DateTimeOffset.UtcNow, "run", null));
+        var existing = MakeItem(
+            "item",
+            "user",
+            wearCount: 2,
+            events: new[] { new WearEvent(DateTimeOffset.UtcNow, "run", null) });
         existing.LastWearActionId = "dupe-evt";
 
         _mockContainer
@@ -323,9 +327,12 @@ public sealed class WardrobeRepositoryTests
             "item",
             "user",
             wearCount: 2,
-            new WearEvent(DateTimeOffset.UtcNow.AddHours(-1), "old", null),
-            new WearEvent(DateTimeOffset.UtcNow.AddHours(-2), "older", null),
-            new WearEvent(DateTimeOffset.UtcNow.AddHours(-3), "oldest", null));
+            events: new[]
+            {
+                new WearEvent(DateTimeOffset.UtcNow.AddHours(-1), "old", null),
+                new WearEvent(DateTimeOffset.UtcNow.AddHours(-2), "older", null),
+                new WearEvent(DateTimeOffset.UtcNow.AddHours(-3), "oldest", null),
+            });
         var newEvent = new WearEvent(DateTimeOffset.UtcNow, "new", null);
         old.WearEvents = new List<WearEvent>(old.WearEvents) { newEvent };
         var updatedResponse = CosmosTestHelpers.CreateItemResponse(new ClothingItem
