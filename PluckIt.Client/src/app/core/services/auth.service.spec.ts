@@ -173,9 +173,7 @@ describe('AuthService', () => {
   it('initialize() handles invalid stored auth payload without GIS bootstrap', async () => {
     environment.production = true;
     const initialize = vi.fn();
-    const prompt = vi.fn((callback: (notification: { isNotDisplayed: () => boolean; isSkippedMoment: () => boolean }) => void) => {
-      callback({ isNotDisplayed: () => true, isSkippedMoment: () => false });
-    });
+    const prompt = vi.fn();
     vi.spyOn(asInternal(), 'waitForGoogleIdentityScript').mockResolvedValue(true);
     Object.defineProperty(window, 'google', {
       value: { accounts: { id: { initialize, prompt, disableAutoSelect: vi.fn(), renderButton: vi.fn() } } },
