@@ -32,7 +32,7 @@ _KNOWN_COLORS = {
     "pink", "purple", "brown", "beige", "grey", "gray", "cream", "olive",
     "maroon", "teal", "gold", "silver",
 }
-_DEFAULT_CACHE_TTL_MS = 300_000
+_DEFAULT_CACHE_TTL_MS = 1_800_000
 
 
 def _ensure_fx_cache() -> tuple[str, str]:
@@ -347,14 +347,17 @@ async def _fetch_user_data(user_id: str, cutoff: datetime) -> tuple[list[dict], 
     
     items = []
     async for item in wardrobe.query_items(
-        query="SELECT c.id, c.wearCount, c.lastWornAt, c.price, c.colours, c.tags, c.dateAdded FROM c WHERE c.userId = @userId",
+        query=(
+            "SELECT c.id, c.wearCount, c.lastWornAt, c.price, c.colours, c.tags, c.dateAdded "
+            "FROM c WHERE c.userId = @userId OFFSET 0 LIMIT 1000"
+        ),
         parameters=[{"name": "@userId", "value": user_id}],
     ):
         items.append(item)
         
     events = []
     async for ev in wear_events.query_items(
-        query="SELECT c.itemId, c.occurredAt FROM c WHERE c.userId = @userId AND c.occurredAt >= @cutoff",
+        query="SELECT c.itemId, c.occurredAt FROM c WHERE c.userId = @userId AND c.occurredAt >= @cutoff LIMIT 5000",
         parameters=[{"name": "@userId", "value": user_id}, {"name": "@cutoff", "value": cutoff.isoformat()}],
     ):
         events.append(ev)
