@@ -47,7 +47,7 @@ async def test_run_from_snippets_async_uses_async_container_for_upsert() -> None
         patch("agents.mood_processor._build_embedder", return_value=embedder),
         patch("agents.mood_processor._extract_all_parallel", return_value=[mood]),
         patch("agents.mood_processor._dedup_within_run", return_value=([mood], [[0.1, 0.2]])),
-        patch("agents.mood_processor._load_existing_moods_with_embeddings", return_value=[]),
+        patch("agents.mood_processor._load_existing_moods_with_embeddings", new_callable=AsyncMock, return_value=[]),
         patch("agents.mood_processor._canonicalize_against_db", side_effect=lambda mood_data, *_args, **_kwargs: mood_data),
     ):
         saved = await run_from_snippets_async([{"title": "Quiet Luxury"}, {"title": "Classic Outerwear"}])
@@ -112,18 +112,20 @@ def test_run_from_snippets_batches_reembed_calls_for_canonicalized_names() -> No
     embedder = MagicMock()
     embedder.embed_documents.return_value = [[0.2]]
 
-    with patch("agents.mood_processor._build_llm", return_value=MagicMock()), \
-            patch("agents.mood_processor._build_confirm_llm", return_value=MagicMock()), \
-            patch("agents.mood_processor._build_embedder", return_value=embedder), \
-            patch("agents.mood_processor.get_moods_container_sync", return_value=MagicMock()), \
-            patch("agents.mood_processor._extract_all_parallel", return_value=moods), \
-            patch("agents.mood_processor._dedup_within_run", return_value=(moods, initial_embeddings)), \
-            patch("agents.mood_processor._load_existing_moods_with_embeddings", return_value=[]), \
+    with (
+            patch("agents.mood_processor._build_llm", return_value=MagicMock()),
+            patch("agents.mood_processor._build_confirm_llm", return_value=MagicMock()),
+            patch("agents.mood_processor._build_embedder", return_value=embedder),
+            patch("agents.mood_processor.get_moods_container", return_value=AsyncMock()),
+            patch("agents.mood_processor._extract_all_parallel", return_value=moods),
+            patch("agents.mood_processor._dedup_within_run", return_value=(moods, initial_embeddings)),
+            patch("agents.mood_processor._load_existing_moods_with_embeddings", new_callable=AsyncMock, return_value=[]),
             patch(
                 "agents.mood_processor._canonicalize_against_db",
                 side_effect=lambda mood, *_args, **_kwargs: _canonicalize_name(mood),
-            ), \
-            patch("agents.mood_processor.upsert_mood") as upsert_mood:
+            ),
+            patch("agents.mood_processor.upsert_mood", new_callable=AsyncMock) as upsert_mood,
+    ):
         result = mood_processor.run_from_snippets([{"title": "a", "summary": "", "url": "u", "published": "", "source": "r"}])
 
     assert result == 2
@@ -156,15 +158,17 @@ def test_run_from_snippets_falls_back_to_original_embeddings_on_reembed_failure(
     embedder = MagicMock()
     embedder.embed_documents.side_effect = [RuntimeError("embeddings unavailable")]
 
-    with patch("agents.mood_processor._build_llm", return_value=MagicMock()), \
-            patch("agents.mood_processor._build_confirm_llm", return_value=MagicMock()), \
-            patch("agents.mood_processor._build_embedder", return_value=embedder), \
-            patch("agents.mood_processor.get_moods_container_sync", return_value=MagicMock()), \
-            patch("agents.mood_processor._extract_all_parallel", return_value=moods), \
-            patch("agents.mood_processor._dedup_within_run", return_value=(moods, initial_embeddings)), \
-            patch("agents.mood_processor._load_existing_moods_with_embeddings", return_value=[]), \
-            patch("agents.mood_processor._canonicalize_against_db", side_effect=_canonicalize_name), \
-            patch("agents.mood_processor.upsert_mood") as upsert_mood:
+    with (
+            patch("agents.mood_processor._build_llm", return_value=MagicMock()),
+            patch("agents.mood_processor._build_confirm_llm", return_value=MagicMock()),
+            patch("agents.mood_processor._build_embedder", return_value=embedder),
+            patch("agents.mood_processor.get_moods_container", return_value=AsyncMock()),
+            patch("agents.mood_processor._extract_all_parallel", return_value=moods),
+            patch("agents.mood_processor._dedup_within_run", return_value=(moods, initial_embeddings)),
+            patch("agents.mood_processor._load_existing_moods_with_embeddings", new_callable=AsyncMock, return_value=[]),
+            patch("agents.mood_processor._canonicalize_against_db", side_effect=_canonicalize_name),
+            patch("agents.mood_processor.upsert_mood", new_callable=AsyncMock) as upsert_mood,
+    ):
         result = mood_processor.run_from_snippets([{"title": "a", "summary": "", "url": "u", "published": "", "source": "r"}])
 
     assert result == 2
@@ -185,19 +189,51 @@ def test_run_from_snippets_does_not_reembed_if_not_canonicalized() -> None:
 
     embedder = MagicMock()
 
-    with patch("agents.mood_processor._build_llm", return_value=MagicMock()), \
-            patch("agents.mood_processor._build_confirm_llm", return_value=MagicMock()), \
-            patch("agents.mood_processor._build_embedder", return_value=embedder), \
-            patch("agents.mood_processor.get_moods_container_sync", return_value=MagicMock()), \
-            patch("agents.mood_processor._extract_all_parallel", return_value=moods), \
-            patch("agents.mood_processor._dedup_within_run", return_value=(moods, initial_embeddings)), \
-            patch("agents.mood_processor._load_existing_moods_with_embeddings", return_value=[]), \
+    with (
+            patch("agents.mood_processor._build_llm", return_value=MagicMock()),
+            patch("agents.mood_processor._build_confirm_llm", return_value=MagicMock()),
+            patch("agents.mood_processor._build_embedder", return_value=embedder),
+            patch("agents.mood_processor.get_moods_container", return_value=AsyncMock()),
+            patch("agents.mood_processor._extract_all_parallel", return_value=moods),
+            patch("agents.mood_processor._dedup_within_run", return_value=(moods, initial_embeddings)),
+            patch("agents.mood_processor._load_existing_moods_with_embeddings", new_callable=AsyncMock, return_value=[]),
             patch(
                 "agents.mood_processor._canonicalize_against_db",
                 side_effect=lambda mood, *_args, **_kwargs: mood,
-            ), \
-            patch("agents.mood_processor.upsert_mood"):
+            ),
+            patch("agents.mood_processor.upsert_mood", new_callable=AsyncMock),
+    ):
         result = mood_processor.run_from_snippets([{"title": "a", "summary": "", "url": "u", "published": "", "source": "r"}])
 
     assert result == 1
     embedder.embed_documents.assert_not_called()
+
+
+def test_run_from_snippets_skips_unknown_primary_moods() -> None:
+    moods = [
+        {
+            "name": "Mysterious Style",
+            "primaryMood": "Unknown",
+            "resolvedSources": [{"url": "https://example.com/mystery"}],
+        },
+    ]
+    initial_embeddings = [[0.9]]
+    embedder = MagicMock()
+
+    with (
+        patch("agents.mood_processor._build_llm", return_value=MagicMock()),
+        patch("agents.mood_processor._build_confirm_llm", return_value=MagicMock()),
+        patch("agents.mood_processor._build_embedder", return_value=embedder),
+        patch("agents.mood_processor.get_moods_container", return_value=AsyncMock()),
+        patch("agents.mood_processor._extract_all_parallel", return_value=moods),
+        patch("agents.mood_processor._dedup_within_run", return_value=(moods, initial_embeddings)),
+        patch("agents.mood_processor._load_existing_moods_with_embeddings", new_callable=AsyncMock, return_value=[]),
+        patch("agents.mood_processor._canonicalize_against_db", side_effect=lambda mood, *_args, **_kwargs: mood),
+        patch("agents.mood_processor.upsert_mood", new_callable=AsyncMock) as upsert_mood,
+    ):
+        result = mood_processor.run_from_snippets([
+            {"title": "a", "summary": "", "url": "u", "published": "", "source": "r"},
+        ])
+
+    assert result == 0
+    upsert_mood.assert_not_called()

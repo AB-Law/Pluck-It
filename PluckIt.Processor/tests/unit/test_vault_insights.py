@@ -468,3 +468,5 @@ async def test_fetch_user_data_applies_query_limits_with_parameters():
         {"name": "@userId", "value": "test-user"},
         {"name": "@cutoff", "value": cutoff.isoformat()},
     ]
+    assert captured_queries["wardrobe"]["partition_key"] == "test-user"
+    assert captured_queries["wear_events"]["partition_key"] == "test-user"

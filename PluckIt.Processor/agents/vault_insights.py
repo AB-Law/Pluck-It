@@ -352,6 +352,7 @@ async def _fetch_user_data(user_id: str, cutoff: datetime) -> tuple[list[dict], 
             "FROM c WHERE c.userId = @userId OFFSET 0 LIMIT 1000"
         ),
         parameters=[{"name": "@userId", "value": user_id}],
+        partition_key=user_id,
     ):
         items.append(item)
         
@@ -359,6 +360,7 @@ async def _fetch_user_data(user_id: str, cutoff: datetime) -> tuple[list[dict], 
     async for ev in wear_events.query_items(
         query="SELECT c.itemId, c.occurredAt FROM c WHERE c.userId = @userId AND c.occurredAt >= @cutoff LIMIT 5000",
         parameters=[{"name": "@userId", "value": user_id}, {"name": "@cutoff", "value": cutoff.isoformat()}],
+        partition_key=user_id,
     ):
         events.append(ev)
         

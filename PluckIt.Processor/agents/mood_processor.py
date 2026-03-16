@@ -495,6 +495,19 @@ async def run_from_snippets_async(snippets: list[dict]) -> int:
 
     deduped, embeddings = _dedup_within_run(all_moods, embedder)
 
+    filtered_deduped: list[dict] = []
+    filtered_embeddings: list[list[float]] = []
+    for mood_data, name_embedding in zip(deduped, embeddings):
+        primary = mood_data.get("primaryMood", "")
+        if primary not in PRIMARY_MOODS:
+            logger.warning("Unknown primaryMood '%s' for '%s' - skipping.", primary, mood_data.get("name"))
+            continue
+        filtered_deduped.append(mood_data)
+        filtered_embeddings.append(name_embedding)
+
+    deduped = filtered_deduped
+    embeddings = filtered_embeddings
+
     unique_primaries = {m["primaryMood"] for m in deduped if m.get("primaryMood") in PRIMARY_MOODS}
     existing_by_primary: dict[str, list[dict]] = {}
     for primary in unique_primaries:
@@ -504,10 +517,6 @@ async def run_from_snippets_async(snippets: list[dict]) -> int:
     canonicalized_names: list[str] = []
     for idx, (mood_data, name_embedding) in enumerate(zip(deduped, embeddings)):
         primary = mood_data.get("primaryMood", "")
-        if primary not in PRIMARY_MOODS:
-            logger.warning("Unknown primaryMood '%s' for '%s' - skipping.", primary, mood_data.get("name"))
-            continue
-
         original_name = mood_data["name"]
         mood_data = _canonicalize_against_db(
             mood_data, name_embedding, existing_by_primary.get(primary, []), confirm_llm,
@@ -527,13 +536,13 @@ async def run_from_snippets_async(snippets: list[dict]) -> int:
                     len(canonicalized_indices),
                 )
             else:
-                for idx, name_embedding in zip(canonicalized_indices, new_embeddings):
+                for idx, name_embedding in zip(canonicalized_indices, new_embeddings, strict=True):
                     embeddings[idx] = name_embedding
         except Exception as exc:
             logger.debug("Batch re-embed after canonicalization failed: %s", exc)
 
     saved = 0
-    for mood_data, name_embedding in zip(deduped, embeddings):
+    for mood_data, name_embedding in zip(deduped, embeddings, strict=True):
         try:
             await upsert_mood(mood_data, name_embedding, container)
             saved += 1

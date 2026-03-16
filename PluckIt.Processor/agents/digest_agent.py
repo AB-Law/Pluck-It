@@ -359,7 +359,7 @@ def run_weekly_digest() -> None:
             max_item_count=500,
         )
     except Exception as exc:
-        logger.error("Digest: failed to list profiles: %s", exc)
+        logger.error("Digest: failed to list profiles (%s): %s", type(exc).__name__, exc)
         return
 
     for profile in profiles_cursor:
