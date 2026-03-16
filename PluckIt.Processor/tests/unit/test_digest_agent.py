@@ -247,14 +247,16 @@ def test_save_digest_and_update_profile_updates_fingerprint():
 
 @pytest.mark.unit
 def test_run_weekly_digest_tracks_outcomes_and_handles_failures():
-    read_all_profiles = MagicMock(return_value=[
+    read_profiles = MagicMock(
+        return_value=iter([
         {"id": "user-good"},
         {"id": "user-bad"},
         {"id": ""},
         {},
     ])
+    )
     profile_container = MagicMock()
-    profile_container.read_all_items = read_all_profiles
+    profile_container.query_items = read_profiles
 
     def _run_digest_side_effect(user_id: str):
         if user_id == "user-bad":
@@ -271,6 +273,7 @@ def test_run_weekly_digest_tracks_outcomes_and_handles_failures():
     assert mock_info.call_count >= 2
     last_call = mock_info.call_args_list[-1]
     assert "Weekly digest complete" in last_call.args[0]
+    read_profiles.assert_called_once_with(query="SELECT c.id FROM c", max_item_count=500)
 @pytest.mark.unit
 def test_run_digest_for_user_with_status_fails_when_no_suggestions():
     profile_container = MagicMock()
