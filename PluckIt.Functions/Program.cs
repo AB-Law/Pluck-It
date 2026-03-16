@@ -106,7 +106,8 @@ var host = new HostBuilder()
             new WardrobeRepository(
                 sp.GetRequiredService<CosmosClient>(),
                 cosmosDatabase,
-                cosmosContainer));
+                cosmosContainer,
+                config["Cosmos:ImageCleanupIndexContainer"] ?? WardrobeImageCleanupIndex.DefaultContainerName));
 
         var cosmosWearEventsContainer = config["Cosmos:WearEventsContainer"] ?? "WearEvents";
         services.AddSingleton<IWearHistoryRepository>(sp =>

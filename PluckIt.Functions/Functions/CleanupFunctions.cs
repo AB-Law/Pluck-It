@@ -24,11 +24,13 @@ public class CleanupFunctions(
 {
     private const string TransparentSuffix = "-transparent.png";
 
-    private static (string dbName, string containerName) GetCosmosConfig()
+    private static (string dbName, string wardrobeContainerName, string? imageCleanupIndexContainerName) GetCosmosConfig()
     {
         var dbName = Environment.GetEnvironmentVariable("Cosmos__Database") ?? "PluckIt";
         var containerName = Environment.GetEnvironmentVariable("Cosmos__Container") ?? "Wardrobe";
-        return (dbName, containerName);
+        var imageCleanupIndexContainerName = Environment.GetEnvironmentVariable(
+            WardrobeImageCleanupIndex.ContainerSettingName);
+        return (dbName, containerName, imageCleanupIndexContainerName);
     }
 
     private static (string accountName, string archiveContainer) GetStorageConfig()
@@ -53,19 +55,37 @@ public class CleanupFunctions(
 
     private async Task<HashSet<string>> GetKnownItemIdsAsync(CancellationToken cancellationToken)
     {
-        var knownIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        var (dbName, containerName) = GetCosmosConfig();
+        var (dbName, wardrobeContainerName, imageCleanupIndexContainerName) = GetCosmosConfig();
+        var useImageCleanupIndex = !string.IsNullOrWhiteSpace(imageCleanupIndexContainerName);
+        var containerName = useImageCleanupIndex
+            ? imageCleanupIndexContainerName!
+            : wardrobeContainerName;
         var container = cosmosClient.GetContainer(dbName, containerName);
 
-        var query = new QueryDefinition("SELECT c.id FROM c WHERE IS_DEFINED(c.imageUrl)");
+        var query = useImageCleanupIndex
+            ? new QueryDefinition("SELECT c.itemId FROM c")
+            : new QueryDefinition("SELECT c.id FROM c WHERE IS_DEFINED(c.imageUrl)");
+        var queryOptions = new QueryRequestOptions
+        {
+            MaxItemCount = 500,
+            PartitionKey = useImageCleanupIndex
+                ? new PartitionKey(WardrobeImageCleanupIndex.PartitionKeyValue)
+                : null,
+        };
+        var knownIds = await ReadKnownItemIdsAsync(container, query, queryOptions, cancellationToken);
+        return knownIds;
+    }
+
+    private static async Task<HashSet<string>> ReadKnownItemIdsAsync(
+        Container container,
+        QueryDefinition query,
+        QueryRequestOptions requestOptions,
+        CancellationToken cancellationToken)
+    {
+        var knownIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var iterator = container.GetItemQueryStreamIterator(
             query,
-            requestOptions: new QueryRequestOptions
-            {
-                MaxItemCount = 500,
-            });
-
+            requestOptions: requestOptions);
         while (iterator.HasMoreResults)
         {
             using var response = await iterator.ReadNextAsync(cancellationToken);
@@ -84,7 +104,10 @@ public class CleanupFunctions(
             {
                 if (!item.TryGetProperty("id", out var idProp))
                 {
-                    continue;
+                    if (!item.TryGetProperty("itemId", out idProp))
+                    {
+                        continue;
+                    }
                 }
 
                 var id = idProp.GetString();
@@ -94,7 +117,6 @@ public class CleanupFunctions(
                 }
             }
         }
-
         return knownIds;
     }
 
@@ -107,8 +129,9 @@ public class CleanupFunctions(
     {
         logger.LogInformation("Orphan blob cleanup started at {Time}", DateTimeOffset.UtcNow);
 
-        // ── 1. Collect all known item IDs from Cosmos (cross-partition) ───────
-        // We read only the /id field to minimise RU cost.
+        // ── 1. Collect all known item IDs from Cosmos ────────────────────
+        // Prefer the cleanup index container when configured; otherwise
+        // use the legacy wardrobe scan.
         try
         {
             var knownIds = await GetKnownItemIdsAsync(cancellationToken);

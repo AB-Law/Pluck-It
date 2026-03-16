@@ -59,12 +59,13 @@ public sealed class CleanupFunctionsTests
     /// a simulated JSON response containing the provided item IDs.
     /// Cosmos returns pages shaped roughly like { "Documents": [ {"id":"abc"}, ... ] }
     /// </summary>
-    private void SetupCosmosQueryIterator(params string[] itemIds)
+    private void SetupCosmosQueryIterator(bool itemIdFieldOnly, params string[] itemIds)
     {
         var docs = new List<string>();
+        var fieldName = itemIdFieldOnly ? "itemId" : "id";
         foreach (var id in itemIds)
         {
-            docs.Add($$"""{"id":"{{id}}"}""");
+            docs.Add($$"""{"{{fieldName}}":"{{id}}"}""");
         }
         var pageJson = $$"""{"Documents": [ {{string.Join(",", docs)}} ]}""";
 
@@ -90,7 +91,7 @@ public sealed class CleanupFunctionsTests
     public async Task CleanUpOrphanBlobs_KnownBlob_IsSkipped()
     {
         // Cosmos knows about "item-123"
-        SetupCosmosQueryIterator("item-123");
+        SetupCosmosQueryIterator(false, "item-123");
 
         // Storage has a blob named "item-123-transparent.png"
         _sasService.ArchiveBlobNames.Add("item-123-transparent.png");
@@ -105,7 +106,7 @@ public sealed class CleanupFunctionsTests
     public async Task CleanUpOrphanBlobs_OrphanBlob_IsDeleted()
     {
         // Cosmos knows about "item-123"
-        SetupCosmosQueryIterator("item-123");
+        SetupCosmosQueryIterator(false, "item-123");
 
         // Storage has a blob named "orphan-999-transparent.png"
         _sasService.ArchiveBlobNames.Add("orphan-999-transparent.png");
@@ -120,7 +121,7 @@ public sealed class CleanupFunctionsTests
     [Fact]
     public async Task CleanUpOrphanBlobs_MixedBlobs_DeletesOnlyOrphans()
     {
-        SetupCosmosQueryIterator("known-1", "known-2");
+        SetupCosmosQueryIterator(false, "known-1", "known-2");
         _sasService.ArchiveBlobNames.AddRange(MixedOrphanBlobNames);
 
         await _sut.CleanUpOrphanBlobs(CreateDummyTimer(), CancellationToken.None);
@@ -133,7 +134,7 @@ public sealed class CleanupFunctionsTests
     [Fact]
     public async Task CleanUpOrphanBlobs_EmptyStorage_NoOps()
     {
-        SetupCosmosQueryIterator("some-item");
+        SetupCosmosQueryIterator(false, "some-item");
         // Storage has no blobs
 
         await _sut.CleanUpOrphanBlobs(CreateDummyTimer(), CancellationToken.None);
@@ -159,5 +160,25 @@ public sealed class CleanupFunctionsTests
 
         // But no deletes should have been issued because Cosmos read failed (fail-safe)
         _sasService.DeletedUrls.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task CleanUpOrphanBlobs_UsesImageCleanupIndexPayload()
+    {
+        var previousIndexContainer = Environment.GetEnvironmentVariable("Cosmos__ImageCleanupIndexContainer");
+        Environment.SetEnvironmentVariable("Cosmos__ImageCleanupIndexContainer", "WardrobeImageCleanupIndex");
+        try
+        {
+            SetupCosmosQueryIterator(true, "known-1");
+            _sasService.ArchiveBlobNames.Add("known-1-transparent.png");
+
+            await _sut.CleanUpOrphanBlobs(CreateDummyTimer(), CancellationToken.None);
+
+            _sasService.DeletedUrls.ShouldBeEmpty();
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("Cosmos__ImageCleanupIndexContainer", previousIndexContainer);
+        }
     }
 }

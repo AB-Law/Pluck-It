@@ -33,6 +33,7 @@ DATABASE = "PluckIt"
 
 CONTAINERS = [
     ("Wardrobe",                      _PK_USER),
+    ("WardrobeImageCleanupIndex",      "/partition"),
     ("UserProfiles",                  "/id"),
     ("Conversations",                 _PK_USER),
     ("Digests",                       _PK_USER),
