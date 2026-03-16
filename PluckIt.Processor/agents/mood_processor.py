@@ -498,8 +498,9 @@ def run_from_snippets(snippets: list[dict]) -> int:
         for p in unique_primaries
     }
 
-    saved = 0
-    for mood_data, name_embedding in zip(deduped, embeddings):
+    canonicalized_indices: list[int] = []
+    canonicalized_names: list[str] = []
+    for idx, (mood_data, name_embedding) in enumerate(zip(deduped, embeddings)):
         primary = mood_data.get("primaryMood", "")
         if primary not in PRIMARY_MOODS:
             logger.warning("Unknown primaryMood '%s' for '%s' - skipping.", primary, mood_data.get("name"))
@@ -511,11 +512,26 @@ def run_from_snippets(snippets: list[dict]) -> int:
         )
 
         if mood_data["name"] != original_name:
-            try:
-                name_embedding = embedder.embed_query(mood_data["name"])
-            except Exception as exc:
-                logger.debug("Re-embed after canonicalization failed: %s", exc)
+            canonicalized_indices.append(idx)
+            canonicalized_names.append(mood_data["name"])
 
+    if canonicalized_names:
+        try:
+            new_embeddings = embedder.embed_documents(canonicalized_names)
+            if len(new_embeddings) != len(canonicalized_indices):
+                logger.warning(
+                    "Canonicalized mood re-embed count mismatch: got %d embeddings for %d names.",
+                    len(new_embeddings),
+                    len(canonicalized_indices),
+                )
+            else:
+                for idx, name_embedding in zip(canonicalized_indices, new_embeddings):
+                    embeddings[idx] = name_embedding
+        except Exception as exc:
+            logger.debug("Batch re-embed after canonicalization failed: %s", exc)
+
+    saved = 0
+    for mood_data, name_embedding in zip(deduped, embeddings):
         try:
             upsert_mood(mood_data, name_embedding, container)
             saved += 1
