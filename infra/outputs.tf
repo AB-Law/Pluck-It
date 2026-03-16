@@ -33,6 +33,11 @@ output "cosmos_container_name" {
   value       = azurerm_cosmosdb_sql_container.wardrobe.name
 }
 
+output "cosmos_image_cleanup_index_container_name" {
+  description = "Cosmos DB container name for wardrobe image cleanup index."
+  value       = azurerm_cosmosdb_sql_container.wardrobe_image_cleanup_index.name
+}
+
 output "cosmos_vault_insights_cache_container_name" {
   description = "Cosmos DB container name for cached vault insight responses."
   value       = azurerm_cosmosdb_sql_container.vault_insights_cache.name

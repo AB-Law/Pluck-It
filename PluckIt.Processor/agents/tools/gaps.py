@@ -18,6 +18,7 @@ from langchain_core.runnables import RunnableConfig
 from ..db import get_wardrobe_container, get_user_profiles_container
 
 logger = logging.getLogger(__name__)
+_WARDROBE_SCAN_LIMIT = 500
 
 # Minimum recommended counts per category by style. Can be extended.
 _STYLE_BASELINES: dict[str, dict[str, int]] = {
@@ -104,7 +105,10 @@ async def _load_wardrobe_items(user_id: str) -> tuple[Counter, list[dict[str, An
     all_items: list[dict[str, Any]] = []
 
     async for item in wardrobe.query_items(
-        query="SELECT c.category, c.colours, c.tags, c.brand FROM c WHERE c.userId = @userId",
+        query="SELECT c.category, c.colours, c.tags, c.brand FROM c "
+              "WHERE c.userId = @userId "
+              "ORDER BY c._ts DESC, c.id ASC "
+              f"OFFSET 0 LIMIT {_WARDROBE_SCAN_LIMIT}",
         parameters=[{"name": "@userId", "value": user_id}],
     ):
         cat = (item.get("category") or "uncategorised").lower()

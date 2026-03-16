@@ -164,8 +164,8 @@ def run_digest_for_user_with_status(user_id: str, force: bool = False) -> tuple[
     # 4. Generate Suggestions via LLM
     items_with_history = sum(1 for s in ranked_items if s["wearCount"] > 0)
     suggestions = _generate_suggestions(
-        profile, ranked_items, category_counts, liked, disliked, 
-        climate_zone, items_with_history, len(wardrobe_data["items"])
+        profile, ranked_items, category_counts, liked, disliked,
+        climate_zone, items_with_history, len(wardrobe_data["item_ids"])
     )
     if not suggestions:
         return None, "failed"
@@ -183,14 +183,24 @@ def run_digest_for_user_with_status(user_id: str, force: bool = False) -> tuple[
 def _load_user_wardrobe(user_id: str) -> Optional[dict]:
     try:
         container = get_wardrobe_container_sync()
+        ids = [
+            item["id"]
+            for item in container.query_items(
+                query="SELECT c.id FROM c WHERE c.userId = @userId",
+                parameters=[{"name": "@userId", "value": user_id}],
+            )
+        ]
+        if not ids:
+            return {"items": [], "item_ids": []}
+
         items = []
-        ids = []
         for item in container.query_items(
             query="SELECT c.id, c.category, c.colours, c.tags, c.brand, c.aestheticTags, "
-                  "c.wearCount, c.lastWornAt, c.wearEvents, c.price FROM c WHERE c.userId = @userId",
-            parameters=[{"name": "@userId", "value": user_id}],
+                  "c.wearCount, c.lastWornAt, c.wearEvents, c.price "
+                  "FROM c WHERE c.userId = @userId AND IS_DEFINED(c.wearCount) AND c.wearCount > 0 "
+                  "ORDER BY c.wearCount DESC OFFSET 0 LIMIT @limit",
+            parameters=[{"name": "@userId", "value": user_id}, {"name": "@limit", "value": _PROMPT_ITEM_LIMIT}],
         ):
-            ids.append(item["id"])
             items.append(item)
         return {"items": items, "item_ids": ids}
     except Exception as exc:

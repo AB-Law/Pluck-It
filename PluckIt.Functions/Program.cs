@@ -11,6 +11,8 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.OpenTelemetry;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.StackExchangeRedis;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using PluckIt.Core;
@@ -106,7 +108,8 @@ var host = new HostBuilder()
             new WardrobeRepository(
                 sp.GetRequiredService<CosmosClient>(),
                 cosmosDatabase,
-                cosmosContainer));
+                cosmosContainer,
+                config["Cosmos:ImageCleanupIndexContainer"] ?? WardrobeImageCleanupIndex.DefaultContainerName));
 
         var cosmosWearEventsContainer = config["Cosmos:WearEventsContainer"] ?? "WearEvents";
         services.AddSingleton<IWearHistoryRepository>(sp =>
@@ -196,12 +199,58 @@ var host = new HostBuilder()
         var blobAccountKey = config["BlobStorage:AccountKey"] ?? "";
         var blobArchiveContainer = config["BlobStorage:ArchiveContainer"] ?? "archive";
         var blobUploadsContainer = config["BlobStorage:UploadsContainer"] ?? "uploads";
-        // Use the Azurite-compatible connection-string constructor for local dev.
-        // StorageSharedKeyCredential + explicit URI breaks with Azure.Storage.Blobs v12.28+ against Azurite.
-        IBlobSasService blobSasService = blobAccountName == "devstoreaccount1"
-            ? new BlobSasService("UseDevelopmentStorage=true", blobArchiveContainer, blobUploadsContainer)
-            : new BlobSasService(blobAccountName, blobAccountKey, blobArchiveContainer, blobUploadsContainer);
-        services.AddSingleton(blobSasService);
+        var sasCacheEnabledSetting = config["SasCache:Enabled"] ?? config["SasCache__Enabled"];
+        var sasCacheEnabled = false;
+        if (!string.IsNullOrWhiteSpace(sasCacheEnabledSetting))
+        {
+            if (!bool.TryParse(sasCacheEnabledSetting, out var parsedSasCacheEnabled))
+            {
+                throw new InvalidOperationException(
+                    "Invalid env var 'SasCache__Enabled' value. Set to true or false.");
+            }
+            sasCacheEnabled = parsedSasCacheEnabled;
+        }
+        var sasRedisConnectionString = config["SasCache:RedisConnectionString"] ??
+                                      config["SasCache__RedisConnectionString"] ??
+                                      string.Empty;
+
+        if (sasCacheEnabled && string.IsNullOrWhiteSpace(sasRedisConnectionString))
+        {
+            throw new InvalidOperationException(
+                "Required env var 'SasCache__RedisConnectionString' is not set while SAS cache is enabled.");
+        }
+
+        if (sasCacheEnabled)
+        {
+            services.AddStackExchangeRedisCache(options =>
+            {
+                options.Configuration = sasRedisConnectionString;
+                options.InstanceName = "pluckit-sas";
+            });
+        }
+        else
+        {
+            services.AddDistributedMemoryCache();
+        }
+
+        services.AddSingleton<IBlobSasService>(_ =>
+        {
+            if (blobAccountName == "devstoreaccount1")
+            {
+                return new BlobSasService(
+                    "UseDevelopmentStorage=true",
+                    blobArchiveContainer,
+                    _.GetRequiredService<IDistributedCache>(),
+                    blobUploadsContainer);
+            }
+
+            return new BlobSasService(
+                blobAccountName,
+                blobAccountKey,
+                blobArchiveContainer,
+                _.GetRequiredService<IDistributedCache>(),
+                blobUploadsContainer);
+        });
 
         // ── Image processing job queue ─────────────────────────────────────────
         // Re-uses the same storage account as blobs (sa_pluckit).

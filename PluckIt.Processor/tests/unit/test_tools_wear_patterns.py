@@ -270,6 +270,40 @@ async def test_most_recent_events_used_not_oldest():
 
 
 @pytest.mark.unit
+async def test_load_wardrobe_items_limits_query_and_cuts_events():
+    from agents.tools.wear_patterns import _load_wardrobe_items, _RECENT_WEAR_EVENTS_LIMIT
+
+    now = datetime.now(timezone.utc)
+    events = [
+        {"occasion": "event", "occurredAt": (now - timedelta(days=idx)).isoformat(), "weatherSnapshot": {"conditions": "clear"}}
+        for idx in range(20)
+    ]
+
+    async def _query_items(**kwargs):
+        assert "OFFSET 0 LIMIT 500" in kwargs["query"]
+        yield {
+            "id": "item-1",
+            "category": "tops",
+            "brand": "TestBrand",
+            "aestheticTags": ["casual"],
+            "wearCount": 1,
+            "lastWornAt": now.isoformat(),
+            "wearEvents": events,
+            "price": {"amount": 100.0},
+        }
+
+    mock_container = AsyncMock()
+    mock_container.query_items = _query_items
+
+    with patch("agents.tools.wear_patterns.get_wardrobe_container", return_value=mock_container):
+        items = await _load_wardrobe_items("test-user")
+
+    assert len(items) == 1
+    assert len(items[0]["wearEvents"]) == _RECENT_WEAR_EVENTS_LIMIT
+    assert items[0]["wearEvents"][0]["occurredAt"] >= items[0]["wearEvents"][1]["occurredAt"]
+
+
+@pytest.mark.unit
 async def test_missing_user_id_returns_error():
     from agents.tools.wear_patterns import get_wear_patterns
 

@@ -13,6 +13,8 @@ and keeps them in memory for the duration of that run.
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
+from itertools import combinations
 from typing import Optional
 
 from .image_utils import hamming_distance
@@ -20,6 +22,37 @@ from .image_utils import hamming_distance
 logger = logging.getLogger(__name__)
 
 PHASH_THRESHOLD = 5  # bits — images are "same" if Hamming distance < this
+PHASH_PREFIX_CHARS = 4  # first 16 bits (4 hex chars) of each pHash
+PHASH_PREFIX_BITS = PHASH_PREFIX_CHARS * 4
+PRECOMPUTED_PHASH_MASKS = tuple(
+    tuple(sum(1 << bit for bit in flips) for flips in combinations(range(PHASH_PREFIX_BITS), distance))
+    for distance in range(1, PHASH_THRESHOLD)
+)
+
+
+@lru_cache(maxsize=2048)
+def _candidate_buckets_cached(bucket: str) -> tuple[str, ...]:
+    """
+    Return all pHash prefix buckets within PHASH_THRESHOLD bit distance.
+
+    Cached at module scope so lookup results do not retain `self` in cache keys.
+    """
+    if len(bucket) < PHASH_PREFIX_CHARS:
+        return (bucket,)
+
+    try:
+        base = int(bucket, 16)
+    except ValueError:
+        return (bucket,)
+    candidates: set[int] = {base}
+    for masks in PRECOMPUTED_PHASH_MASKS:
+        for mask in masks:
+            candidates.add(base ^ mask)
+
+    return tuple(
+        f"{value:0{PHASH_PREFIX_CHARS}x}"
+        for value in candidates
+    )
 
 
 class RunDeduplicator:
@@ -33,7 +66,7 @@ class RunDeduplicator:
 
     def __init__(self) -> None:
         self._seen_urls: set[str] = set()
-        self._seen_phashes: list[str] = []   # list — we need Hamming checks
+        self._seen_phashes_by_prefix: dict[str, list[str]] = {}
 
     # ── Population ────────────────────────────────────────────────────────────
 
@@ -64,11 +97,11 @@ class RunDeduplicator:
                 if doc.get("productUrl"):
                     self._seen_urls.add(doc["productUrl"])
                 if doc.get("pHash"):
-                    self._seen_phashes.append(doc["pHash"])
+                    self._register_phash(doc["pHash"])
             logger.debug(
                 "Deduplicator loaded %d URLs and %d pHashes",
                 len(self._seen_urls),
-                len(self._seen_phashes),
+                sum(len(bucket) for bucket in self._seen_phashes_by_prefix.values()),
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Could not pre-load dedup state from Cosmos: %s", exc)
@@ -87,9 +120,11 @@ class RunDeduplicator:
         return False
 
     def _is_phash_duplicate(self, phash: str) -> bool:
+        bucket = self._phash_bucket(phash)
         return any(
             hamming_distance(phash, existing) < PHASH_THRESHOLD
-            for existing in self._seen_phashes
+            for candidate_bucket in _candidate_buckets_cached(bucket)
+            for existing in self._seen_phashes_by_prefix.get(candidate_bucket, [])
         )
 
     # ── Registration ──────────────────────────────────────────────────────────
@@ -98,4 +133,16 @@ class RunDeduplicator:
         """Call after successfully inserting an item to prevent within-run dupes."""
         self._seen_urls.add(product_url)
         if phash:
-            self._seen_phashes.append(phash)
+            self._register_phash(phash)
+
+    # ── Internal indexing ─────────────────────────────────────────────────────
+
+    def _phash_bucket(self, phash: str) -> str:
+        """Return the pHash bucket key for quick Hamming-distance candidate filtering."""
+        return phash[:PHASH_PREFIX_CHARS].lower()
+
+    def _register_phash(self, phash: str) -> None:
+        """Add a pHash to its prefix bucket."""
+        bucket = self._phash_bucket(phash)
+        self._seen_phashes_by_prefix.setdefault(bucket, []).append(phash)
+

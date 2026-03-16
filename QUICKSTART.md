@@ -63,6 +63,21 @@ cp PluckIt.Processor/local.settings.json.example PluckIt.Processor/local.setting
 Edit both files and replace:
 - `AI__Endpoint` / `AZURE_OPENAI_ENDPOINT` → your Azure OpenAI endpoint
 - `AI__ApiKey` / `AZURE_OPENAI_API_KEY` → your Azure OpenAI key
+- `SasCache__Enabled` → `false` for local development (or set to `true` only if Redis is available locally)
+- `SasCache__RedisConnectionString` → local Redis connection string when enabled
+
+To run with Redis locally, you can start a container first:
+
+```bash
+docker run -d -p 6379:6379 --name upstash-compat-redis redis:7.4-alpine
+```
+
+Then set:
+
+```json
+"SasCache__Enabled": true,
+"SasCache__RedisConnectionString": "localhost:6379"
+```
 
 > `local.settings.json` is gitignored — never commit it.
 

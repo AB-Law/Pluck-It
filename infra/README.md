@@ -88,6 +88,8 @@ Required variables (set in `terraform.tfvars`):
 - `langfuse_public_key` - Langfuse public key
 - `langfuse_secret_key` - Langfuse secret key
 - `langfuse_host` - Langfuse host URL (optional, defaults to `https://us.cloud.langfuse.com`)
+- `sas_cache_enabled` - Enable shared SAS cache via Redis (defaults to `false`)
+- `sas_cache_redis_connection_string` - Redis connection string for shared SAS cache (required only when `sas_cache_enabled` is `true`)
 
 ## Next Steps
 

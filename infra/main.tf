@@ -233,6 +233,23 @@ resource "azurerm_cosmosdb_sql_container" "wardrobe" {
   }
 }
 
+resource "azurerm_cosmosdb_sql_container" "wardrobe_image_cleanup_index" {
+  name                  = "WardrobeImageCleanupIndex"
+  resource_group_name   = azurerm_resource_group.rg_pluckit_archive.name
+  account_name          = azurerm_cosmosdb_account.pluckit.name
+  database_name         = azurerm_cosmosdb_sql_database.pluckit.name
+  partition_key_paths   = ["/partition"]
+  partition_key_version = 1
+
+  indexing_policy {
+    indexing_mode = "consistent"
+
+    included_path {
+      path = "/*"
+    }
+  }
+}
+
 # Stores refresh/access/ID tokens used for mobile auth session exchange.
 resource "azurerm_cosmosdb_sql_container" "refresh_tokens" {
   name                  = "RefreshTokens"
@@ -801,6 +818,7 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
     "Cosmos__Key"                           = azurerm_cosmosdb_account.pluckit.primary_key
     "Cosmos__Database"                      = azurerm_cosmosdb_sql_database.pluckit.name
     "Cosmos__Container"                     = azurerm_cosmosdb_sql_container.wardrobe.name
+    "Cosmos__ImageCleanupIndexContainer"    = azurerm_cosmosdb_sql_container.wardrobe_image_cleanup_index.name
     "Cosmos__RefreshTokensContainer"        = azurerm_cosmosdb_sql_container.refresh_tokens.name
     "Cosmos__WearEventsContainer"           = azurerm_cosmosdb_sql_container.wear_events.name
     "Cosmos__StylingActivityContainer"      = azurerm_cosmosdb_sql_container.styling_activity.name
@@ -812,6 +830,8 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
     "BlobStorage__AccountKey"               = azurerm_storage_account.sa_pluckit.primary_access_key
     "BlobStorage__ArchiveContainer"         = azurerm_storage_container.archive.name
     "BlobStorage__UploadsContainer"         = azurerm_storage_container.uploads.name
+    "SasCache__Enabled"                     = var.sas_cache_enabled
+    "SasCache__RedisConnectionString"       = var.sas_cache_redis_connection_string
     "Processor__BaseUrl"                    = "https://${local.base_name}-processor-func.azurewebsites.net"
     # Storage Queue connection for the image-processing-jobs queue trigger + enqueue client.
     # The queue lives on sa_pluckit (same account as archive/uploads blobs).

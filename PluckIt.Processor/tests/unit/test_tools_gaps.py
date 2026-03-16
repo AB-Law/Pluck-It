@@ -85,3 +85,21 @@ async def test_analyze_wardrobe_gaps_returns_string():
 
     assert isinstance(result, str)
     assert len(result) > 0  # Should report gaps since we only have 1 top vs baseline of 5
+
+
+@pytest.mark.unit
+async def test_load_wardrobe_items_limits_query():
+    from agents.tools.gaps import _load_wardrobe_items
+
+    mock_wardrobe = AsyncMock()
+
+    async def _query_items(**kwargs):
+        assert "OFFSET 0 LIMIT 500" in kwargs["query"]
+        yield {"category": "tops", "colours": [{"name": "White"}], "tags": ["casual"], "brand": "Brand"}
+
+    mock_wardrobe.query_items = _query_items
+
+    with patch("agents.tools.gaps.get_wardrobe_container", return_value=mock_wardrobe):
+        _, items = await _load_wardrobe_items("test-user")
+
+    assert len(items) == 1

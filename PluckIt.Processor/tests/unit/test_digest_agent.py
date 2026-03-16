@@ -8,6 +8,8 @@ import hashlib
 import json
 
 from agents.digest_agent import (
+    _PROMPT_ITEM_LIMIT,
+    _load_user_wardrobe,
     _save_digest_and_update_profile,
     compute_wardrobe_hash,
     run_digest_for_user_with_status,
@@ -31,6 +33,77 @@ def test_run_digest_for_user_with_status_fails_when_wardrobe_cannot_load():
 
     assert digest is None
     assert outcome == "failed"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("ids_rows", "items_rows", "expected_ids", "expected_items", "expects_wear_filter"),
+    [
+        pytest.param(
+            [{"id": "item-1"}, {"id": "item-2"}, {"id": "item-3"}],
+            [
+                {"id": "item-2", "category": "tops", "wearCount": 3},
+                {"id": "item-1", "category": "bottoms", "wearCount": 5},
+            ],
+            ["item-1", "item-2", "item-3"],
+            [
+                {"id": "item-2", "category": "tops", "wearCount": 3},
+                {"id": "item-1", "category": "bottoms", "wearCount": 5},
+            ],
+            False,
+            id="basic_query_shape_and_limits",
+        ),
+        pytest.param(
+            [{"id": "id-low-signal"}, {"id": "id-high-signal"}, {"id": "id-unworn"}],
+            [
+                {"id": "id-high-signal", "wearCount": 5, "category": "tops"},
+                {"id": "id-low-signal", "wearCount": 2, "category": "shoes"},
+            ],
+            ["id-low-signal", "id-high-signal", "id-unworn"],
+            [
+                {"id": "id-high-signal", "wearCount": 5, "category": "tops"},
+                {"id": "id-low-signal", "wearCount": 2, "category": "shoes"},
+            ],
+            True,
+            id="prefetch_ids_then_filtered_prompt_items",
+        ),
+    ],
+)
+def test_load_user_wardrobe_prefetches_ids_and_limits_prompt_items(
+    ids_rows: list[dict],
+    items_rows: list[dict],
+    expected_ids: list[str],
+    expected_items: list[dict],
+    expects_wear_filter: bool,
+):
+    sync_wardrobe = MagicMock()
+    sync_wardrobe.query_items.side_effect = [iter(ids_rows), iter(items_rows)]
+
+    with patch("agents.digest_agent.get_wardrobe_container_sync", return_value=sync_wardrobe):
+        wardrobe_data = _load_user_wardrobe("user-1")
+
+    assert wardrobe_data is not None
+    assert wardrobe_data["item_ids"] == expected_ids
+    assert wardrobe_data["items"] == expected_items
+    assert sync_wardrobe.query_items.call_count == 2
+
+    first_call_args = sync_wardrobe.query_items.call_args_list[0].kwargs
+    second_call_args = sync_wardrobe.query_items.call_args_list[1].kwargs
+    first_query = first_call_args["query"]
+    first_params = first_call_args["parameters"]
+    second_query = second_call_args["query"]
+    second_params = second_call_args["parameters"]
+
+    assert "SELECT c.id FROM c WHERE c.userId = @userId" in first_query
+    assert {"name": "@userId", "value": "user-1"} in first_params
+
+    assert "ORDER BY c.wearCount DESC" in second_query
+    assert "OFFSET 0 LIMIT @limit" in second_query
+    assert {"name": "@userId", "value": "user-1"} in second_params
+    assert {"name": "@limit", "value": _PROMPT_ITEM_LIMIT} in second_params
+    if expects_wear_filter:
+        assert "IS_DEFINED(c.wearCount)" in second_query
+        assert "c.wearCount > 0" in second_query
 
 
 @pytest.mark.unit
@@ -461,3 +534,16 @@ def test_run_digest_skips_when_recommendation_opt_out():
 
     assert result is None, "Opted-out user should return None"
     fake_llm.invoke.assert_not_called()
+
+
+
+@pytest.mark.unit
+def test_load_user_wardrobe_returns_no_items_without_second_query_when_no_items():
+    sync_wardrobe = MagicMock()
+    sync_wardrobe.query_items.return_value = iter([])
+
+    with patch("agents.digest_agent.get_wardrobe_container_sync", return_value=sync_wardrobe):
+        result = _load_user_wardrobe("user-empty")
+
+    assert result == {"items": [], "item_ids": []}
+    assert sync_wardrobe.query_items.call_count == 1
