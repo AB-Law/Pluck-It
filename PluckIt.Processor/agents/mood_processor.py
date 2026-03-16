@@ -41,6 +41,7 @@ Cross-run name consistency:
 
 import json
 import logging
+import asyncio
 import math
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -51,7 +52,7 @@ import feedparser
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
 
-from .db import get_moods_container_sync
+from .db import get_moods_container
 
 logger = logging.getLogger(__name__)
 
@@ -323,16 +324,17 @@ def _dedup_within_run(
 
 # ── DB canonicalization ───────────────────────────────────────────────────────
 
-def _load_existing_moods_with_embeddings(
+async def _load_existing_moods_with_embeddings(
     primary_mood: str,
     container,
     embedder: AzureOpenAIEmbeddings,
 ) -> list[dict]:
+    """Load prior moods and ensure name embeddings are available."""
     try:
-        items = list(container.query_items(
+        items = [item async for item in container.query_items(
             query="SELECT c.id, c.name, c.description, c.primaryMood, c.nameEmbedding FROM c",
             partition_key=primary_mood,
-        ))
+        )]
     except Exception as exc:
         logger.warning("Could not load existing moods for '%s': %s", primary_mood, exc)
         return []
@@ -344,9 +346,9 @@ def _load_existing_moods_with_embeddings(
             for i, emb in zip(missing_idx, new_embs):
                 items[i]["nameEmbedding"] = emb
                 try:
-                    full_doc = container.read_item(item=items[i]["id"], partition_key=primary_mood)
+                    full_doc = await container.read_item(item=items[i]["id"], partition_key=primary_mood)
                     full_doc["nameEmbedding"] = emb
-                    container.upsert_item(full_doc)
+                    await container.upsert_item(full_doc)
                 except Exception as bf_exc:
                     logger.debug("Embedding backfill for '%s' skipped: %s", items[i]["name"], bf_exc)
         except Exception as exc:
@@ -427,7 +429,8 @@ def _canonicalize_against_db(
 
 # ── Persistence ───────────────────────────────────────────────────────────────
 
-def upsert_mood(mood_data: dict, name_embedding: list[float], container) -> dict:
+async def upsert_mood(mood_data: dict, name_embedding: list[float], container) -> dict:
+    """Persist a single mood upsert asynchronously, preserving merge behavior."""
     primary_mood     = mood_data.get("primaryMood", "Classic")
     name             = mood_data.get("name", "Unknown")
     doc_id           = _mood_id(primary_mood, name)
@@ -438,7 +441,7 @@ def upsert_mood(mood_data: dict, name_embedding: list[float], container) -> dict
     existing_sources: list[dict] = []
     existing_detected_at = now_iso
     try:
-        existing             = container.read_item(item=doc_id, partition_key=primary_mood)
+        existing             = await container.read_item(item=doc_id, partition_key=primary_mood)
         existing_score       = existing.get("trendScore", 0)
         existing_sources     = existing.get("sources") or []
         existing_detected_at = existing.get("detectedAt", now_iso)
@@ -465,15 +468,15 @@ def upsert_mood(mood_data: dict, name_embedding: list[float], container) -> dict
         "trendScore":    existing_score + len(resolved_sources),
     }
 
-    container.upsert_item(document)
+    await container.upsert_item(document)
     return document
 
 
 # ── Shared pipeline ───────────────────────────────────────────────────────────
 
-def run_from_snippets(snippets: list[dict]) -> int:
+async def run_from_snippets_async(snippets: list[dict]) -> int:
     """
-    Core pipeline shared by the daily timer and the sitemap seeder.
+    Async pipeline shared by the daily timer and the sitemap seeder.
     Returns the number of mood documents saved.
     """
     if not snippets:
@@ -483,7 +486,7 @@ def run_from_snippets(snippets: list[dict]) -> int:
     llm         = _build_llm()
     confirm_llm = _build_confirm_llm()
     embedder    = _build_embedder()
-    container   = get_moods_container_sync()
+    container   = get_moods_container()
 
     all_moods = _extract_all_parallel(snippets, llm)
     if not all_moods:
@@ -492,38 +495,70 @@ def run_from_snippets(snippets: list[dict]) -> int:
 
     deduped, embeddings = _dedup_within_run(all_moods, embedder)
 
-    unique_primaries = {m["primaryMood"] for m in deduped if m.get("primaryMood") in PRIMARY_MOODS}
-    existing_by_primary: dict[str, list[dict]] = {
-        p: _load_existing_moods_with_embeddings(p, container, embedder)
-        for p in unique_primaries
-    }
-
-    saved = 0
+    filtered_deduped: list[dict] = []
+    filtered_embeddings: list[list[float]] = []
     for mood_data, name_embedding in zip(deduped, embeddings):
         primary = mood_data.get("primaryMood", "")
         if primary not in PRIMARY_MOODS:
             logger.warning("Unknown primaryMood '%s' for '%s' - skipping.", primary, mood_data.get("name"))
             continue
+        filtered_deduped.append(mood_data)
+        filtered_embeddings.append(name_embedding)
 
+    deduped = filtered_deduped
+    embeddings = filtered_embeddings
+
+    unique_primaries = {m["primaryMood"] for m in deduped if m.get("primaryMood") in PRIMARY_MOODS}
+    existing_by_primary: dict[str, list[dict]] = {}
+    for primary in unique_primaries:
+        existing_by_primary[primary] = await _load_existing_moods_with_embeddings(primary, container, embedder)
+
+    canonicalized_indices: list[int] = []
+    canonicalized_names: list[str] = []
+    for idx, (mood_data, name_embedding) in enumerate(zip(deduped, embeddings)):
+        primary = mood_data.get("primaryMood", "")
         original_name = mood_data["name"]
         mood_data = _canonicalize_against_db(
             mood_data, name_embedding, existing_by_primary.get(primary, []), confirm_llm,
         )
 
         if mood_data["name"] != original_name:
-            try:
-                name_embedding = embedder.embed_query(mood_data["name"])
-            except Exception as exc:
-                logger.debug("Re-embed after canonicalization failed: %s", exc)
+            canonicalized_indices.append(idx)
+            canonicalized_names.append(mood_data["name"])
 
+    if canonicalized_names:
         try:
-            upsert_mood(mood_data, name_embedding, container)
+            new_embeddings = embedder.embed_documents(canonicalized_names)
+            if len(new_embeddings) != len(canonicalized_indices):
+                logger.warning(
+                    "Canonicalized mood re-embed count mismatch: got %d embeddings for %d names.",
+                    len(new_embeddings),
+                    len(canonicalized_indices),
+                )
+            else:
+                for idx, name_embedding in zip(canonicalized_indices, new_embeddings, strict=True):
+                    embeddings[idx] = name_embedding
+        except Exception as exc:
+            logger.debug("Batch re-embed after canonicalization failed: %s", exc)
+
+    saved = 0
+    for mood_data, name_embedding in zip(deduped, embeddings, strict=True):
+        try:
+            await upsert_mood(mood_data, name_embedding, container)
             saved += 1
         except Exception as exc:
             logger.error("Failed to upsert '%s': %s", mood_data.get("name"), exc)
 
     logger.info("run_from_snippets complete - %d/%d moods saved.", saved, len(deduped))
     return saved
+
+
+def run_from_snippets(snippets: list[dict]) -> int:
+    """
+    Core pipeline shared by the daily timer and the sitemap seeder.
+    Returns the number of mood documents saved.
+    """
+    return asyncio.run(run_from_snippets_async(snippets))
 
 
 # ── Timer trigger entry point ─────────────────────────────────────────────────
