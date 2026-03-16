@@ -354,12 +354,15 @@ def run_weekly_digest() -> None:
 
     try:
         profile_container = get_user_profiles_container_sync()
-        all_profiles = list(profile_container.read_all_items())
+        profiles_cursor = profile_container.query_items(
+            query="SELECT c.id FROM c",
+            max_item_count=500,
+        )
     except Exception as exc:
         logger.error("Digest: failed to list profiles: %s", exc)
         return
 
-    for profile in all_profiles:
+    for profile in profiles_cursor:
         user_id = profile.get("id")
         if not user_id:
             continue

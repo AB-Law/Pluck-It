@@ -23,6 +23,15 @@ def _async_iter(items):
     return _gen
 
 
+def _capturing_async_iter(capture: dict, key: str, items):
+    async def _gen(**kwargs):
+        capture[key] = kwargs
+        for i in items:
+            yield i
+
+    return _gen
+
+
 @pytest.mark.unit
 async def test_compute_vault_insights_handles_empty_wardrobe():
     from agents.vault_insights import compute_vault_insights
@@ -416,3 +425,46 @@ async def test_compute_vault_insights_writes_cache_entry_on_miss():
 
     assert result["currency"] == "USD"
     cache.upsert_item.assert_called_once()
+    cached_payload = cache.upsert_item.call_args.args[0]
+    assert cached_payload["cacheTtlMs"] == 1_800_000
+
+
+@pytest.mark.unit
+async def test_fetch_user_data_applies_query_limits_with_parameters():
+    from agents.vault_insights import _fetch_user_data
+
+    cutoff = datetime(2026, 3, 16, 0, 0, 0, tzinfo=timezone.utc)
+    captured_queries = {}
+
+    wardrobe = AsyncMock()
+    wardrobe.query_items = _capturing_async_iter(
+        captured_queries, "wardrobe", []
+    )
+    wear_events = AsyncMock()
+    wear_events.query_items = _capturing_async_iter(
+        captured_queries, "wear_events", []
+    )
+
+    with (
+        patch("agents.vault_insights.get_wardrobe_container", return_value=wardrobe),
+        patch("agents.vault_insights.get_wear_events_container", return_value=wear_events),
+    ):
+        await _fetch_user_data("test-user", cutoff)
+
+    wardrobe_query = captured_queries["wardrobe"]["query"]
+    wear_events_query = captured_queries["wear_events"]["query"]
+
+    assert "OFFSET 0 LIMIT 1000" in wardrobe_query
+    assert "LIMIT 5000" in wear_events_query
+    assert "@userId" in wardrobe_query
+    assert "@userId" in wear_events_query
+    assert "@cutoff" in wear_events_query
+    assert "test-user" not in wear_events_query
+
+    wardrobe_params = captured_queries["wardrobe"]["parameters"]
+    wear_event_params = captured_queries["wear_events"]["parameters"]
+    assert wardrobe_params == [{"name": "@userId", "value": "test-user"}]
+    assert wear_event_params == [
+        {"name": "@userId", "value": "test-user"},
+        {"name": "@cutoff", "value": cutoff.isoformat()},
+    ]

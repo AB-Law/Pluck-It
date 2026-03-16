@@ -31,6 +31,8 @@ public class WearHistoryRepository : IWearHistoryRepository
     int maxResults = 366,
     CancellationToken cancellationToken = default)
   {
+    var safeMaxResults = Math.Clamp(maxResults, 1, 1000);
+
     var sql = "SELECT * FROM c WHERE c.userId = @userId AND c.itemId = @itemId";
     if (from.HasValue) sql += " AND c.occurredAt >= @from";
     if (to.HasValue) sql += " AND c.occurredAt <= @to";
@@ -48,16 +50,16 @@ public class WearHistoryRepository : IWearHistoryRepository
       requestOptions: new QueryRequestOptions
       {
         PartitionKey = new PartitionKey(userId),
-        MaxItemCount = Math.Clamp(maxResults, 1, 1000),
+        MaxItemCount = safeMaxResults,
       });
 
-    while (iterator.HasMoreResults && results.Count < maxResults)
+    while (iterator.HasMoreResults && results.Count < safeMaxResults)
     {
       var page = await iterator.ReadNextAsync(cancellationToken);
       results.AddRange(page);
     }
 
-    return results.Take(maxResults).ToList();
+    return results.Take(safeMaxResults).ToList();
   }
 }
 
