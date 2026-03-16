@@ -6,19 +6,21 @@ using System.Threading.Tasks;
 using Azure.Storage;
 using Azure.Storage.Blobs;
 using Azure.Storage.Sas;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
 using PluckIt.Core;
 
 namespace PluckIt.Infrastructure;
 
 public class BlobSasService : IBlobSasService
 {
-  private readonly StorageSharedKeyCredential _credential;
-  private readonly string _archiveContainer;
-  private readonly string _uploadsContainer;
-  private readonly BlobServiceClient _serviceClient;
-  private readonly HashSet<string> _allowedContainers;
-  private readonly MemoryCache _sasCache = new(new MemoryCacheOptions());
+  private StorageSharedKeyCredential _credential = null!;
+  private string _archiveContainer = null!;
+  private string _uploadsContainer = "uploads";
+  private BlobServiceClient _serviceClient = null!;
+  private HashSet<string> _allowedContainers = null!;
+  private IDistributedCache _sasCache = null!;
   private const int SasCacheSkewMinutes = 5;
   private const int MinimumCacheMinutes = 1;
 
@@ -26,13 +28,17 @@ public class BlobSasService : IBlobSasService
       string uploadsContainer = "uploads")
   {
     _credential = new StorageSharedKeyCredential(accountName, accountKey);
-    _archiveContainer = archiveContainer ?? throw new ArgumentNullException(nameof(archiveContainer));
-    _uploadsContainer = uploadsContainer;
-    _allowedContainers = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-    {
-      _archiveContainer,
-      _uploadsContainer
-    };
+    InitializeContainers(archiveContainer, uploadsContainer, CreateFallbackDistributedCache());
+    _serviceClient = new BlobServiceClient(
+        new Uri($"https://{accountName}.blob.core.windows.net"), _credential);
+  }
+
+  public BlobSasService(string accountName, string accountKey, string archiveContainer,
+      IDistributedCache distributedCache, string uploadsContainer = "uploads")
+  {
+    _credential = new StorageSharedKeyCredential(accountName, accountKey);
+    InitializeContainers(archiveContainer, uploadsContainer,
+      distributedCache ?? throw new ArgumentNullException(nameof(distributedCache)));
     _serviceClient = new BlobServiceClient(
         new Uri($"https://{accountName}.blob.core.windows.net"), _credential);
   }
@@ -45,8 +51,45 @@ public class BlobSasService : IBlobSasService
   public BlobSasService(string connectionString, string archiveContainer,
       string uploadsContainer = "uploads")
   {
+    InitializeFromConnectionString(
+      connectionString,
+      archiveContainer,
+      uploadsContainer,
+      CreateFallbackDistributedCache());
+  }
+
+  public BlobSasService(string connectionString, string archiveContainer,
+      IDistributedCache distributedCache, string uploadsContainer = "uploads")
+  {
+    InitializeFromConnectionString(
+      connectionString,
+      archiveContainer,
+      uploadsContainer,
+      distributedCache ?? throw new ArgumentNullException(nameof(distributedCache)));
+  }
+
+  private void InitializeFromConnectionString(
+    string connectionString,
+    string archiveContainer,
+    string uploadsContainer,
+    IDistributedCache distributedCache)
+  {
     if (string.IsNullOrWhiteSpace(connectionString))
       throw new ArgumentNullException(nameof(connectionString));
+
+    _serviceClient = new BlobServiceClient(connectionString);
+
+    // Extract credential from the dev storage connection string for SAS generation.
+    // For Azurite, SAS URLs won't be used externally, so a dummy credential is fine.
+    _credential = new StorageSharedKeyCredential("devstoreaccount1",
+        "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OugushZnRUOkvietl3hGys8uqHFht0YhfB7DPm3bkzrEt5PJBKgIfbI=");
+
+    InitializeContainers(archiveContainer, uploadsContainer, distributedCache);
+  }
+
+  private void InitializeContainers(string archiveContainer, string uploadsContainer,
+      IDistributedCache distributedCache)
+  {
     _archiveContainer = archiveContainer ?? throw new ArgumentNullException(nameof(archiveContainer));
     _uploadsContainer = uploadsContainer;
     _allowedContainers = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -54,11 +97,12 @@ public class BlobSasService : IBlobSasService
       _archiveContainer,
       _uploadsContainer
     };
-    _serviceClient = new BlobServiceClient(connectionString);
-    // Extract credential from the dev storage connection string for SAS generation.
-    // For Azurite, SAS URLs won't be used externally, so a dummy credential is fine.
-    _credential = new StorageSharedKeyCredential("devstoreaccount1",
-        "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OugushZnRUOkvietl3hGys8uqHFht0YhfB7DPm3bkzrEt5PJBKgIfbI=");
+    _sasCache = distributedCache;
+  }
+
+  private static IDistributedCache CreateFallbackDistributedCache()
+  {
+    return new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
   }
 
   private BlobContainerClient ArchiveContainer =>
@@ -86,8 +130,16 @@ public class BlobSasService : IBlobSasService
         .Uri;
       var cacheKey = $"{canonicalBlobUri}|{validForMinutes}";
 
-      if (_sasCache.TryGetValue(cacheKey, out string? cachedSasUrl))
-        return cachedSasUrl;
+      try
+      {
+        var cachedSasUrl = _sasCache.GetString(cacheKey);
+        if (!string.IsNullOrWhiteSpace(cachedSasUrl))
+          return cachedSasUrl;
+      }
+      catch
+      {
+        // Cache backends are best-effort; continue generating a fresh SAS token on cache read failure.
+      }
 
       var sasBuilder = new BlobSasBuilder
       {
@@ -104,7 +156,19 @@ public class BlobSasService : IBlobSasService
       var cacheMinutes = validForMinutes - SasCacheSkewMinutes;
       if (cacheMinutes > 0)
       {
-        _sasCache.Set(cacheKey, sasUrl, TimeSpan.FromMinutes(Math.Max(MinimumCacheMinutes, cacheMinutes)));
+        try
+        {
+          var cacheOptions = new DistributedCacheEntryOptions
+          {
+            AbsoluteExpirationRelativeToNow =
+              TimeSpan.FromMinutes(Math.Max(MinimumCacheMinutes, cacheMinutes)),
+          };
+          _sasCache.SetString(cacheKey, sasUrl, cacheOptions);
+        }
+        catch
+        {
+          // Cache backends are best-effort; return freshly generated token on write failure.
+        }
       }
 
       return sasUrl;

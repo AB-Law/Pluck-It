@@ -830,6 +830,8 @@ resource "azurerm_function_app_flex_consumption" "pluckit_api" {
     "BlobStorage__AccountKey"               = azurerm_storage_account.sa_pluckit.primary_access_key
     "BlobStorage__ArchiveContainer"         = azurerm_storage_container.archive.name
     "BlobStorage__UploadsContainer"         = azurerm_storage_container.uploads.name
+    "SasCache__Enabled"                    = var.sas_cache_enabled
+    "SasCache__RedisConnectionString"       = var.sas_cache_redis_connection_string
     "Processor__BaseUrl"                    = "https://${local.base_name}-processor-func.azurewebsites.net"
     # Storage Queue connection for the image-processing-jobs queue trigger + enqueue client.
     # The queue lives on sa_pluckit (same account as archive/uploads blobs).

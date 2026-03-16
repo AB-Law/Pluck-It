@@ -8,7 +8,7 @@ public interface IBlobSasService
 {
   /// <summary>
   /// Given a plain blob URL, returns a short-lived SAS URL valid for <paramref name="validForMinutes"/> minutes.
-  /// The generated URL may be served from an in-memory cache for the same blob+TTL during a short window
+/// The generated URL may be served from a distributed cache for the same blob+TTL during a short window
   /// to keep the returned URL stable across repeated calls.
   /// If the URL cannot be parsed or signing fails, returns the original URL unchanged.
   /// </summary>

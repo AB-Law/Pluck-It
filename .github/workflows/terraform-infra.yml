@@ -54,6 +54,8 @@ jobs:
           SEGMENTATION_ENDPOINT_URL: ${{ secrets.SEGMENTATION_ENDPOINT_URL }}
           SEGMENTATION_SHARED_TOKEN: ${{ secrets.SEGMENTATION_SHARED_TOKEN }}
           CORS_ALLOWED_ORIGINS: ${{ secrets.CORS_ALLOWED_ORIGINS }}
+          SAS_CACHE_ENABLED: ${{ vars.SAS_CACHE_ENABLED }}
+          SAS_CACHE_REDIS_CONNECTION_STRING: ${{ secrets.SAS_CACHE_REDIS_CONNECTION_STRING }}
           GRAFANA_CLOUD_OTLP_ENDPOINT: ${{ secrets.GRAFANA_CLOUD_OTLP_ENDPOINT }}
           GRAFANA_CLOUD_OTLP_HEADERS: ${{ secrets.GRAFANA_CLOUD_OTLP_HEADERS }}
           GRAFANA_CLOUD_OTEL_SERVICE_NAME_PROCESSOR: ${{ vars.GRAFANA_CLOUD_OTEL_SERVICE_NAME_PROCESSOR }}
@@ -90,6 +92,12 @@ jobs:
           fi
           if [ -n "$GRAFANA_CLOUD_OTLP_HEADERS" ]; then
             echo "grafana_cloud_otlp_headers = \"$GRAFANA_CLOUD_OTLP_HEADERS\"" >> terraform.auto.tfvars
+          fi
+          echo "sas_cache_enabled = ${SAS_CACHE_ENABLED:-false}" >> terraform.auto.tfvars
+          if [ -n "$SAS_CACHE_REDIS_CONNECTION_STRING" ]; then
+            python3 -c "import json, os; open('terraform.auto.tfvars','a').write('sas_cache_redis_connection_string = '+json.dumps(''.join(os.environ['SAS_CACHE_REDIS_CONNECTION_STRING'].splitlines()))+'\\n')"
+          else
+            echo 'sas_cache_redis_connection_string = ""' >> terraform.auto.tfvars
           fi
           if [ -n "$GRAFANA_CLOUD_OTEL_SERVICE_NAME_PROCESSOR" ]; then
             echo "grafana_cloud_processor_service_name = \"$GRAFANA_CLOUD_OTEL_SERVICE_NAME_PROCESSOR\"" >> terraform.auto.tfvars

@@ -184,3 +184,21 @@ variable "langfuse_host" {
   type        = string
   default     = "https://us.cloud.langfuse.com"
 }
+
+variable "sas_cache_enabled" {
+  description = "Enable distributed cache for SAS URL generation."
+  type        = bool
+  default     = false
+}
+
+variable "sas_cache_redis_connection_string" {
+  description = "Redis connection string used by shared SAS token cache."
+  type        = string
+  sensitive   = true
+  default     = ""
+
+  validation {
+    condition     = !var.sas_cache_enabled || trimspace(var.sas_cache_redis_connection_string) != ""
+    error_message = "sas_cache_redis_connection_string is required when sas_cache_enabled is true."
+  }
+}

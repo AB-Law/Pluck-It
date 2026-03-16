@@ -20,6 +20,8 @@
     "BlobStorage__AccountName": "devstoreaccount1",
     "BlobStorage__AccountKey": "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OugushZnRUOkvietl3hGys8uqHFht0YhfB7DPm3bkzrEt5PJBKgIfbI=",
     "BlobStorage__ArchiveContainer": "archive",
+    "SasCache__Enabled": false,
+    "SasCache__RedisConnectionString": "",
 
     "Processor__BaseUrl": "http://localhost:7071",
 
