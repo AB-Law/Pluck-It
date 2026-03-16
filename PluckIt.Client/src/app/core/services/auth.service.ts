@@ -39,11 +39,15 @@ interface StoredAuth {
   user: AuthUser;
 }
 
+const GOOGLE_IDENTITY_SCRIPT_URL = 'https://accounts.google.com/gsi/client';
+
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly _user = signal<AuthUser | null>(null);
   private readonly _idToken = signal<string | null>(null);
   private readonly _tokenExp = signal<number>(0);
+  private _googleClientLoad?: Promise<boolean>;
+  private _googleClientInitialized = false;
 
   readonly user = this._user.asReadonly();
 
@@ -59,47 +63,11 @@ export class AuthService {
     // Restore persisted session first so the guard doesn't redirect on refresh.
     if (this.restoreFromStorage()) {
       // Still initialize GIS in the background so ensureFreshToken() can work.
-      this.waitForGIS().then(() => {
-        this.gis?.initialize({
-          client_id: environment.googleClientId,
-          callback: (response: GisCredentialResponse) => this.handleCredentialResponse(response),
-          auto_select: true,
-          cancel_on_tap_outside: false,
-        });
-      });
+      // This must be non-blocking; loading GIS here is only needed for users
+      // who already have a saved session.
+      void this.bootstrapGoogleIdentity();
       return;
     }
-
-    await this.waitForGIS();
-
-    // Give GIS up to 2 s to silently re-authenticate a returning user before
-    // Angular finishes bootstrapping.  If no active Google session exists, we
-    // resolve immediately and the guard redirects the user to /login.
-    await new Promise<void>((resolve) => {
-      let settled = false;
-      const done = () => { if (!settled) { settled = true; resolve(); } };
-
-      this.gis.initialize({
-        client_id: environment.googleClientId,
-        callback: (response: GisCredentialResponse) => {
-          this.handleCredentialResponse(response);
-          done();
-        },
-        auto_select: true,
-        cancel_on_tap_outside: false,
-      });
-
-      // prompt() drives the silent re-auth / One Tap flow.
-      // The moment notification tells us when GIS gives up.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      this.gis.prompt((notification: any) => {
-        if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-          done();
-        }
-      });
-
-      setTimeout(done, 2000); // safety: never block startup indefinitely
-    });
   }
 
   /**
@@ -154,17 +122,8 @@ export class AuthService {
   ensureFreshToken(): void {
     const now = Math.floor(Date.now() / 1000);
     if (this.isAuthenticated() && this._tokenExp() - now < 60) {
-      this.gis?.prompt();
+      void this.bootstrapGoogleIdentity().then(() => this.gis?.prompt());
     }
-  }
-
-  /** Renders the official "Sign in with Google" button into the given element. */
-  renderButton(element: HTMLElement): void {
-    this.gis?.renderButton(element, {
-      theme: 'filled_black',
-      size: 'large',
-      width: element.offsetWidth || 300,
-    });
   }
 
   isAuthenticated(): boolean {
@@ -172,7 +131,7 @@ export class AuthService {
   }
 
   login(): void {
-    this.gis?.prompt();
+    void this.bootstrapGoogleIdentity().then(() => this.gis?.prompt());
   }
 
   logout(): void {
@@ -183,17 +142,72 @@ export class AuthService {
     localStorage.removeItem(STORAGE_KEY);
   }
 
-  private waitForGIS(): Promise<void> {
-    return new Promise<void>((resolve) => {
-      const poll = () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        if ((globalThis as any)['google']?.accounts?.id) {
-          resolve();
-        } else {
-          setTimeout(poll, 50);
+  private async bootstrapGoogleIdentity(): Promise<boolean> {
+    const ready = await this.ensureGoogleClientScript();
+    if (!ready || !this.gis) {
+      return false;
+    }
+
+    if (this._googleClientInitialized) {
+      return true;
+    }
+
+    this._googleClientInitialized = true;
+    this.gis.initialize({
+      client_id: environment.googleClientId,
+      callback: (response: GisCredentialResponse) => this.handleCredentialResponse(response),
+      auto_select: true,
+      cancel_on_tap_outside: false,
+    });
+
+    return true;
+  }
+
+  private ensureGoogleClientScript(): Promise<boolean> {
+    if (typeof globalThis === 'undefined' || typeof document === 'undefined') {
+      return Promise.resolve(false);
+    }
+
+    if ((globalThis as any)['google']?.accounts?.id) {
+      return Promise.resolve(true);
+    }
+
+    if (!this._googleClientLoad) {
+      const existingScript = document.querySelector<HTMLScriptElement>(`script[src="${GOOGLE_IDENTITY_SCRIPT_URL}"]`);
+      if (!existingScript) {
+        const script = document.createElement('script');
+        script.src = GOOGLE_IDENTITY_SCRIPT_URL;
+        script.async = true;
+        script.defer = true;
+        document.head.appendChild(script);
+      }
+      const waitForLoad = this.waitForGoogleIdentityScript(2500);
+      this._googleClientLoad = waitForLoad.then((ready) => {
+        if (!ready) {
+          this._googleClientLoad = undefined;
         }
+        return ready;
+      });
+    }
+    return this._googleClientLoad;
+  }
+
+  private waitForGoogleIdentityScript(timeoutMs = 3000, intervalMs = 50): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    return new Promise<boolean>((resolve) => {
+      const poll = () => {
+        if ((globalThis as any)['google']?.accounts?.id) {
+          resolve(true);
+          return;
+        }
+        if (Date.now() >= deadline) {
+          resolve(false);
+          return;
+        }
+        setTimeout(poll, intervalMs);
       };
       poll();
     });
   }
+
 }

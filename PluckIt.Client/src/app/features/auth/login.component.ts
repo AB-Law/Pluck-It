@@ -1,4 +1,4 @@
-import { Component, AfterViewInit, ElementRef, ViewChild, inject, effect } from '@angular/core';
+import { Component, inject, effect } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { AuthService } from '../../core/services/auth.service';
 
@@ -15,28 +15,28 @@ import { AuthService } from '../../core/services/auth.service';
         <div class="absolute inset-0 flicker-overlay z-10"></div>
         <div class="grid grid-cols-4 gap-12 p-24 opacity-20 animate-flicker">
           <div class="h-80 flex items-center justify-center rotate-12 transition-transform duration-1000">
-            <span class="material-symbols-outlined text-9xl text-slate-400/30">checkroom</span>
+            <span class="text-9xl text-slate-400/30">◉</span>
           </div>
           <div class="h-80 flex items-center justify-center -rotate-12 translate-y-32">
-            <span class="material-symbols-outlined text-9xl text-slate-400/30">apparel</span>
+            <span class="text-9xl text-slate-400/30">◈</span>
           </div>
           <div class="h-80 flex items-center justify-center rotate-45 translate-x-10">
-            <span class="material-symbols-outlined text-9xl text-slate-400/30">footprint</span>
+            <span class="text-9xl text-slate-400/30">✦</span>
           </div>
           <div class="h-80 flex items-center justify-center -rotate-6 translate-y-16">
-            <span class="material-symbols-outlined text-9xl text-slate-400/30">styler</span>
+            <span class="text-9xl text-slate-400/30">⬟</span>
           </div>
           <div class="h-80 flex items-center justify-center -rotate-45 -translate-y-20">
-            <span class="material-symbols-outlined text-9xl text-slate-400/30">shopping_bag</span>
+            <span class="text-9xl text-slate-400/30">✶</span>
           </div>
           <div class="h-80 flex items-center justify-center rotate-12 translate-y-40">
-            <span class="material-symbols-outlined text-9xl text-slate-400/30">dry_cleaning</span>
+            <span class="text-9xl text-slate-400/30">◊</span>
           </div>
           <div class="h-80 flex items-center justify-center -rotate-12">
-            <span class="material-symbols-outlined text-9xl text-slate-400/30">checkroom</span>
+            <span class="text-9xl text-slate-400/30">◉</span>
           </div>
           <div class="h-80 flex items-center justify-center rotate-6 translate-y-10">
-            <span class="material-symbols-outlined text-9xl text-slate-400/30">apparel</span>
+            <span class="text-9xl text-slate-400/30">◈</span>
           </div>
         </div>
       </div>
@@ -53,7 +53,7 @@ import { AuthService } from '../../core/services/auth.service';
               <div class="size-3 rounded-full bg-emerald-500/50"></div>
             </div>
             <div class="ml-6 flex items-center gap-3">
-              <span class="material-symbols-outlined text-slate-500 text-sm">terminal</span>
+              <span class="text-slate-500 text-sm">▦</span>
               <span class="text-[10px] font-mono text-slate-500 uppercase tracking-widest">PLUCK_IT_SECURE_AUTH_ENVIRONMENT_v4.2</span>
             </div>
             <div class="ml-auto">
@@ -67,7 +67,7 @@ import { AuthService } from '../../core/services/auth.service';
 
               <!-- Logo -->
               <div class="flex items-center gap-4 mb-3">
-                <span class="material-symbols-outlined text-primary" style="font-size:3rem; font-variation-settings:'FILL' 1">checkroom</span>
+                <span class="text-primary" style="font-size:3rem">◉</span>
                 <h1 class="text-4xl font-black tracking-tighter text-white">Pluck-It</h1>
               </div>
 
@@ -98,7 +98,13 @@ import { AuthService } from '../../core/services/auth.service';
 
               <!-- GIS Sign-in button -->
               <div class="log-line w-full max-w-sm flex justify-center" style="animation-delay: 3.1s">
-                <div #gisBtnContainer class="w-full"></div>
+                <button
+                  type="button"
+                  class="w-full inline-flex items-center justify-center gap-3 rounded-md border border-slate-800 bg-slate-900/80 px-6 py-4 text-sm font-mono tracking-[0.2em] uppercase text-white transition hover:bg-primary hover:text-black hover:border-primary/80"
+                  (click)="loginWithGoogle()"
+                >
+                  Continue with Google
+                </button>
               </div>
 
               <p class="log-line mt-12 text-slate-600 text-[10px] font-mono tracking-widest uppercase" style="animation-delay: 3.1s">
@@ -176,10 +182,9 @@ import { AuthService } from '../../core/services/auth.service';
     }
   `]
 })
-export class LoginComponent implements AfterViewInit {
+export class LoginComponent {
   protected readonly auth = inject(AuthService);
   private readonly router = inject(Router);
-  @ViewChild('gisBtnContainer') private readonly gisBtnContainer!: ElementRef<HTMLDivElement>;
 
   constructor() {
     effect(() => {
@@ -189,7 +194,7 @@ export class LoginComponent implements AfterViewInit {
     });
   }
 
-  ngAfterViewInit(): void {
-    this.auth.renderButton(this.gisBtnContainer.nativeElement);
+  protected loginWithGoogle(): void {
+    void this.auth.login();
   }
 }
