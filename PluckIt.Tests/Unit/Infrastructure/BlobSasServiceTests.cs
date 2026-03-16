@@ -57,6 +57,44 @@ public sealed class BlobSasServiceTests
     }
 
     [Fact]
+    public async Task GenerateSasUrl_CachesSasForAllowedContainer()
+    {
+        var sut = CreateSut(archive: "archive");
+        var input = $"https://{AccountName}.blob.core.windows.net/archive/item.jpg";
+
+        var first = sut.GenerateSasUrl(input, validForMinutes: 120);
+        await Task.Delay(TimeSpan.FromSeconds(1.1));
+        var second = sut.GenerateSasUrl(input, validForMinutes: 120);
+
+        second.ShouldBe(first);
+    }
+
+    [Fact]
+    public void GenerateSasUrl_CachesByValidityWindow()
+    {
+        var sut = CreateSut(archive: "archive");
+        var input = $"https://{AccountName}.blob.core.windows.net/archive/item.jpg";
+
+        var first = sut.GenerateSasUrl(input, validForMinutes: 120);
+        var second = sut.GenerateSasUrl(input, validForMinutes: 121);
+
+        second.ShouldNotBe(first);
+    }
+
+    [Fact]
+    public async Task GenerateSasUrl_ShortExpiryDoesNotUseCache()
+    {
+        var sut = CreateSut(archive: "archive");
+        var input = $"https://{AccountName}.blob.core.windows.net/archive/item.jpg";
+
+        var first = sut.GenerateSasUrl(input, validForMinutes: 5);
+        await Task.Delay(TimeSpan.FromSeconds(1.1));
+        var second = sut.GenerateSasUrl(input, validForMinutes: 5);
+
+        second.ShouldNotBe(first);
+    }
+
+    [Fact]
     public async Task DeleteBlobAsync_NoopForNullOrDisallowed()
     {
         var sut = CreateSut(archive: "archive");

@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Azure.Storage;
 using Azure.Storage.Blobs;
 using Azure.Storage.Sas;
+using Microsoft.Extensions.Caching.Memory;
 using PluckIt.Core;
 
 namespace PluckIt.Infrastructure;
@@ -17,6 +18,9 @@ public class BlobSasService : IBlobSasService
   private readonly string _uploadsContainer;
   private readonly BlobServiceClient _serviceClient;
   private readonly HashSet<string> _allowedContainers;
+  private readonly MemoryCache _sasCache = new(new MemoryCacheOptions());
+  private const int SasCacheSkewMinutes = 5;
+  private const int MinimumCacheMinutes = 1;
 
   public BlobSasService(string accountName, string accountKey, string archiveContainer,
       string uploadsContainer = "uploads")
@@ -77,6 +81,14 @@ public class BlobSasService : IBlobSasService
       if (!_allowedContainers.Contains(containerName))
         return blobUrl;
 
+      var canonicalBlobUri = _serviceClient.GetBlobContainerClient(containerName)
+        .GetBlobClient(blobName)
+        .Uri;
+      var cacheKey = $"{canonicalBlobUri}|{validForMinutes}";
+
+      if (_sasCache.TryGetValue(cacheKey, out string? cachedSasUrl))
+        return cachedSasUrl;
+
       var sasBuilder = new BlobSasBuilder
       {
         BlobContainerName = containerName,
@@ -87,10 +99,15 @@ public class BlobSasService : IBlobSasService
       sasBuilder.SetPermissions(BlobSasPermissions.Read);
 
       var sasToken = sasBuilder.ToSasQueryParameters(_credential).ToString();
-      var canonicalBlobUri = _serviceClient.GetBlobContainerClient(containerName)
-        .GetBlobClient(blobName)
-        .Uri;
-      return $"{canonicalBlobUri}?{sasToken}";
+      var sasUrl = $"{canonicalBlobUri}?{sasToken}";
+
+      var cacheMinutes = validForMinutes - SasCacheSkewMinutes;
+      if (cacheMinutes > 0)
+      {
+        _sasCache.Set(cacheKey, sasUrl, TimeSpan.FromMinutes(Math.Max(MinimumCacheMinutes, cacheMinutes)));
+      }
+
+      return sasUrl;
     }
     catch
     {
