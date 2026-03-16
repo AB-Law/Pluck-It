@@ -140,4 +140,27 @@ public sealed class WearHistoryRepositoryTests
         queryOptions.ShouldNotBeNull();
         queryOptions!.MaxItemCount.ShouldBe(1);
     }
+
+  [Fact]
+  public async Task GetByItemAsync_StopsFetchingAtClampedMaxResults()
+  {
+    var events = Enumerable.Range(1, 1100)
+      .Select(i => Record($"h{i}", "item", "user"))
+      .ToArray();
+    var iterator = CosmosTestHelpers.CreateQueryIterator(
+      (events.Take(1000).ToArray(), "token-2"),
+      (events.Skip(1000).ToArray(), null));
+    QueryRequestOptions? queryOptions = null;
+
+    _mockContainer
+      .Setup(c => c.GetItemQueryIterator<WearHistoryRecord>(It.IsAny<QueryDefinition>(), It.IsAny<string>(), It.IsAny<QueryRequestOptions>()))
+      .Callback((QueryDefinition _, string _, QueryRequestOptions options) => queryOptions = options)
+      .Returns(iterator.Object);
+
+    var actual = await _sut.GetByItemAsync("item", "user", maxResults: 2000, cancellationToken: CancellationToken.None);
+
+    actual.Count.ShouldBe(1000);
+    queryOptions.ShouldNotBeNull();
+    queryOptions!.MaxItemCount.ShouldBe(1000);
+  }
 }
