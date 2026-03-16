@@ -24,9 +24,13 @@ logger = logging.getLogger(__name__)
 PHASH_THRESHOLD = 5  # bits — images are "same" if Hamming distance < this
 PHASH_PREFIX_CHARS = 4  # first 16 bits (4 hex chars) of each pHash
 PHASH_PREFIX_BITS = PHASH_PREFIX_CHARS * 4
+PRECOMPUTED_PHASH_MASKS = tuple(
+    tuple(sum(1 << bit for bit in flips) for flips in combinations(range(PHASH_PREFIX_BITS), distance))
+    for distance in range(1, PHASH_THRESHOLD)
+)
 
 
-@lru_cache(maxsize=None)
+@lru_cache(maxsize=2048)
 def _candidate_buckets_cached(bucket: str) -> tuple[str, ...]:
     """
     Return all pHash prefix buckets within PHASH_THRESHOLD bit distance.
@@ -41,13 +45,8 @@ def _candidate_buckets_cached(bucket: str) -> tuple[str, ...]:
     except ValueError:
         return (bucket,)
     candidates: set[int] = {base}
-    bits = range(PHASH_PREFIX_BITS)
-
-    for distance in range(1, PHASH_THRESHOLD + 1):
-        for flips in combinations(bits, distance):
-            mask = 0
-            for bit in flips:
-                mask |= 1 << bit
+    for masks in PRECOMPUTED_PHASH_MASKS:
+        for mask in masks:
             candidates.add(base ^ mask)
 
     return tuple(

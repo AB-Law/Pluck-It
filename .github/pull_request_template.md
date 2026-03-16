@@ -26,7 +26,7 @@
 
 ## Checklist
 
-- [ ] PR targets `dev` and not `main`
+- [ ] PR targets `dev` (or `main` for release PRs)
 - [ ] Branch name follows project conventions (`feature/<name>` or `fix/<name>`)
 - [ ] Relevant tests pass for the areas changed
 - [ ] No `local.settings.json` files are committed

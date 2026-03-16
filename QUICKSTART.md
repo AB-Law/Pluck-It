@@ -76,7 +76,7 @@ Then set:
 
 ```json
 "SasCache__Enabled": true,
-"SasCache__RedisConnectionString": "<Redis connection string>"
+"SasCache__RedisConnectionString": "localhost:6379"
 ```
 
 > `local.settings.json` is gitignored — never commit it.

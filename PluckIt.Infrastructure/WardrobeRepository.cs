@@ -5,6 +5,8 @@ using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Azure.Cosmos;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using PluckIt.Core;
 
 namespace PluckIt.Infrastructure;
@@ -16,12 +18,14 @@ public class WardrobeRepository : IWardrobeRepository
   private readonly string _containerName;
   private readonly string? _imageCleanupIndexContainerName;
   private Container? _imageCleanupIndexContainer;
+  private readonly ILogger<WardrobeRepository> _logger;
 
   public WardrobeRepository(
     CosmosClient client,
     string databaseName,
     string containerName,
-    string? imageCleanupIndexContainerName = null)
+    string? imageCleanupIndexContainerName = null,
+    ILogger<WardrobeRepository>? logger = null)
   {
     _client = client ?? throw new ArgumentNullException(nameof(client));
     _databaseName = databaseName ?? throw new ArgumentNullException(nameof(databaseName));
@@ -29,6 +33,7 @@ public class WardrobeRepository : IWardrobeRepository
     _imageCleanupIndexContainerName = string.IsNullOrWhiteSpace(imageCleanupIndexContainerName)
       ? null
       : imageCleanupIndexContainerName;
+    _logger = logger ?? NullLogger<WardrobeRepository>.Instance;
   }
 
   private Container Container => _client.GetContainer(_databaseName, _containerName);
@@ -234,7 +239,18 @@ public class WardrobeRepository : IWardrobeRepository
       item,
       new PartitionKey(item.UserId),
       cancellationToken: cancellationToken);
-    await SyncImageCleanupIndexAsync(item, cancellationToken);
+    try
+    {
+      await SyncImageCleanupIndexAsync(item, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(
+        ex,
+        "Failed to sync image cleanup index for wardrobe item UserId={UserId}, ItemId={ItemId}",
+        item.UserId,
+        item.Id);
+    }
   }
 
     public async Task DeleteAsync(

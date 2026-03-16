@@ -105,7 +105,9 @@ async def _load_wardrobe_items(user_id: str) -> tuple[Counter, list[dict[str, An
     all_items: list[dict[str, Any]] = []
 
     async for item in wardrobe.query_items(
-        query="SELECT c.category, c.colours, c.tags, c.brand FROM c WHERE c.userId = @userId "
+        query="SELECT c.category, c.colours, c.tags, c.brand FROM c "
+              "WHERE c.userId = @userId "
+              "ORDER BY c._ts DESC, c.id ASC "
               f"OFFSET 0 LIMIT {_WARDROBE_SCAN_LIMIT}",
         parameters=[{"name": "@userId", "value": user_id}],
     ):

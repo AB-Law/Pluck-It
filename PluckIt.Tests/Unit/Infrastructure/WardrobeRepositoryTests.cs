@@ -25,12 +25,17 @@ public sealed class WardrobeRepositoryTests
         _sut = new WardrobeRepository(_mockClient.Object, DatabaseName, ContainerName);
     }
 
-    private static ClothingItem MakeItem(string id, string userId, int wearCount = 0, params WearEvent[] events) =>
+    private static ClothingItem MakeItem(
+        string id,
+        string userId,
+        int wearCount = 0,
+        string? imageUrl = null,
+        params WearEvent[] events) =>
         new()
         {
             Id = id,
             UserId = userId,
-            ImageUrl = $"https://cdn/{id}.jpg",
+            ImageUrl = imageUrl ?? $"https://cdn/{id}.jpg",
             Brand = "Generic",
             Category = "Tops",
             DateAdded = DateTimeOffset.UtcNow,
@@ -211,8 +216,7 @@ public sealed class WardrobeRepositoryTests
     public async Task UpsertAsync_WithoutImageUrl_RemovesImageCleanupIndex()
     {
         var (sut, _, wardrobeContainer, cleanupContainer) = CreateRepositoryWithImageIndex();
-        var item = MakeItem("without-image", "user");
-        item.ImageUrl = null;
+        var item = MakeItem("without-image", "user", imageUrl: string.Empty);
 
         wardrobeContainer
             .Setup(c => c.UpsertItemAsync(item, new PartitionKey("user"), null, It.IsAny<CancellationToken>()))

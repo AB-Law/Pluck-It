@@ -216,21 +216,21 @@ var host = new HostBuilder()
 
         if (sasCacheEnabled && string.IsNullOrWhiteSpace(sasRedisConnectionString))
         {
-          throw new InvalidOperationException(
-              "Required env var 'SasCache__RedisConnectionString' is not set while SAS cache is enabled.");
+            throw new InvalidOperationException(
+                "Required env var 'SasCache__RedisConnectionString' is not set while SAS cache is enabled.");
         }
 
         if (sasCacheEnabled)
         {
-          services.AddStackExchangeRedisCache(options =>
-          {
-            options.Configuration = sasRedisConnectionString;
-            options.InstanceName = "pluckit-sas";
-          });
+            services.AddStackExchangeRedisCache(options =>
+            {
+                options.Configuration = sasRedisConnectionString;
+                options.InstanceName = "pluckit-sas";
+            });
         }
         else
         {
-          services.AddDistributedMemoryCache();
+            services.AddDistributedMemoryCache();
         }
 
         services.AddSingleton<IBlobSasService>(_ =>

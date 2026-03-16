@@ -85,7 +85,9 @@ async def _load_wardrobe_items(user_id: str) -> list[dict[str, Any]]:
 
     async for item in container.query_items(
         query="SELECT c.id, c.category, c.brand, c.aestheticTags, c.tags, "
-        "c.wearCount, c.lastWornAt, c.wearEvents, c.price FROM c WHERE c.userId = @userId "
+        "c.wearCount, c.lastWornAt, c.wearEvents, c.price FROM c "
+        "WHERE c.userId = @userId "
+        "ORDER BY c._ts DESC, c.id ASC "
         f"OFFSET 0 LIMIT {_WARDROBE_SCAN_LIMIT}",
         parameters=[{"name": "@userId", "value": user_id}],
     ):

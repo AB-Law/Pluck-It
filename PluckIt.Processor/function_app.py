@@ -2956,7 +2956,23 @@ async def acquire_scraper_lease(source_id: str, user_id: Annotated[str, Depends(
                 raise HTTPException(status_code=409, detail="Lease already held by another user.")
 
         source["leaseExpiresAt"] = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
-        await container.upsert_item(source)
+        try:
+            await container.replace_item(
+                source["id"],
+                source,
+                etag=source["_etag"],
+                match_condition=MatchConditions.IfNotModified,
+            )
+        except CosmosHttpResponseError as exc:
+            if exc.status_code == 412:
+                logger.warning(
+                    "Could not acquire scrape lease for %s for user %s because lease was updated.",
+                    source_id,
+                    user_id,
+                )
+                raise HTTPException(status_code=409, detail="Lease already held by another user.")
+            logger.exception("acquire_scraper_lease failed while replacing lease doc %s: %s", source_id, exc)
+            raise HTTPException(status_code=500, detail="Could not acquire lease.") from exc
         return {"status": "ok", "expiresAt": source["leaseExpiresAt"]}
     except Exception as exc:
         if isinstance(exc, HTTPException): raise

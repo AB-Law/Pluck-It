@@ -91,7 +91,9 @@ public class CleanupFunctions(
             using var response = await iterator.ReadNextAsync(cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                break;
+                throw new InvalidOperationException(
+                    $"Failed to read known item IDs from Cosmos. "
+                    + $"StatusCode={response.StatusCode}, Diagnostics={response.Diagnostics}");
             }
 
             using var doc = await JsonDocument.ParseAsync(response.Content, cancellationToken: cancellationToken);
