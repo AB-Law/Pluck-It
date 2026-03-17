@@ -963,6 +963,7 @@ def _metadata_api_key() -> str:
 def _metadata_request_id_from_headers(headers: dict[str, str], request: Request) -> str:
     return (
         _normalise_header_value(headers.get("x-request-id"))
+        or _normalise_header_value(headers.get("x-trace-id"))
         or _normalise_header_value(request.headers.get("X-Request-Id"))
         or ""
     )
@@ -1049,6 +1050,7 @@ def _set_trace_identifier_kwargs(
     *,
     trace_identifier: str | None,
     user_id: str | None,
+    extra_metadata: dict[str, Any] | None = None,
 ) -> None:
     has_user_id_arg = "user_id" in callback_signature.parameters
     has_metadata_arg = "metadata" in callback_signature.parameters
@@ -1060,7 +1062,11 @@ def _set_trace_identifier_kwargs(
     if supports_kwargs or has_user_id_arg:
         kwargs["user_id"] = user_id
     if supports_kwargs or has_metadata_arg:
-        kwargs["metadata"] = {"trace_id": trace_identifier}
+        metadata_payload = dict(extra_metadata or {})
+        if trace_identifier:
+            metadata_payload.setdefault("trace_id", trace_identifier)
+        if metadata_payload:
+            kwargs["metadata"] = metadata_payload
     if supports_kwargs or has_trace_context_arg:
         kwargs["trace_context"] = {"trace_id": trace_identifier}
 
@@ -1078,6 +1084,7 @@ def _build_langfuse_callback_kwargs(
     public_key: str,
     secret_key: str,
     host: str,
+    extra_metadata: dict[str, Any] | None = None,
     logger: Any,
 ) -> dict[str, Any]:
     supports_kwargs = any(
@@ -1097,6 +1104,7 @@ def _build_langfuse_callback_kwargs(
         supports_kwargs,
         trace_identifier=trace_identifier,
         user_id=user_id,
+        extra_metadata=extra_metadata,
     )
     if trace_identifier and not supports_kwargs:
         _warn_if_trace_context_unsupported(callback_signature, logger)
@@ -1119,7 +1127,12 @@ def _configure_langfuse_client(
     langfuse_cls(public_key=public_key, secret_key=secret_key)
 
 
-def _build_langfuse_callbacks(trace_id: str | None = None, *, user_id: str | None = None) -> list[Any]:
+def _build_langfuse_callbacks(
+    trace_id: str | None = None,
+    *,
+    user_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> list[Any]:
     """Build optional Langfuse callbacks for metadata extraction."""
     public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "").strip()
     secret_key = os.getenv("LANGFUSE_SECRET_KEY", "").strip()
@@ -1152,6 +1165,7 @@ def _build_langfuse_callbacks(trace_id: str | None = None, *, user_id: str | Non
             public_key=public_key,
             secret_key=secret_key,
             host=host,
+            extra_metadata=metadata,
             logger=logger,
         )
         if not kwargs:
@@ -1461,7 +1475,11 @@ def _infer_clothing_metadata(
         if not endpoint or not api_key:
             raise RuntimeError("Azure OpenAI credentials are not configured.")
         langfuse_trace_id = _extract_langfuse_trace_id(request_id, traceparent)
-        callbacks = _build_langfuse_callbacks(langfuse_trace_id, user_id=item_id)
+        callbacks = _build_langfuse_callbacks(
+            langfuse_trace_id,
+            user_id=item_id,
+            metadata={"component": "clothing-metadata", "trace_label": "clothing-metadata"},
+        )
 
         llm = AzureChatOpenAI(
             azure_endpoint=endpoint,
@@ -2357,7 +2375,7 @@ async def update_memory(body: MemoryUpdateRequest, user_id: Annotated[str, Depen
         500: {"description": "Could not run digest."},
     },
 )
-async def run_digest_now(user_id: Annotated[str, Depends(get_user_id)], force: bool = True):
+async def run_digest_now(request: Request, user_id: Annotated[str, Depends(get_user_id)], force: bool = True):
     """Manually trigger digest generation for the authenticated user.
     Useful for local dev/testing — production relies on the Monday timer trigger.
     Defaults to force=True to bypass the wardrobe-unchanged hash guard.
@@ -2365,9 +2383,10 @@ async def run_digest_now(user_id: Annotated[str, Depends(get_user_id)], force: b
     """
     import asyncio
     from agents.digest_agent import run_digest_for_user
+    trace_id = request.headers.get("X-Trace-Id")
     try:
         result = await asyncio.get_event_loop().run_in_executor(
-            None, run_digest_for_user, user_id, force
+            None, run_digest_for_user, user_id, force, trace_id
         )
         if result is None:
             return {"status": "skipped", "reason": "opted out of recommendations or no wardrobe items"}

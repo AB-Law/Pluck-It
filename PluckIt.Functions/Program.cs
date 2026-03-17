@@ -68,6 +68,7 @@ var host = new HostBuilder()
         // IHttpClientFactory is already registered by the AddHttpClient("processor") call below.
         // GoogleTokenValidator is a singleton so the JWKS cache is shared across invocations.
         services.AddSingleton<GoogleTokenValidator>();
+        services.AddSingleton<ITokenResolver, TokenResolver>();
         services.AddSingleton(sp =>
             new WardrobeFunctionsAuthContext(
                 config["Local:DevUserId"],
