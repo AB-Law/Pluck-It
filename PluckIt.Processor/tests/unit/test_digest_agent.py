@@ -8,6 +8,7 @@ import hashlib
 import json
 from collections import Counter
 
+import agents.digest_agent as digest_agent
 from agents.digest_agent import (
     _PROMPT_ITEM_LIMIT,
     _load_user_wardrobe,
@@ -18,6 +19,12 @@ from agents.digest_agent import (
     run_digest_for_user_with_status,
     run_weekly_digest,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_digest_llm_cache():
+    """Reset the digest LLM singleton between tests to avoid cross-test leakage."""
+    digest_agent._DIGEST_LLM = None
 
 
 @pytest.mark.unit
@@ -189,7 +196,7 @@ def test_generate_suggestions_forwards_trace_context_to_llm_call():
     fake_llm = MagicMock()
     fake_llm.invoke = MagicMock(return_value=fake_llm_response)
 
-    with patch("agents.digest_agent._build_digest_llm", return_value=fake_llm) as mock_build:
+    with patch("agents.digest_agent._get_digest_llm", return_value=fake_llm) as mock_llm_factory:
         suggestions = _generate_suggestions(
             {"stylePreferences": ["minimalist"], "preferredColours": ["navy"]},
             [{"category": "tops"}],
@@ -205,11 +212,14 @@ def test_generate_suggestions_forwards_trace_context_to_llm_call():
         )
 
     assert suggestions == [{"item": "White linen shirt", "rationale": "Overwrites"}]
-    mock_build.assert_called_once()
-    called_kwargs = mock_build.call_args.kwargs
-    assert called_kwargs["trace_id"] == "trace-123"
-    assert called_kwargs["user_id"] == "user-1"
-    assert called_kwargs["callbacks"] == ["cb-1"]
+    mock_llm_factory.assert_called_once()
+    fake_llm.invoke.assert_called_once()
+    invoke_kwargs = fake_llm.invoke.call_args.kwargs
+    assert "config" in invoke_kwargs
+    config = invoke_kwargs["config"]
+    assert config["callbacks"] == ["cb-1"]
+    assert config["metadata"]["trace_id"] == "trace-123"
+    assert config["metadata"]["user_id"] == "user-1"
 
 
 @pytest.mark.unit
@@ -513,6 +523,17 @@ def test_run_digest_runs_when_hash_changed():
 
 
 @pytest.mark.unit
+def test_get_digest_llm_reuses_singleton_instance():
+    fake_llm = MagicMock()
+    with patch("agents.digest_agent._build_digest_llm", return_value=fake_llm) as build:
+        first = digest_agent._get_digest_llm()
+        second = digest_agent._get_digest_llm()
+
+    assert first is second is fake_llm
+    build.assert_called_once()
+
+
+@pytest.mark.unit
 def test_run_digest_handles_empty_wardrobe():
     """Empty wardrobe should still succeed (returns None due to no items to hash)."""
     sync_wardrobe = MagicMock()
@@ -577,7 +598,7 @@ def test_run_digest_includes_liked_feedback_in_prompt():
     fake_llm_response.content = json.dumps([{"item": "White Oxford shirt", "rationale": "Gap"}])
     fake_llm = MagicMock()
 
-    def _capture_invoke(messages):
+    def _capture_invoke(messages, **_kwargs):
         for msg in messages:
             captured_prompts.append(msg.content)
         return fake_llm_response

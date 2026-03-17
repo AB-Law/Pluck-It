@@ -40,6 +40,9 @@ from .db import (
 
 logger = logging.getLogger(__name__)
 
+# Keep one shared digest LLM instance per process for batch runs.
+_DIGEST_LLM: AzureChatOpenAI | None = None
+
 # Items fed into the LLM prompt — keeps prompt tokens bounded for p95 < 2.5 s AC.
 _PROMPT_ITEM_LIMIT = 50
 _DigestOutcome = Literal["skipped_by_hash", "skipped_by_opt_out", "generated", "failed"]
@@ -118,6 +121,15 @@ def _build_digest_llm(
     if callbacks:
         llm_kwargs["callbacks"] = callbacks
     return AzureChatOpenAI(**llm_kwargs)
+
+
+def _get_digest_llm() -> AzureChatOpenAI:
+    """Return a singleton Azure Chat client for digest generation."""
+    global _DIGEST_LLM
+    if _DIGEST_LLM is None:
+        logger.debug("Initializing shared digest LLM instance.")
+        _DIGEST_LLM = _build_digest_llm()
+    return _DIGEST_LLM
 
 
 def _recency_score(wear_count: int, last_worn_at: Optional[str]) -> float:
@@ -389,12 +401,22 @@ Top items: {json.dumps(scored[:20])}
 {sparse_note}{feedback_note}
 3-5 purchase suggestions (item, rationale) in JSON array format."""
 
-        llm = _build_digest_llm(
-            trace_id=trace_id,
-            user_id=user_id,
-            callbacks=callbacks,
+        llm = _get_digest_llm()
+        invoke_kwargs: dict[str, Any] = {}
+        if callbacks is not None:
+            metadata: dict[str, str] = {}
+            if trace_id is not None:
+                metadata["trace_id"] = trace_id
+            if user_id is not None:
+                metadata["user_id"] = user_id
+            invoke_config = {"callbacks": callbacks}
+            if metadata:
+                invoke_config["metadata"] = metadata
+            invoke_kwargs["config"] = invoke_config
+        resp = llm.invoke(
+            [SystemMessage(content="Stylist. JSON only."), HumanMessage(content=prompt)],
+            **invoke_kwargs,
         )
-        resp = llm.invoke([SystemMessage(content="Stylist. JSON only."), HumanMessage(content=prompt)])
         raw = resp.content.strip()
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
