@@ -17,7 +17,7 @@ import time
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
-from function_app import _build_json_etag
+from function_app import _build_json_etag, _infer_clothing_metadata
 
 from fastapi import HTTPException
 import pytest
@@ -114,6 +114,69 @@ async def test_post_extract_metadata_forwards_trace_headers_to_infer(async_clien
     _, call_kwargs = mock_infer.call_args
     assert call_kwargs["request_id"] == "request-123"
     assert call_kwargs["traceparent"] == "00-11223344556677889900aabbccddeeff-1234567890abcdef-01"
+
+
+@pytest.mark.unit
+async def test_post_extract_metadata_forwards_x_trace_id_header_to_request_id(async_client):
+    async_image = base64.b64encode(b"fake-image").decode("ascii")
+    with patch("function_app._infer_clothing_metadata") as mock_infer:
+        mock_infer.return_value = {"brand": None, "category": None, "tags": [], "colours": []}
+        response = await async_client.post(
+            "/api/extract-clothing-metadata",
+            headers={"X-API-Key": "test-metadata-key", "X-Trace-Id": "trace-header-1"},
+            json={
+                "item_id": "item-1",
+                "image_bytes_base64": async_image,
+                "media_type": "image/jpeg",
+            },
+        )
+
+    assert response.status_code == 200
+    _, call_kwargs = mock_infer.call_args
+    assert call_kwargs["request_id"] == "trace-header-1"
+
+
+@pytest.mark.unit
+def test_infer_clothing_metadata_attaches_component_label_to_langfuse_metadata():
+    fake_llm_response = MagicMock()
+    fake_llm_response.content = json.dumps(
+        {"brand": "Acme", "category": "Outerwear", "tags": ["cotton"], "colours": [{"name": "Navy", "hex": "#001122"}]}
+    )
+    fake_llm = MagicMock()
+    fake_llm.invoke = MagicMock(return_value=fake_llm_response)
+
+    with (
+        patch.dict(
+            os.environ,
+            {
+                "AZURE_OPENAI_ENDPOINT": "https://example.openai.azure.com/",
+                "AZURE_OPENAI_API_KEY": "test-key",
+                "AZURE_OPENAI_DEPLOYMENT": "gpt-4.1-mini",
+            },
+        ),
+        patch("function_app._build_langfuse_callbacks") as mock_build,
+        patch("langchain_openai.AzureChatOpenAI", return_value=fake_llm),
+    ):
+        result = _infer_clothing_metadata(
+            b"fake-image",
+            "image/jpeg",
+            "item-1",
+            request_id="request-123",
+        )
+
+    assert result["brand"] == "Acme"
+    assert result["category"] == "Outerwear"
+    assert result["tags"] == ["cotton"]
+    assert result["colours"] == [{"name": "Navy", "hex": "#001122"}]
+    mock_build.assert_called_once()
+    call_args, call_kwargs = mock_build.call_args
+    assert len(call_args) == 1
+    assert isinstance(call_args[0], str)
+    assert len(call_args[0]) == 32
+    assert call_kwargs == {
+        "user_id": "item-1",
+        "metadata": {"component": "clothing-metadata", "trace_label": "clothing-metadata"},
+    }
 
 
 @pytest.mark.unit
@@ -473,6 +536,18 @@ async def test_post_digest_run_returns_ok_on_success(async_client):
     data = response.json()
     assert data["status"] == "ok"
     assert "suggestions" in data["digest"]
+
+
+@pytest.mark.unit
+async def test_post_digest_run_forwards_x_trace_id(async_client):
+    with patch("agents.digest_agent.run_digest_for_user", return_value={"id": "digest-001", "suggestions": []}) as mock_run:
+        response = await async_client.post("/api/digest/run", headers={"X-Trace-Id": "digest-trace-header"})
+
+    assert response.status_code == 200
+    call_args, _ = mock_run.call_args
+    assert len(call_args) == 3
+    assert call_args[1] is True
+    assert call_args[2] == "digest-trace-header"
 
 
 @pytest.mark.unit
