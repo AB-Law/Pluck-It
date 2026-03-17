@@ -4,7 +4,6 @@ using System.Net;
 using System.Text.Json;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
-using Microsoft.Extensions.Configuration;
 using PluckIt.Core;
 using PluckIt.Functions.Auth;
 using PluckIt.Functions.Serialization;
@@ -18,9 +17,7 @@ namespace PluckIt.Functions.Functions;
 /// </summary>
 public class CollectionFunctions(
     ICollectionRepository repo,
-    GoogleTokenValidator tokenValidator,
-    IConfiguration config,
-    RefreshSessionStore? refreshSessionStore = null)
+    ITokenResolver tokenResolver)
 {
     // ── GET /api/collections ─────────────────────────────────────────────────
     // Returns owned collections + joined collections merged.
@@ -263,47 +260,8 @@ public class CollectionFunctions(
         HttpRequestData req,
         CancellationToken cancellationToken = default)
     {
-        if (TryGetBearerToken(req, out var token))
-        {
-            var sub = await tokenValidator.ValidateAsync(token);
-            if (sub is not null) return (true, sub);
-
-            var sessionUserId = await ResolveUserIdFromSessionTokenAsync(token, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(sessionUserId))
-                return (true, sessionUserId);
-        }
-        var devId = config["Local:DevUserId"];
-        if (!string.IsNullOrEmpty(devId)) return (true, devId);
-        return (false, null);
-    }
-
-    private static bool TryGetBearerToken(HttpRequestData req, out string token)
-    {
-        token = string.Empty;
-        if (!req.Headers.TryGetValues("Authorization", out var authHeaders))
-            return false;
-
-        var header = authHeaders.FirstOrDefault();
-        if (string.IsNullOrWhiteSpace(header) || !header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        token = header["Bearer ".Length..].Trim();
-        return !string.IsNullOrWhiteSpace(token);
-    }
-
-    private async Task<string?> ResolveUserIdFromSessionTokenAsync(string token, CancellationToken cancellationToken)
-    {
-        if (refreshSessionStore is null)
-            return null;
-
-        try
-        {
-            return await refreshSessionStore.ResolveUserIdFromAccessTokenAsync(token, cancellationToken);
-        }
-        catch
-        {
-            return null;
-        }
+        var userId = await tokenResolver.ResolveUserIdAsync(req, cancellationToken);
+        return string.IsNullOrWhiteSpace(userId) ? (false, null) : (true, userId);
     }
 
     private static async Task<HttpResponseData> JsonOk<T>(
