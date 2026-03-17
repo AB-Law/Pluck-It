@@ -256,8 +256,11 @@ def ingest_items(
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def run_global_scrapers() -> None:
-    """
-    Run all active global scrapers.  Called by the daily timer trigger.
+    """Run all active global scrapers.
+
+    This entry point must fail fast when source loading fails so timer-based
+    scraper invocations can be retried and surfaced through standard exception
+    handling.
     """
     sources_container = get_scraper_sources_container_sync()
     query = "SELECT * FROM c WHERE c.isActive = true AND c.isGlobal = true"
@@ -267,8 +270,8 @@ def run_global_scrapers() -> None:
             enable_cross_partition_query=True,
         ))
     except Exception as exc:  # noqa: BLE001
-        logger.error("Could not load scraper sources: %s", exc)
-        return
+        logger.exception("Could not load scraper sources: %s", exc)
+        raise
 
     logger.info("Running %d active global sources", len(sources))
     total = 0
