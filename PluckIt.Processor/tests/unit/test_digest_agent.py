@@ -598,7 +598,7 @@ def test_run_digest_includes_liked_feedback_in_prompt():
     fake_llm_response.content = json.dumps([{"item": "White Oxford shirt", "rationale": "Gap"}])
     fake_llm = MagicMock()
 
-    def _capture_invoke(messages):
+    def _capture_invoke(messages, **_kwargs):
         for msg in messages:
             captured_prompts.append(msg.content)
         return fake_llm_response
