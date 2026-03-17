@@ -39,6 +39,9 @@ from .db import (
 
 logger = logging.getLogger(__name__)
 
+# Keep one shared digest LLM instance per process for batch runs.
+_DIGEST_LLM: AzureChatOpenAI | None = None
+
 # Items fed into the LLM prompt — keeps prompt tokens bounded for p95 < 2.5 s AC.
 _PROMPT_ITEM_LIMIT = 50
 _DigestOutcome = Literal["skipped_by_hash", "skipped_by_opt_out", "generated", "failed"]
@@ -66,6 +69,15 @@ def _build_digest_llm() -> AzureChatOpenAI:
         temperature=0.5,
         max_tokens=800,
     )
+
+
+def _get_digest_llm() -> AzureChatOpenAI:
+    """Return a singleton Azure Chat client for digest generation."""
+    global _DIGEST_LLM
+    if _DIGEST_LLM is None:
+        logger.debug("Initializing shared digest LLM instance.")
+        _DIGEST_LLM = _build_digest_llm()
+    return _DIGEST_LLM
 
 
 def _recency_score(wear_count: int, last_worn_at: Optional[str]) -> float:
@@ -292,7 +304,7 @@ Top items: {json.dumps(scored[:20])}
 {sparse_note}{feedback_note}
 3-5 purchase suggestions (item, rationale) in JSON array format."""
 
-        llm = _build_digest_llm()
+        llm = _get_digest_llm()
         resp = llm.invoke([SystemMessage(content="Stylist. JSON only."), HumanMessage(content=prompt)])
         raw = resp.content.strip()
         if raw.startswith("```"):

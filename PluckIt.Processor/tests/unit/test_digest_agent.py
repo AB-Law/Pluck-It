@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import hashlib
 import json
 
+import agents.digest_agent as digest_agent
 from agents.digest_agent import (
     _PROMPT_ITEM_LIMIT,
     _load_user_wardrobe,
@@ -15,6 +16,12 @@ from agents.digest_agent import (
     run_digest_for_user_with_status,
     run_weekly_digest,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_digest_llm_cache():
+    """Reset the digest LLM singleton between tests to avoid cross-test leakage."""
+    digest_agent._DIGEST_LLM = None
 
 
 @pytest.mark.unit
@@ -418,6 +425,17 @@ def test_run_digest_runs_when_hash_changed():
     assert isinstance(result["suggestions"], list)
     sync_digests.upsert_item.assert_called_once()
     sync_profiles.upsert_item.assert_called_once()
+
+
+@pytest.mark.unit
+def test_get_digest_llm_reuses_singleton_instance():
+    fake_llm = MagicMock()
+    with patch("agents.digest_agent._build_digest_llm", return_value=fake_llm) as build:
+        first = digest_agent._get_digest_llm()
+        second = digest_agent._get_digest_llm()
+
+    assert first is second is fake_llm
+    build.assert_called_once()
 
 
 @pytest.mark.unit
