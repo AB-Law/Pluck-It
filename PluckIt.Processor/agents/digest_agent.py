@@ -24,8 +24,9 @@ import json
 import logging
 import os
 from collections import Counter
+import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import AzureChatOpenAI
@@ -44,6 +45,42 @@ _PROMPT_ITEM_LIMIT = 50
 _DigestOutcome = Literal["skipped_by_hash", "skipped_by_opt_out", "generated", "failed"]
 
 
+def _build_digest_langfuse_callbacks(trace_id: str | None = None, *, user_id: str | None = None) -> list[Any]:
+    """Build optional Langfuse callbacks using function_app shared settings."""
+    try:
+        from function_app import _build_langfuse_callbacks as shared_build
+    except Exception as exc:
+        logger.warning("Digest: unable to import shared Langfuse callback builder: %s", exc)
+        return []
+
+    try:
+        return shared_build(
+            trace_id,
+            user_id=user_id,
+            metadata={"component": "digest", "trace_label": "wardrobe-digest"},
+        )
+    except Exception as exc:
+        logger.warning("Digest: shared Langfuse callback builder failed: %s", exc)
+        return []
+
+
+def _flush_digest_langfuse_callbacks(callbacks: list[Any]) -> None:
+    """Flush optional Langfuse callbacks if available."""
+    if not callbacks:
+        return
+
+    try:
+        from function_app import _flush_langfuse_callbacks as shared_flush
+    except Exception as exc:
+        logger.warning("Digest: unable to import shared Langfuse callback flusher: %s", exc)
+        return
+
+    try:
+        shared_flush(callbacks)
+    except Exception as exc:
+        logger.warning("Digest: shared Langfuse callback flush failed: %s", exc)
+
+
 def _get_env(name: str, default: Optional[str] = None) -> str:
     v = os.getenv(name, default)
     if v is None:
@@ -57,15 +94,30 @@ def compute_wardrobe_hash(item_ids: list[str]) -> str:
     return hashlib.sha256(combined.encode()).hexdigest()[:16]
 
 
-def _build_digest_llm() -> AzureChatOpenAI:
-    return AzureChatOpenAI(
-        azure_endpoint=_get_env("AZURE_OPENAI_ENDPOINT"),
-        api_key=_get_env("AZURE_OPENAI_API_KEY"),
-        azure_deployment=_get_env("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini"),
-        api_version="2024-12-01-preview",
-        temperature=0.5,
-        max_tokens=800,
-    )
+def _build_digest_llm(
+    *,
+    trace_id: str | None = None,
+    user_id: str | None = None,
+    callbacks: list[Any] | None = None,
+    azure_deployment: str | None = None,
+    temperature: float = 0.5,
+    max_tokens: int = 800,
+) -> AzureChatOpenAI:
+    """Build the digest LLM client."""
+    if callbacks is None:
+        callbacks = _build_digest_langfuse_callbacks(trace_id, user_id=user_id)
+
+    llm_kwargs = {
+        "azure_endpoint": _get_env("AZURE_OPENAI_ENDPOINT"),
+        "api_key": _get_env("AZURE_OPENAI_API_KEY"),
+        "azure_deployment": azure_deployment or _get_env("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini"),
+        "api_version": "2024-12-01-preview",
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    if callbacks:
+        llm_kwargs["callbacks"] = callbacks
+    return AzureChatOpenAI(**llm_kwargs)
 
 
 def _recency_score(wear_count: int, last_worn_at: Optional[str]) -> float:
@@ -83,7 +135,14 @@ def _recency_score(wear_count: int, last_worn_at: Optional[str]) -> float:
     return round(wear_count * recency, 3)
 
 
-def _infer_climate_zone(location_city: Optional[str], wear_events_conditions: list[str]) -> Optional[str]:
+def _infer_climate_zone(
+    location_city: Optional[str],
+    wear_events_conditions: list[str],
+    *,
+    callbacks: list[Any] | None = None,
+    trace_id: str | None = None,
+    user_id: str | None = None,
+) -> Optional[str]:
     """
     Best-effort climate zone inference from city name + wear-event weather snapshots.
     Uses a nano-LLM call; returns None on any failure (non-blocking).
@@ -99,14 +158,16 @@ def _infer_climate_zone(location_city: Optional[str], wear_events_conditions: li
             "Reply with ONE word — the climate zone: temperate | tropical | continental | arid | polar. "
             "No explanation."
         )
-        nano = AzureChatOpenAI(
-            azure_endpoint=_get_env("AZURE_OPENAI_ENDPOINT"),
-            api_key=_get_env("AZURE_OPENAI_API_KEY"),
-            azure_deployment=os.getenv("AZURE_OPENAI_NANO_DEPLOYMENT",
-                                        os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini")),
-            api_version="2024-12-01-preview",
+        nano = _build_digest_llm(
+            trace_id=trace_id,
+            user_id=user_id,
+            callbacks=callbacks,
             temperature=0,
             max_tokens=5,
+            azure_deployment=os.getenv(
+                "AZURE_OPENAI_NANO_DEPLOYMENT",
+                os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-4.1-mini"),
+            ),
         )
         result = nano.invoke(prompt).content.strip().lower()
         if result in {"temperate", "tropical", "continental", "arid", "polar"}:
@@ -116,16 +177,24 @@ def _infer_climate_zone(location_city: Optional[str], wear_events_conditions: li
     return None
 
 
-def run_digest_for_user(user_id: str, force: bool = False) -> Optional[dict]:
+def run_digest_for_user(
+    user_id: str,
+    force: bool = False,
+    trace_id: str | None = None,
+) -> Optional[dict]:
     """
     Synchronous digest run for a single user. Returns the digest dict or None
     if skipped (wardrobe unchanged) or on error.
     """
-    result, _ = run_digest_for_user_with_status(user_id, force=force)
+    result, _ = run_digest_for_user_with_status(user_id, force=force, trace_id=trace_id)
     return result
 
 
-def run_digest_for_user_with_status(user_id: str, force: bool = False) -> tuple[Optional[dict], _DigestOutcome]:
+def run_digest_for_user_with_status(
+    user_id: str,
+    force: bool = False,
+    trace_id: str | None = None,
+) -> tuple[Optional[dict], _DigestOutcome]:
     """
     Same as `run_digest_for_user`, plus internal status for scheduler metrics.
 
@@ -158,15 +227,30 @@ def run_digest_for_user_with_status(user_id: str, force: bool = False) -> tuple[
     liked, disliked = _load_recent_feedback(user_id)
     
     climate_zone = profile.get("climateZone")
-    if not climate_zone and profile.get("locationCity"):
-        climate_zone = _infer_climate_zone(profile["locationCity"], climate_signals)
+    trace_id = trace_id or str(uuid.uuid4())
+    callbacks = _build_digest_langfuse_callbacks(trace_id, user_id=user_id)
+    suggestions: list = []
+    try:
+        if not climate_zone and profile.get("locationCity"):
+            climate_zone = _infer_climate_zone(
+                profile["locationCity"],
+                climate_signals,
+                callbacks=callbacks,
+                trace_id=trace_id,
+                user_id=user_id,
+            )
 
-    # 4. Generate Suggestions via LLM
-    items_with_history = sum(1 for s in ranked_items if s["wearCount"] > 0)
-    suggestions = _generate_suggestions(
-        profile, ranked_items, category_counts, liked, disliked,
-        climate_zone, items_with_history, len(wardrobe_data["item_ids"])
-    )
+        # 4. Generate Suggestions via LLM
+        items_with_history = sum(1 for s in ranked_items if s["wearCount"] > 0)
+        suggestions = _generate_suggestions(
+            profile, ranked_items, category_counts, liked, disliked,
+            climate_zone, items_with_history, len(wardrobe_data["item_ids"]),
+            trace_id=trace_id,
+            user_id=user_id,
+            callbacks=callbacks,
+        )
+    finally:
+        _flush_digest_langfuse_callbacks(callbacks)
     if not suggestions:
         return None, "failed"
 
@@ -274,7 +358,20 @@ def _load_recent_feedback(user_id: str) -> tuple[list[str], list[str]]:
         pass
     return liked, disliked
 
-def _generate_suggestions(profile, scored, counts, liked, disliked, climate, worn_count, total_count) -> list:
+def _generate_suggestions(
+    profile,
+    scored,
+    counts,
+    liked,
+    disliked,
+    climate,
+    worn_count,
+    total_count,
+    *,
+    trace_id: str | None = None,
+    user_id: str | None = None,
+    callbacks: list[Any] | None = None,
+) -> list:
     try:
         sparse = worn_count < 5
         style_prefs = profile.get("stylePreferences") or []
@@ -292,7 +389,11 @@ Top items: {json.dumps(scored[:20])}
 {sparse_note}{feedback_note}
 3-5 purchase suggestions (item, rationale) in JSON array format."""
 
-        llm = _build_digest_llm()
+        llm = _build_digest_llm(
+            trace_id=trace_id,
+            user_id=user_id,
+            callbacks=callbacks,
+        )
         resp = llm.invoke([SystemMessage(content="Stylist. JSON only."), HumanMessage(content=prompt)])
         raw = resp.content.strip()
         if raw.startswith("```"):

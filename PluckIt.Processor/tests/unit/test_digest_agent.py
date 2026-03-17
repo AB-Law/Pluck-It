@@ -6,10 +6,13 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import hashlib
 import json
+from collections import Counter
 
 from agents.digest_agent import (
     _PROMPT_ITEM_LIMIT,
     _load_user_wardrobe,
+    _generate_suggestions,
+    _build_digest_langfuse_callbacks,
     _save_digest_and_update_profile,
     compute_wardrobe_hash,
     run_digest_for_user_with_status,
@@ -175,6 +178,95 @@ def test_run_digest_for_user_with_status_generates_digest():
 
     assert digest == {"id": "d-1"}
     assert outcome == "generated"
+
+
+@pytest.mark.unit
+def test_generate_suggestions_forwards_trace_context_to_llm_call():
+    fake_llm_response = MagicMock()
+    fake_llm_response.content = json.dumps(
+        [{"item": "White linen shirt", "reason": "Overwrites"}]
+    )
+    fake_llm = MagicMock()
+    fake_llm.invoke = MagicMock(return_value=fake_llm_response)
+
+    with patch("agents.digest_agent._build_digest_llm", return_value=fake_llm) as mock_build:
+        suggestions = _generate_suggestions(
+            {"stylePreferences": ["minimalist"], "preferredColours": ["navy"]},
+            [{"category": "tops"}],
+            Counter({"tops": 3}),
+            ["liked item"],
+            ["disliked item"],
+            "temperate",
+            1,
+            2,
+            trace_id="trace-123",
+            user_id="user-1",
+            callbacks=["cb-1"],
+        )
+
+    assert suggestions == [{"item": "White linen shirt", "rationale": "Overwrites"}]
+    mock_build.assert_called_once()
+    called_kwargs = mock_build.call_args.kwargs
+    assert called_kwargs["trace_id"] == "trace-123"
+    assert called_kwargs["user_id"] == "user-1"
+    assert called_kwargs["callbacks"] == ["cb-1"]
+
+
+@pytest.mark.unit
+def test_run_digest_for_user_with_status_builds_and_flushes_digest_callbacks():
+    profile_container = MagicMock()
+    profile_container.read_item.return_value = {
+        "id": "user-trace",
+        "wardrobeHashAtLastDigest": "old-hash",
+        "recommendationOptIn": True,
+        "climateZone": "temperate",
+    }
+    fake_callbacks = [MagicMock()]
+
+    with (
+        patch("agents.digest_agent.get_user_profiles_container_sync", return_value=profile_container),
+        patch("agents.digest_agent._load_user_wardrobe", return_value={"items": [{"wearCount": 1}], "item_ids": ["item-1"]}),
+        patch("agents.digest_agent.compute_wardrobe_hash", return_value="hash-456"),
+        patch("agents.digest_agent._should_skip_digest", return_value=False),
+        patch("agents.digest_agent._analyze_wardrobe", return_value=([], Counter({"tops": 1}), [])),
+        patch("agents.digest_agent._load_recent_feedback", return_value=([], [])),
+        patch("agents.digest_agent._build_digest_langfuse_callbacks", return_value=fake_callbacks) as mock_build,
+        patch("agents.digest_agent._generate_suggestions", return_value=[{"item": "jacket", "rationale": "works great"}]) as mock_generate,
+        patch("agents.digest_agent._compute_style_confidence", return_value=0.8),
+        patch("agents.digest_agent._create_digest_doc", return_value={"id": "d-1"}),
+        patch("agents.digest_agent._save_digest_and_update_profile", return_value=True),
+        patch("agents.digest_agent._flush_digest_langfuse_callbacks") as mock_flush,
+    ):
+        digest, outcome = run_digest_for_user_with_status("user-trace", force=True, trace_id="trace-123")
+
+    assert digest == {"id": "d-1"}
+    assert outcome == "generated"
+    mock_build.assert_called_once_with(
+        "trace-123",
+        user_id="user-trace",
+    )
+    mock_generate.assert_called_once()
+    generate_kwargs = mock_generate.call_args.kwargs
+    assert generate_kwargs["trace_id"] == "trace-123"
+    assert generate_kwargs["user_id"] == "user-trace"
+    assert generate_kwargs["callbacks"] == fake_callbacks
+    mock_flush.assert_called_once_with(fake_callbacks)
+
+
+@pytest.mark.unit
+def test_build_digest_langfuse_callbacks_forwards_component_label_to_shared_builder():
+    with patch("function_app._build_langfuse_callbacks") as mock_shared_build:
+        expected_callbacks = [MagicMock()]
+        mock_shared_build.return_value = expected_callbacks
+
+        callbacks = _build_digest_langfuse_callbacks("trace-123", user_id="user-trace")
+
+    assert callbacks == expected_callbacks
+    mock_shared_build.assert_called_once_with(
+        "trace-123",
+        user_id="user-trace",
+        metadata={"component": "digest", "trace_label": "wardrobe-digest"},
+    )
 
 
 @pytest.mark.unit
