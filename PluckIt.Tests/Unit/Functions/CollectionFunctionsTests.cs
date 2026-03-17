@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using Shouldly;
 using PluckIt.Core;
+using PluckIt.Functions.Auth;
 using PluckIt.Functions.Functions;
 using PluckIt.Functions.Serialization;
 using PluckIt.Tests.Fakes;
@@ -36,11 +37,9 @@ public sealed class CollectionFunctionsTests
 
     private static CollectionFunctions CreateSut(InMemoryCollectionRepository? repo = null, string userId = OwnerId)
     {
-        var cfg = TestConfiguration.WithDevUser(userId);
         return new CollectionFunctions(
             repo ?? new InMemoryCollectionRepository(),
-            TestFactory.CreateTokenValidator(cfg),
-            cfg);
+            new TestTokenResolver(userId));
     }
 
     // ── GetCollections ───────────────────────────────────────────────────────
@@ -82,11 +81,9 @@ public sealed class CollectionFunctionsTests
     [Fact]
     public async Task GetCollections_Returns401WhenUnauthenticated()
     {
-        var cfg = TestConfiguration.Unauthenticated();
         var sut = new CollectionFunctions(
             new InMemoryCollectionRepository(),
-            TestFactory.CreateTokenValidator(cfg),
-            cfg);
+            new TestTokenResolver(null));
 
         var result = await sut.GetCollections(
             TestRequest.Get("http://localhost/api/collections"), CancellationToken.None);
@@ -227,5 +224,15 @@ public sealed class CollectionFunctionsTests
 
         result.StatusCode.ShouldBe(HttpStatusCode.NoContent);
         repo.AllCollections[0].ClothingItemIds.ShouldNotContain("item-xyz");
+    }
+
+    private sealed class TestTokenResolver(string? userId) : ITokenResolver
+    {
+        public Task<string?> ResolveUserIdAsync(
+            Microsoft.Azure.Functions.Worker.Http.HttpRequestData request,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<string?>(userId);
+        }
     }
 }

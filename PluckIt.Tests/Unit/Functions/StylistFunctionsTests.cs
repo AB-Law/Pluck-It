@@ -2,6 +2,7 @@ using System.Net;
 using System;
 using Shouldly;
 using PluckIt.Core;
+using PluckIt.Functions.Auth;
 using PluckIt.Functions.Functions;
 using PluckIt.Tests.Fakes;
 using PluckIt.Tests.Helpers;
@@ -28,12 +29,10 @@ public sealed class StylistFunctionsTests
         InMemoryWardrobeRepository? repo    = null,
         FakeStylistService?         stylist = null)
     {
-        var cfg = TestConfiguration.WithDevUser(UserId);
         return new StylistFunctions(
             repo    ?? new InMemoryWardrobeRepository(),
             stylist ?? new FakeStylistService(),
-            cfg,
-            TestFactory.CreateTokenValidator(cfg),
+            new TestTokenResolver(UserId),
             TestFactory.NullLogger<StylistFunctions>());
     }
 
@@ -66,12 +65,10 @@ public sealed class StylistFunctionsTests
     [Fact]
     public async Task GetRecommendations_Returns401WhenUnauthenticated()
     {
-        var cfg = TestConfiguration.Unauthenticated();
         var sut = new StylistFunctions(
             new InMemoryWardrobeRepository(),
             new FakeStylistService(),
-            cfg,
-            TestFactory.CreateTokenValidator(cfg),
+            new TestTokenResolver(null),
             TestFactory.NullLogger<StylistFunctions>());
 
         var result = await sut.GetRecommendations(
@@ -133,5 +130,15 @@ public sealed class StylistFunctionsTests
         stylist.LastWardrobe!.Count.ShouldBe(1);
         stylist.LastWardrobe![0].Category.ShouldBe("Tops");
         stylist.LastWardrobe![0].WearCount.ShouldBeGreaterThanOrEqualTo(2);
+    }
+
+    private sealed class TestTokenResolver(string? userId) : ITokenResolver
+    {
+        public Task<string?> ResolveUserIdAsync(
+            Microsoft.Azure.Functions.Worker.Http.HttpRequestData request,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult<string?>(userId);
+        }
     }
 }

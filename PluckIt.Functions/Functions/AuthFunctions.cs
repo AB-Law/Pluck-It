@@ -1,6 +1,5 @@
 using System.Net;
 using System.Text.Json;
-using System.Linq;
 using System.Threading;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -11,7 +10,10 @@ namespace PluckIt.Functions.Functions;
 /// <summary>
 /// Authentication exchange endpoints used by mobile clients.
 /// </summary>
-public class AuthFunctions(WardrobeFunctionsAuthContext authContext, RefreshSessionStore refreshSessionStore)
+public class AuthFunctions(
+    WardrobeFunctionsAuthContext authContext,
+    RefreshSessionStore refreshSessionStore,
+    ITokenResolver tokenResolver)
 {
     private const string ContentTypeHeader = "Content-Type";
     private const string JsonContentType = "application/json; charset=utf-8";
@@ -173,7 +175,7 @@ public class AuthFunctions(WardrobeFunctionsAuthContext authContext, RefreshSess
 
             if (!string.IsNullOrWhiteSpace(userId))
             {
-                var authenticatedUserId = await GetAuthenticatedUserIdFromRequestAsync(req, cancellationToken);
+                var authenticatedUserId = await tokenResolver.ResolveUserIdAsync(req, cancellationToken);
                 if (!string.Equals(authenticatedUserId, userId, StringComparison.Ordinal))
                     return await BuildJsonErrorResponse(req, HttpStatusCode.Forbidden, "Forbidden.");
 
@@ -255,45 +257,6 @@ public class AuthFunctions(WardrobeFunctionsAuthContext authContext, RefreshSess
         }
 
         return null;
-    }
-
-    private async Task<string?> GetAuthenticatedUserIdFromRequestAsync(HttpRequestData req, CancellationToken cancellationToken)
-    {
-        if (!req.Headers.TryGetValues("Authorization", out var authHeaders))
-            return null;
-
-        var header = authHeaders.FirstOrDefault();
-        if (string.IsNullOrWhiteSpace(header) || !header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-            return null;
-
-        var token = header["Bearer ".Length..].Trim();
-        if (string.IsNullOrWhiteSpace(token))
-            return null;
-
-        string? googleUserId = null;
-        try
-        {
-            googleUserId = await authContext.TokenValidator.ValidateAsync(token);
-        }
-        catch (Exception)
-        {
-            // Ignore token validation failures here; callers can still resolve the user via refresh session fallback.
-        }
-
-        if (!string.IsNullOrWhiteSpace(googleUserId))
-            return googleUserId;
-
-        if (refreshSessionStore is null)
-            return null;
-
-        try
-        {
-            return await refreshSessionStore.ResolveUserIdFromAccessTokenAsync(token, cancellationToken);
-        }
-        catch
-        {
-            return null;
-        }
     }
 
     private static string? ResolveIdToken(JsonElement root)
