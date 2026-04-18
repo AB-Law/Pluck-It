@@ -2814,6 +2814,7 @@ async def list_scraper_sources(user_id: Annotated[str, Depends(get_user_id)]):
         sources = []
         async for doc in sources_container.query_items(
             query="SELECT c.id, c.name, c.sourceType, c.isGlobal, c.lastScrapedAt, c.config, c.leaseExpiresAt FROM c WHERE c.isActive = true",
+            enable_cross_partition_query=True,
         ):
             for key in _COSMOS_INTERNAL_KEYS:
                 doc.pop(key, None)
@@ -2835,6 +2836,7 @@ async def _get_user_subscriptions(container: any, user_id: str) -> set[str]:
     async for sub in container.query_items(
         query="SELECT c.sourceId FROM c WHERE c.userId = @uid AND c.isActive = true",
         parameters=[{"name": _DB_USER_ID_PARAM, "value": user_id}],
+        partition_key=user_id,
     ):
         subscribed_ids.add(sub["sourceId"])
     return subscribed_ids
@@ -2959,6 +2961,7 @@ async def acquire_scraper_lease(source_id: str, user_id: Annotated[str, Depends(
         items = [i async for i in container.query_items(
             query="SELECT * FROM c WHERE c.id = @id",
             parameters=[{"name": "@id", "value": source_id}],
+            enable_cross_partition_query=True,
         )]
         if not items:
             raise HTTPException(status_code=404, detail=_ERR_SOURCE_NOT_FOUND_MESSAGE)
@@ -3057,6 +3060,7 @@ async def _get_source_and_verify_sub(source_id: str) -> dict:
         items = [i async for i in container.query_items(
             query="SELECT * FROM c WHERE c.id = @id",
             parameters=[{"name": "@id", "value": source_id}],
+            enable_cross_partition_query=True,
         )]
         if not items:
             raise HTTPException(status_code=404, detail=_ERR_SOURCE_NOT_FOUND_MESSAGE)
