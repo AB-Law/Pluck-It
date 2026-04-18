@@ -267,7 +267,7 @@ def run_global_scrapers() -> None:
     try:
         sources = list(sources_container.query_items(
             query=query,
-            enable_cross_partition_query=True,
+        enable_cross_partition_query=True,
         ))
     except Exception as exc:  # noqa: BLE001
         logger.exception("Could not load scraper sources: %s", exc)
