@@ -2836,7 +2836,7 @@ async def _get_user_subscriptions(container: any, user_id: str) -> set[str]:
     async for sub in container.query_items(
         query="SELECT c.sourceId FROM c WHERE c.userId = @uid AND c.isActive = true",
         parameters=[{"name": _DB_USER_ID_PARAM, "value": user_id}],
-        enable_cross_partition_query=True,
+        partition_key=user_id,
     ):
         subscribed_ids.add(sub["sourceId"])
     return subscribed_ids

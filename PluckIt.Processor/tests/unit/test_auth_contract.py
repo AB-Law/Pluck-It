@@ -96,7 +96,10 @@ async def test_refresh_session_rotates_tokens_and_replaces_previous(async_client
     container.replace_item = AsyncMock(return_value={})
     container.upsert_item = AsyncMock(return_value={})
 
-    with patch("agents.db.get_refresh_tokens_container", return_value=container):
+    with (
+        patch("function_app._utc_now", return_value=now),
+        patch("agents.db.get_refresh_tokens_container", return_value=container),
+    ):
         response = await async_client.post(
             "/api/auth/refresh",
             json={"refresh_token": old_refresh_token},
@@ -160,7 +163,10 @@ async def test_refresh_session_rejects_expired_refresh_token(async_client):
     container.replace_item = AsyncMock(return_value={})
     container.upsert_item = AsyncMock(return_value={})
 
-    with patch("agents.db.get_refresh_tokens_container", return_value=container):
+    with (
+        patch("function_app._utc_now", return_value=now),
+        patch("agents.db.get_refresh_tokens_container", return_value=container),
+    ):
         response = await async_client.post(
             "/api/auth/refresh",
             json={"refresh_token": old_refresh_token},

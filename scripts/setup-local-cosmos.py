@@ -41,7 +41,7 @@ CONTAINERS = [
     ("DigestFeedback",                _PK_USER),
     ("WearEvents",                    _PK_USER),
     ("StylingActivity",               _PK_USER),
-    ("ScraperSources",                "/id"),
+    ("ScraperSources",                "/sourceType"),
     ("ScrapedItems",                  "/sourceId"),
     ("UserSourceSubscriptions",       _PK_USER),
     ("TasteCalibration",              _PK_USER),
