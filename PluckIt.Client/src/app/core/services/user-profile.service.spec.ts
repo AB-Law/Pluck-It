@@ -16,6 +16,11 @@ const MOCK_PROFILE: UserProfile = {
   stylePreferences: ['minimalist'],
   favoriteBrands: ['Zara'],
   preferredColours: ['white', 'navy'],
+  wishlistStyleKeywords: ['Relaxed Tailoring'],
+  wishlistPreferredColours: ['Camel'],
+  wishlistFavoriteBrands: ['COS'],
+  wishlistGarmentInterests: ['Blazer'],
+  wishlistProfileUpdatedAt: '2026-04-19T00:00:00Z',
 };
 
 describe('UserProfileService', () => {
@@ -63,6 +68,7 @@ describe('UserProfileService', () => {
     const defaults = service.getOrDefault();
     expect(defaults.currencyCode).toBe('USD');
     expect(defaults.stylePreferences).toEqual([]);
+    expect(defaults.wishlistStyleKeywords).toEqual([]);
   });
 
   it('getOrDefault() returns loaded profile when available', () => {

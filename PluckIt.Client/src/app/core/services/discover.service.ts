@@ -59,6 +59,10 @@ export class DiscoverService {
     );
   }
 
+  saveToWishlist(itemId: string): Observable<{ id: string }> {
+    return this.http.post<{ id: string }>(`${this.base}/scraper/items/${itemId}/wishlist`, {});
+  }
+
   acquireLease(sourceId: string): Observable<{ status: string; expiresAt: string }> {
     return this.http.post<{ status: string; expiresAt: string }>(
       `${this.base}/scraper/lease/${sourceId}`,

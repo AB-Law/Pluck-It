@@ -101,4 +101,36 @@ public class UserProfile
   /// this class does not perform invalidation automatically.
   /// </summary>
   public string? ClimateZone { get; set; }
+
+  // ── Wishlist-derived taste signals (AI-inferred, never user-declared) ─────
+
+  /// <summary>
+  /// Style descriptors inferred from the user's current wishlist items.
+  /// Recomputed from the full wishlist after wishlist mutations.
+  /// </summary>
+  public List<string> WishlistStyleKeywords { get; set; } = [];
+
+  /// <summary>
+  /// Colours inferred from the user's wishlist items.
+  /// Recomputed from the full wishlist after wishlist mutations.
+  /// </summary>
+  public List<string> WishlistPreferredColours { get; set; } = [];
+
+  /// <summary>
+  /// Brands inferred from the user's wishlist items.
+  /// Recomputed from the full wishlist after wishlist mutations.
+  /// </summary>
+  public List<string> WishlistFavoriteBrands { get; set; } = [];
+
+  /// <summary>
+  /// Garment categories and product interests inferred from wishlist items.
+  /// Recomputed from the full wishlist after wishlist mutations.
+  /// </summary>
+  public List<string> WishlistGarmentInterests { get; set; } = [];
+
+  /// <summary>
+  /// ISO 8601 timestamp for the latest wishlist-profile recomputation.
+  /// Null when the wishlist-derived profile is empty.
+  /// </summary>
+  public string? WishlistProfileUpdatedAt { get; set; }
 }

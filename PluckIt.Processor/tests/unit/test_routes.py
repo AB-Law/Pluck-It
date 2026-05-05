@@ -48,6 +48,79 @@ async def test_health_endpoint(async_client):
 
 
 @pytest.mark.unit
+async def test_post_scraped_item_wishlist_clones_and_recomputes(async_client):
+    scraped_container = AsyncMock()
+    scraped_container.read_item = AsyncMock(return_value={
+        "id": "item-001",
+        "title": "Soft blazer",
+        "description": "Relaxed tailoring",
+        "imageUrl": "https://cdn.example.com/look.jpg",
+        "productUrl": "https://example.com/post",
+        "tags": ["quiet luxury", "blazer"],
+        "brand": "COS",
+        "sourceId": "src-1",
+        "sourceType": "brand",
+        "price": "$120",
+    })
+    wardrobe_container = AsyncMock()
+    wardrobe_container.read_item = AsyncMock(side_effect=Exception("missing"))
+    wardrobe_container.upsert_item = AsyncMock()
+    mock_recompute = AsyncMock(return_value={})
+
+    with (
+        patch("agents.db.get_scraped_items_container", return_value=scraped_container),
+        patch("agents.db.get_wardrobe_container", return_value=wardrobe_container),
+        patch("agents.wishlist_profile.recompute_wishlist_profile", new=mock_recompute),
+    ):
+        response = await async_client.post("/api/scraper/items/item-001/wishlist")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == "wishlist-scraped-item-001"
+    assert payload["isWishlisted"] is True
+    assert payload["brand"] == "COS"
+    wardrobe_container.upsert_item.assert_awaited_once()
+    mock_recompute.assert_awaited_once()
+
+
+@pytest.mark.unit
+async def test_list_scraped_items_marks_wishlisted_state(async_client):
+    scraped_container = AsyncMock()
+
+    async def _query_items(**_kwargs):
+        yield {
+            "id": "item-001",
+            "sourceId": "src-1",
+            "sourceType": "brand",
+            "title": "Soft blazer",
+            "description": "Relaxed tailoring",
+            "imageUrl": "https://cdn.example.com/look.jpg",
+            "productUrl": "https://example.com/post",
+            "tags": ["quiet luxury"],
+            "buyLinks": [],
+            "scoreSignal": 1,
+            "brand": "COS",
+            "price": "$120",
+            "scrapedAt": "2026-01-01T00:00:00Z",
+            "userId": "global",
+        }
+
+    scraped_container.query_items = _query_items
+    wardrobe_container = AsyncMock()
+    wardrobe_container.read_item = AsyncMock(return_value={"id": "wishlist-scraped-item-001", "isWishlisted": True})
+
+    with (
+        patch("agents.db.get_scraped_items_container", return_value=scraped_container),
+        patch("agents.db.get_wardrobe_container", return_value=wardrobe_container),
+    ):
+        response = await async_client.get("/api/scraper/items")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["items"][0]["wishlisted"] is True
+
+
+@pytest.mark.unit
 async def test_post_extract_metadata_valid_payload_returns_deterministic_shape(async_client):
     async_image = base64.b64encode(b"fake-image").decode("ascii")
 

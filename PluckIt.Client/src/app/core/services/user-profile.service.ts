@@ -22,6 +22,11 @@ export interface UserProfile {
   recommendationOptIn?: boolean;
   styleConfidenceProfile?: number | null; // 0–1, AI-inferred
   climateZone?: string | null; // e.g. "temperate", "tropical"
+  wishlistStyleKeywords?: string[];
+  wishlistPreferredColours?: string[];
+  wishlistFavoriteBrands?: string[];
+  wishlistGarmentInterests?: string[];
+  wishlistProfileUpdatedAt?: string | null;
 }
 
 const DEFAULT_PROFILE: UserProfile = {
@@ -30,6 +35,11 @@ const DEFAULT_PROFILE: UserProfile = {
   stylePreferences: [],
   favoriteBrands: [],
   preferredColours: [],
+  wishlistStyleKeywords: [],
+  wishlistPreferredColours: [],
+  wishlistFavoriteBrands: [],
+  wishlistGarmentInterests: [],
+  wishlistProfileUpdatedAt: null,
 };
 
 @Injectable({ providedIn: 'root' })

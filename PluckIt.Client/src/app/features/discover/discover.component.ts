@@ -175,6 +175,7 @@ import { NetworkService } from '../../core/services/network.service';
                     [item]="item"
                     (cardClicked)="onCardClick($event)"
                     (feedbackSent)="onFeedback($event)"
+                    (wishlistRequested)="onWishlistRequested($event)"
                   />
                 </div>
               }
@@ -338,6 +339,21 @@ import { NetworkService } from '../../core/services/network.service';
                   }}</span>
                 }
               </div>
+
+              <button
+                class="flex w-full items-center justify-center gap-2 rounded-lg border py-2.5 text-xs font-semibold transition-colors"
+                [class]="
+                  selectedItem()!.wishlisted
+                    ? 'border-rose-500/40 bg-rose-500/10 text-rose-300'
+                    : 'border-border-chrome bg-zinc-900 text-slate-200 hover:border-rose-400/40 hover:text-rose-300'
+                "
+                (click)="onWishlistRequested(selectedItem()!)"
+              >
+                <span class="material-symbols-outlined text-base">{{
+                  selectedItem()!.wishlisted ? 'favorite' : 'favorite_border'
+                }}</span>
+                {{ selectedItem()!.wishlisted ? 'Saved to Wishlist' : 'Save to Wishlist' }}
+              </button>
 
               @if (selectedItem()!.buyLinks.length > 0) {
                 <div class="space-y-1.5">
@@ -589,7 +605,7 @@ export class DiscoverComponent implements OnInit, OnDestroy {
 
       // Local throttling: 2 minutes between scrapes from this browser
       const lastScrapedKey = `last_scraped_${sourceId}`;
-      const lastScrapedStr = localStorage.getItem(lastScrapedKey);
+      const lastScrapedStr = globalThis.localStorage?.getItem?.(lastScrapedKey) ?? null;
       if (lastScrapedStr) {
         const lastScraped = Number.parseInt(lastScrapedStr, 10);
         if (Date.now() - lastScraped < 120000) {
@@ -636,7 +652,7 @@ export class DiscoverComponent implements OnInit, OnDestroy {
         this.discoverService.ingestReddit(sourceId, posts).subscribe({
           next: (res) => {
             console.log(`Successfully ingested ${res.count} items from r/${subreddit}`);
-            localStorage.setItem(`last_scraped_${sourceId}`, Date.now().toString());
+            globalThis.localStorage?.setItem?.(`last_scraped_${sourceId}`, Date.now().toString());
             if (res.count > 0) {
               this.loadFeed(false);
             }
@@ -693,6 +709,26 @@ export class DiscoverComponent implements OnInit, OnDestroy {
     this.discoverService
       .sendFeedback(event.itemId, event.signal, event.galleryImageIndex)
       .subscribe();
+  }
+
+  onWishlistRequested(item: ScrapedItem) {
+    if (item.wishlisted) {
+      return;
+    }
+
+    this.discoverService.saveToWishlist(item.id).subscribe({
+      next: () => {
+        this.allItems.update((items) =>
+          items.map((candidate) =>
+            candidate.id === item.id ? { ...candidate, wishlisted: true } : candidate,
+          ),
+        );
+        const selected = this.selectedItem();
+        if (selected?.id === item.id) {
+          this.selectedItem.set({ ...selected, wishlisted: true });
+        }
+      },
+    });
   }
 
   onModalFeedback(signal: 'up' | 'down') {

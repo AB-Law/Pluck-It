@@ -17,6 +17,7 @@ describe('DiscoverComponent', () => {
     acquireLease: ReturnType<typeof vi.fn>;
     ingestReddit: ReturnType<typeof vi.fn>;
     sendFeedback: ReturnType<typeof vi.fn>;
+    saveToWishlist: ReturnType<typeof vi.fn>;
     suggestSource: ReturnType<typeof vi.fn>;
     unsubscribe: ReturnType<typeof vi.fn>;
   };
@@ -93,12 +94,24 @@ describe('DiscoverComponent', () => {
   };
 
   beforeEach(async () => {
+    const storage = {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+      clear: vi.fn(),
+    };
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: storage,
+      configurable: true,
+    });
+
     discoverService = {
       getSources: vi.fn().mockReturnValue(of(SOURCES)),
       getFeed: vi.fn().mockReturnValue(of({ items: [ITEM], nextContinuationToken: null })),
       acquireLease: vi.fn().mockReturnValue(of({ status: 'ok', expiresAt: '2026-03-11T00:00:00Z' })),
       ingestReddit: vi.fn().mockReturnValue(of({ count: 1, status: 'queued' })),
       sendFeedback: vi.fn().mockReturnValue(of({})),
+      saveToWishlist: vi.fn().mockReturnValue(of({ id: 'wishlist-scraped-i-1' })),
       suggestSource: vi.fn().mockReturnValue(of({})),
       unsubscribe: vi.fn().mockReturnValue(of({})),
     };
@@ -178,6 +191,19 @@ describe('DiscoverComponent', () => {
     component.onModalFeedback('down');
     expect(discoverService.sendFeedback).toHaveBeenCalledWith('i-1', 'down', 0);
     expect(asInternal().modalVoted()).toBe('down');
+  });
+
+  it('saves discover items to the wishlist and marks them locally', () => {
+    component.onWishlistRequested(ITEM);
+
+    expect(discoverService.saveToWishlist).toHaveBeenCalledWith('i-1');
+    expect(asInternal().allItems()[0].wishlisted).toBe(true);
+  });
+
+  it('skips duplicate wishlist saves once item is already marked', () => {
+    component.onWishlistRequested({ ...ITEM, wishlisted: true });
+
+    expect(discoverService.saveToWishlist).not.toHaveBeenCalled();
   });
 
   it('navigates gallery images in modal with guards', () => {

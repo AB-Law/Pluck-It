@@ -48,6 +48,21 @@ import { ScrapedItem } from '../../core/models/scraped-item.model';
               ↑ {{ item().redditScore }}
             </span>
           }
+
+          <button
+            class="ml-auto flex h-8 w-8 items-center justify-center rounded-full border transition-colors"
+            [class]="
+              item().wishlisted
+                ? 'border-rose-500/60 bg-rose-500/20 text-rose-300'
+                : 'border-white/15 bg-black/40 text-slate-300 hover:border-rose-400/50 hover:text-rose-300'
+            "
+            title="Save to wishlist"
+            (click)="onWishlistClick($event)"
+          >
+            <span class="material-symbols-outlined text-base">{{
+              item().wishlisted ? 'favorite' : 'favorite_border'
+            }}</span>
+          </button>
         </div>
 
         <!-- Like/dislike overlay — appear on hover -->
@@ -146,6 +161,7 @@ export class DiscoverCardComponent {
   item = input.required<ScrapedItem>();
   cardClicked = output<ScrapedItem>();
   feedbackSent = output<{ itemId: string; signal: 'up' | 'down'; galleryImageIndex?: number }>();
+  wishlistRequested = output<ScrapedItem>();
 
   voted = signal<'up' | 'down' | null>(null);
   private readonly scoreDelta = signal(0);
@@ -178,5 +194,10 @@ export class DiscoverCardComponent {
   onImgError(event: Event) {
     (event.target as HTMLImageElement).src =
       'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><rect fill="%2318181b"/></svg>';
+  }
+
+  onWishlistClick(event: Event) {
+    event.stopPropagation();
+    this.wishlistRequested.emit(this.item());
   }
 }

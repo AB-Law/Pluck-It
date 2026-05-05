@@ -88,6 +88,19 @@ describe('DiscoverService', () => {
     indexReq.flush({ scoreSignal: -1 });
   });
 
+  it('saves a discover item to the wishlist', () => {
+    const result: Array<{ id: string }> = [];
+    service.saveToWishlist('item-1').subscribe((item) => result.push(item));
+
+    const req = http.expectOne((request) =>
+      request.method === 'POST' && request.url.includes('/api/scraper/items/item-1/wishlist'),
+    );
+    expect(req.request.body).toEqual({});
+    req.flush({ id: 'wishlist-scraped-item-1', title: 'Saved', sourceId: 'src', sourceType: 'brand' });
+
+    expect(result[0].id).toBe('wishlist-scraped-item-1');
+  });
+
   it('acquires lease and ingests Reddit posts', () => {
     service.acquireLease('src-1').subscribe();
     const leaseReq = http.expectOne((request) => request.method === 'POST' && request.url.includes('/api/scraper/lease/src-1'));

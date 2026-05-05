@@ -137,6 +137,19 @@ public sealed class WardrobeFunctionsTests
         return (env.Items, env.NextContinuationToken);
     }
 
+    private static void AssertWishlistProfile(
+        UserProfile profile,
+        string[] expectedStyles,
+        string[] expectedColours,
+        string[] expectedBrands,
+        string[] expectedGarments)
+    {
+        profile.WishlistStyleKeywords.ShouldBe(expectedStyles, ignoreOrder: true);
+        profile.WishlistPreferredColours.ShouldBe(expectedColours, ignoreOrder: true);
+        profile.WishlistFavoriteBrands.ShouldBe(expectedBrands, ignoreOrder: true);
+        profile.WishlistGarmentInterests.ShouldBe(expectedGarments, ignoreOrder: true);
+    }
+
     // ── UploadItem (multipart) ───────────────────────────────────────────────
 
     [Fact]
@@ -171,6 +184,84 @@ public sealed class WardrobeFunctionsTests
 
         queue.EnqueuedMessages.ShouldHaveSingleItem();
         queue.EnqueuedMessages[0].SkipSegmentation.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task SaveItem_RecomputesWishlistProfileFields()
+    {
+        var repo = new InMemoryWardrobeRepository();
+        var profiles = new InMemoryUserProfileRepository();
+        var sut = CreateSut(repo: repo, userProfileRepo: profiles);
+        var item = MakeItem("wish-save", category: "Outerwear", brand: "COS", tags: ["quiet luxury", "tailored"]);
+        item.IsWishlisted = true;
+        item.Notes = "Soft blazer for weekends";
+        item.Colours = [new ClothingColour("Camel", "#C19A6B")];
+
+        var response = await sut.SaveItem(
+            TestRequest.Post(
+                "http://localhost/api/wardrobe",
+                JsonSerializer.Serialize(item, PluckItJsonContext.Default.ClothingItem)),
+            CancellationToken.None);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Created);
+        var profile = profiles.All[UserId];
+        profile.WishlistProfileUpdatedAt.ShouldNotBeNull();
+        AssertWishlistProfile(profile, ["Quiet Luxury", "Tailored"], ["Camel"], ["COS"], ["Outerwear", "Blazer"]);
+    }
+
+    [Fact]
+    public async Task UpdateWardrobeItem_ClearsWishlistProfileWhenItemStopsBeingWishlisted()
+    {
+        var item = MakeItem("wish-update", category: "Outerwear", brand: "COS", tags: ["quiet luxury"]);
+        item.IsWishlisted = true;
+        item.Notes = "Travel blazer";
+        item.Colours = [new ClothingColour("Camel", "#C19A6B")];
+
+        var repo = new InMemoryWardrobeRepository().WithItems(item);
+        var profiles = new InMemoryUserProfileRepository().WithProfile(new UserProfile
+        {
+            Id = UserId,
+            WishlistStyleKeywords = ["Quiet Luxury"],
+            WishlistPreferredColours = ["Camel"],
+            WishlistFavoriteBrands = ["COS"],
+            WishlistGarmentInterests = ["Blazer"],
+            WishlistProfileUpdatedAt = DateTimeOffset.UtcNow.ToString("O"),
+        });
+        var sut = CreateSut(repo: repo, userProfileRepo: profiles);
+
+        item.IsWishlisted = false;
+        var response = await sut.UpdateWardrobeItem(
+            TestRequest.Put(
+                "http://localhost/api/wardrobe/wish-update",
+                JsonSerializer.Serialize(item, PluckItJsonContext.Default.ClothingItem)),
+            "wish-update",
+            CancellationToken.None);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        var profile = profiles.All[UserId];
+        AssertWishlistProfile(profile, [], [], [], []);
+        profile.WishlistProfileUpdatedAt.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task DeleteWardrobeItem_RecomputesWishlistProfileAfterRemoval()
+    {
+        var first = MakeItem("wish-1", category: "Outerwear", brand: "COS", tags: ["quiet luxury"]);
+        first.IsWishlisted = true;
+        first.Notes = "Blazer";
+        first.Colours = [new ClothingColour("Camel", "#C19A6B")];
+        var second = MakeItem("wish-2", category: "Tops", brand: "Arket", tags: ["minimalist"]);
+        second.IsWishlisted = true;
+        second.Colours = [new ClothingColour("White", "#FFFFFF")];
+
+        var repo = new InMemoryWardrobeRepository().WithItems(first, second);
+        var profiles = new InMemoryUserProfileRepository();
+        var sut = CreateSut(repo: repo, userProfileRepo: profiles);
+
+        await sut.DeleteWardrobeItem(TestRequest.Delete("http://localhost/api/wardrobe/wish-1"), "wish-1", CancellationToken.None);
+
+        var profile = profiles.All[UserId];
+        AssertWishlistProfile(profile, ["Minimalist"], ["White"], ["Arket"], ["Tops"]);
     }
 
     // ── GetWardrobe — basic ──────────────────────────────────────────────────

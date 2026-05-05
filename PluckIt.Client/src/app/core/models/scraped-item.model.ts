@@ -22,6 +22,7 @@ export interface ScrapedItem {
   price: string | null;
   scrapedAt: string;
   userId: string;
+  wishlisted?: boolean;
 }
 
 export interface ScraperSource {

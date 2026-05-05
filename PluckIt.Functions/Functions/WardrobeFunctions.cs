@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -63,6 +64,12 @@ public class WardrobeFunctions(
     private const string NoImageProvidedMessage = "No image provided.";
     private const string RetryDraftConflictMessage = "Only Failed drafts can be retried.";
     private const string ContentTypeErrorMessage = "Could not store image. Please try again.";
+    private static readonly string[] GarmentTerms =
+    [
+        "T-Shirt", "Tee", "Shirt", "Hoodie", "Sweater", "Knit", "Cardigan", "Blazer",
+        "Jacket", "Coat", "Trousers", "Pants", "Jeans", "Skirt", "Dress", "Shorts",
+        "Sneakers", "Boots", "Loafers", "Heels", "Bag",
+    ];
 
     // ── GET /api/wardrobe ───────────────────────────────────────────────────
 
@@ -184,6 +191,7 @@ public class WardrobeFunctions(
         updated.UserId = userId!;
         await repo.UpsertAsync(updated, cancellationToken);
         await RefreshWardrobeFingerprintAsync(userId!, cancellationToken);
+        await RecomputeWishlistProfileAsync(userId!, cancellationToken);
         return req.CreateResponse(HttpStatusCode.NoContent);
     }
 
@@ -206,6 +214,7 @@ public class WardrobeFunctions(
 
         await repo.DeleteAsync(id, userId!, cancellationToken);
         await RefreshWardrobeFingerprintAsync(userId!, cancellationToken);
+        await RecomputeWishlistProfileAsync(userId!, cancellationToken);
 
         // Best-effort blob delete — orphan cleanup Function will catch any misses
         if (!string.IsNullOrEmpty(existing.ImageUrl))
@@ -685,6 +694,7 @@ public class WardrobeFunctions(
             await sasService.DeleteBlobAsync(rawUrl, CancellationToken.None);
 
         await RefreshWardrobeFingerprintAsync(userId!, cancellationToken);
+        await RecomputeWishlistProfileAsync(userId!, cancellationToken);
 
         accepted.ImageUrl = sasService.GenerateSasUrl(accepted.ImageUrl);
         return await JsonOk(req, accepted, PluckItJsonContext.Default.ClothingItem);
@@ -814,6 +824,7 @@ public class WardrobeFunctions(
 
         await repo.UpsertAsync(item, cancellationToken);
         await RefreshWardrobeFingerprintAsync(userId!, cancellationToken);
+        await RecomputeWishlistProfileAsync(userId!, cancellationToken);
 
         var response = req.CreateResponse(HttpStatusCode.Created);
         response.Headers.Add("Location", $"/api/wardrobe/{item.Id}");
@@ -1112,6 +1123,151 @@ public class WardrobeFunctions(
             result.TryAdd(key, value);
         }
         return result;
+    }
+
+    private async Task RecomputeWishlistProfileAsync(string userId, CancellationToken cancellationToken)
+    {
+        var wishlistItems = await LoadWishlistItemsAsync(userId, cancellationToken);
+        var profile = await userProfileRepo.GetAsync(userId, cancellationToken) ?? new UserProfile { Id = userId };
+        var aggregated = AggregateWishlistProfile(wishlistItems);
+        profile.WishlistStyleKeywords = aggregated.StyleKeywords;
+        profile.WishlistPreferredColours = aggregated.Colours;
+        profile.WishlistFavoriteBrands = aggregated.Brands;
+        profile.WishlistGarmentInterests = aggregated.Garments;
+        profile.WishlistProfileUpdatedAt = aggregated.UpdatedAt;
+        await userProfileRepo.UpsertAsync(profile, cancellationToken);
+    }
+
+    private async Task<List<ClothingItem>> LoadWishlistItemsAsync(string userId, CancellationToken cancellationToken)
+    {
+        var results = new List<ClothingItem>();
+        string? continuationToken = null;
+        do
+        {
+            var page = await repo.GetAllAsync(
+                userId,
+                new WardrobeQuery
+                {
+                    IncludeWishlisted = true,
+                    PageSize = 100,
+                    ContinuationToken = continuationToken,
+                },
+                cancellationToken);
+            results.AddRange(page.Items.Where(item => item.IsWishlisted));
+            continuationToken = page.NextContinuationToken;
+        } while (!string.IsNullOrWhiteSpace(continuationToken));
+
+        return results;
+    }
+
+    private static (List<string> StyleKeywords, List<string> Colours, List<string> Brands, List<string> Garments, string? UpdatedAt)
+        AggregateWishlistProfile(IEnumerable<ClothingItem> items)
+    {
+        var wishlistItems = items.ToList();
+        if (wishlistItems.Count == 0)
+            return ([], [], [], [], null);
+
+        var styleValues = new List<string>();
+        var colourValues = new List<string>();
+        var brandValues = new List<string>();
+        var garmentValues = new List<string>();
+
+        foreach (var item in wishlistItems)
+        {
+            styleValues.AddRange(item.Tags.Select(NormalizeTerm).Where(value =>
+                !string.IsNullOrWhiteSpace(value)
+                && !GarmentTerms.Contains(value, StringComparer.OrdinalIgnoreCase)
+                && !IsColourTerm(value)));
+            if (item.AestheticTags is not null)
+            {
+                styleValues.AddRange(item.AestheticTags.Select(NormalizeTerm).Where(value => !string.IsNullOrWhiteSpace(value)));
+            }
+
+            colourValues.AddRange(item.Colours.Select(colour => NormalizeTerm(colour.Name)).Where(value => !string.IsNullOrWhiteSpace(value)));
+
+            var brand = NormalizeTerm(item.Brand);
+            if (!string.IsNullOrWhiteSpace(brand))
+                brandValues.Add(brand);
+
+            var category = NormalizeTerm(item.Category);
+            if (!string.IsNullOrWhiteSpace(category))
+                garmentValues.Add(category);
+
+            garmentValues.AddRange(ExtractGarmentsFromText(item.Notes));
+        }
+
+        return (
+            TopTerms(styleValues, 8),
+            TopTerms(colourValues, 6),
+            TopTerms(brandValues, 6),
+            TopTerms(garmentValues, 8),
+            DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+    }
+
+    private static IEnumerable<string> ExtractGarmentsFromText(string? text)
+    {
+        var normalized = NormalizeSlug(text);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return [];
+
+        return GarmentTerms
+            .Where(term => normalized.Contains(NormalizeSlug(term), StringComparison.Ordinal))
+            .Select(NormalizeTerm);
+    }
+
+    private static bool IsColourTerm(string value)
+    {
+        return value.Equals("Black", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("White", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("Grey", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("Gray", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("Navy", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("Blue", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("Brown", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("Beige", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("Cream", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("Green", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("Red", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("Pink", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("Camel", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("Tan", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeTerm(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+        var compact = Regex.Replace(value.Trim(), "\\s+", " ");
+        return string.Join(" ", compact.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => char.ToUpperInvariant(part[0]) + part[1..].ToLowerInvariant()));
+    }
+
+    private static string NormalizeSlug(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+        return Regex.Replace(value.ToLowerInvariant(), "[^a-z0-9]+", " ").Trim();
+    }
+
+    private static List<string> TopTerms(IEnumerable<string> values, int limit)
+    {
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var canonical = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var raw in values)
+        {
+            var value = NormalizeTerm(raw);
+            if (string.IsNullOrWhiteSpace(value))
+                continue;
+            canonical.TryAdd(value, value);
+            counts[value] = counts.TryGetValue(value, out var count) ? count + 1 : 1;
+        }
+
+        return counts
+            .OrderByDescending(pair => pair.Value)
+            .ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(limit)
+            .Select(pair => canonical[pair.Key])
+            .ToList();
     }
 }
 

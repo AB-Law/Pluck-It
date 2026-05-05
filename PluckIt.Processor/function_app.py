@@ -3289,6 +3289,102 @@ async def _query_scraped_items(
     return items
 
 
+def _to_text(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.strip()
+
+
+def _to_tag_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+
+
+def _dedupe_tags(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        key = value.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(value)
+    return result
+
+
+def _wishlist_clone_id(scraped_item_id: str) -> str:
+    return f"wishlist-scraped-{scraped_item_id}"
+
+
+def _build_wishlist_notes(scraped_item: dict[str, Any]) -> str:
+    parts = [f"Saved from Discover: {_to_text(scraped_item.get('title'))}"]
+    description = _to_text(scraped_item.get("description"))
+    if description:
+        parts.append(description)
+    product_url = _to_text(scraped_item.get("productUrl"))
+    if product_url:
+        parts.append(f"Original: {product_url}")
+    return " | ".join(part for part in parts if part)
+
+
+def _infer_wishlist_category(scraped_item: dict[str, Any]) -> str | None:
+    raw = " ".join(
+        [
+            _to_text(scraped_item.get("title")),
+            " ".join(_to_tag_list(scraped_item.get("tags"))),
+        ]
+    ).lower()
+    if not raw:
+        return None
+    category_aliases = {
+        "tops": ("shirt", "tee", "top", "hoodie", "sweater", "knit", "cardigan"),
+        "bottoms": ("trouser", "trousers", "pants", "jeans", "shorts", "skirt"),
+        "outerwear": ("blazer", "jacket", "coat"),
+        "shoes": ("sneaker", "sneakers", "boots", "loafers", "heels"),
+        "accessories": ("bag", "belt", "cap", "hat"),
+    }
+    for category, phrases in category_aliases.items():
+        if any(phrase in raw for phrase in phrases):
+            return category.title()
+    return None
+
+
+def _parse_wishlist_price(scraped_item: dict[str, Any]) -> dict[str, Any] | None:
+    raw = _to_text(scraped_item.get("price"))
+    if not raw:
+        return None
+    match = re.search(r"([0-9]+(?:\.[0-9]+)?)", raw.replace(",", ""))
+    if not match:
+        return None
+    amount = float(match.group(1))
+    currency = "USD"
+    if "₹" in raw or "inr" in raw.lower():
+        currency = "INR"
+    elif "£" in raw or "gbp" in raw.lower():
+        currency = "GBP"
+    elif "€" in raw or "eur" in raw.lower():
+        currency = "EUR"
+    return {"amount": amount, "originalCurrency": currency}
+
+
+async def _annotate_scraped_wishlist_state(user_id: str, items: list[dict[str, Any]]) -> None:
+    from agents.db import get_wardrobe_container
+
+    wardrobe_container = get_wardrobe_container()
+    for item in items:
+        wishlisted = False
+        try:
+            existing = await wardrobe_container.read_item(
+                item=_wishlist_clone_id(item.get("id", "")),
+                partition_key=user_id,
+            )
+            wishlisted = bool(existing.get("isWishlisted"))
+        except Exception:
+            wishlisted = False
+        item["wishlisted"] = wishlisted
+
+
 @fastapi_app.get(
     "/api/scraper/items",
     responses={
@@ -3335,6 +3431,7 @@ async def list_scraped_items(
 
         has_more = len(items) > effective_page_size
         page_items = items[:effective_page_size]
+        await _annotate_scraped_wishlist_state(user_id, page_items)
         next_token = None
         if has_more and page_items:
             last = page_items[-1]
@@ -3346,7 +3443,77 @@ async def list_scraped_items(
         logger.exception("list_scraped_items failed: %s", exc)
         raise HTTPException(status_code=500, detail="Could not load items.")
 
+@fastapi_app.post(
+    "/api/scraper/items/{item_id}/wishlist",
+    responses={
+        200: {"description": "Wishlist item returned."},
+        401: {"description": "Authentication failed."},
+        404: {"description": "Scraped item not found."},
+        500: {"description": "Could not save wishlist item."},
+    },
+)
+async def save_scraped_item_to_wishlist(
+    item_id: str,
+    user_id: Annotated[str, Depends(get_user_id)],
+):
+    from agents.db import get_scraped_items_container, get_wardrobe_container
+    from agents.wishlist_profile import recompute_wishlist_profile
 
+    scraped_container = get_scraped_items_container()
+    wardrobe_container = get_wardrobe_container()
+    clone_id = _wishlist_clone_id(item_id)
+
+    try:
+        existing = await wardrobe_container.read_item(item=clone_id, partition_key=user_id)
+        if existing.get("isWishlisted"):
+            existing["wishlisted"] = True
+            return existing
+    except Exception:
+        existing = None
+
+    try:
+        scraped_item = await scraped_container.read_item(item=item_id, partition_key="global")
+    except Exception as exc:
+        logger.exception("save_scraped_item_to_wishlist failed loading scraped item %s: %s", item_id, exc)
+        raise HTTPException(status_code=404, detail="Scraped item not found.") from exc
+
+    now = datetime.now(timezone.utc).isoformat()
+    clone = {
+        "id": clone_id,
+        "userId": user_id,
+        "imageUrl": _to_text(scraped_item.get("imageUrl")),
+        "tags": _dedupe_tags(_to_tag_list(scraped_item.get("tags"))),
+        "colours": [],
+        "brand": _to_text(scraped_item.get("brand")) or None,
+        "category": _infer_wishlist_category(scraped_item),
+        "price": _parse_wishlist_price(scraped_item),
+        "notes": _build_wishlist_notes(scraped_item),
+        "dateAdded": now,
+        "wearCount": 0,
+        "estimatedMarketValue": None,
+        "purchaseDate": None,
+        "condition": None,
+        "size": None,
+        "aestheticTags": _dedupe_tags(_to_tag_list(scraped_item.get("tags")))[:6],
+        "isWishlisted": True,
+        "wishlistSource": {
+            "type": "discover",
+            "scrapedItemId": item_id,
+            "sourceId": _to_text(scraped_item.get("sourceId")),
+            "sourceType": _to_text(scraped_item.get("sourceType")),
+            "productUrl": _to_text(scraped_item.get("productUrl")),
+            "title": _to_text(scraped_item.get("title")),
+        },
+    }
+
+    try:
+        await wardrobe_container.upsert_item(clone)
+        await recompute_wishlist_profile(user_id, wardrobe_container=wardrobe_container)
+        clone["wishlisted"] = True
+        return clone
+    except Exception as exc:
+        logger.exception("save_scraped_item_to_wishlist failed persisting clone %s: %s", clone_id, exc)
+        raise HTTPException(status_code=500, detail="Could not save wishlist item.") from exc
 
 
 @fastapi_app.post(
