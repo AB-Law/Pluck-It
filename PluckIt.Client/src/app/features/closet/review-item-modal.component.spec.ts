@@ -183,7 +183,7 @@ describe('ReviewItemModalComponent', () => {
   it('returns CSS variants for card components', () => {
     setInputItem({ ...BASE_ITEM, condition: 'Excellent' });
     component.setCondition('Excellent');
-    expect(component.condBtnClass('Excellent', false)).toContain('bg-white');
+    expect(component.condBtnClass('Excellent', false)).toContain('bg-chrome');
     expect(component.condBtnClass('Good', true)).not.toContain('border-r');
     expect(component.letterSizeBtnClass('M', true)).toContain('text-[10px]');
   });
