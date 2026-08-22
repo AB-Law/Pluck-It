@@ -1,7 +1,8 @@
 import { CommonModule } from '@angular/common';
-import { Component, EventEmitter, Input, Output, signal } from '@angular/core';
+import { Component, EventEmitter, Input, Output, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
+import { ThemeService } from './theme.service';
 
 /**
  * Shared authenticated-app header used across main application routes.
@@ -16,30 +17,29 @@ import { RouterLink } from '@angular/router';
   imports: [CommonModule, FormsModule, RouterLink],
   template: `
     <header
-      class="flex flex-wrap items-center justify-between gap-2 border-b border-border-subtle bg-black px-4 py-3 md:px-6 md:py-4 shrink-0 z-50"
+      class="flex flex-wrap items-center justify-between gap-2 border-b border-app-soft bg-background-dark/90 backdrop-blur-sm px-4 py-3 md:px-6 md:py-4 shrink-0 z-50"
     >
       <div class="flex items-center gap-3 min-w-0">
         <a
           routerLink="/"
-          class="flex items-center gap-3 text-white"
+          class="flex items-center gap-3 text-chrome"
           title="Open your dashboard"
           aria-label="Open your dashboard"
         >
-          <span class="material-symbols-outlined text-primary" style="font-size:30px">
-            checkroom
-          </span>
-          <h2 class="text-white text-base md:text-xl font-bold tracking-tight">Pluck-It</h2>
+          <span class="inline-flex h-2 w-2 rounded-full bg-primary"></span>
+          <h2 class="text-chrome text-base md:text-xl font-medium tracking-tight">Pluck It</h2>
+          <span class="hidden lg:inline text-xs text-app-soft italic">- a wardrobe journal</span>
         </a>
 
         <label class="hidden md:flex flex-col min-w-[260px] lg:min-w-[320px]">
           <div
-            class="flex w-full items-center rounded-lg bg-card-dark border border-[#333] focus-within:border-primary/60 transition-colors"
+            class="flex w-full items-center rounded-lg bg-card-dark border border-border-chrome focus-within:border-primary/60 transition-colors"
           >
             <div class="flex items-center justify-center pl-3 text-slate-text">
               <span class="material-symbols-outlined" style="font-size:20px">search</span>
             </div>
             <input
-              class="w-full bg-transparent border-none text-sm text-white placeholder-slate-text outline-none py-2.5 px-3 font-mono"
+              class="w-full bg-transparent border-none text-sm text-chrome placeholder-slate-text outline-none py-2.5 px-3"
               [ngModel]="searchValue"
               (ngModelChange)="searchValueChange.emit($event)"
               [placeholder]="searchPlaceholder"
@@ -54,7 +54,7 @@ import { RouterLink } from '@angular/router';
         @if (showSearch) {
           <button
             type="button"
-            class="md:hidden h-10 w-10 flex items-center justify-center rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] touch-target"
+            class="md:hidden h-10 w-10 flex items-center justify-center rounded-lg bg-card-dark text-slate-text hover:text-chrome hover:bg-bg-soft touch-target"
             title="Search"
             aria-label="Open search"
             (click)="toggleSearch()"
@@ -64,21 +64,29 @@ import { RouterLink } from '@angular/router';
         }
 
         @if (showUpload) {
-          <button
-            type="button"
-            class="h-10 w-10 rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] flex items-center justify-center touch-target"
-            title="Upload item"
-            aria-label="Upload item"
-            (click)="uploadRequested.emit()"
-          >
-            <span class="material-symbols-outlined" style="font-size:18px">upload_file</span>
-          </button>
+          <div class="relative group">
+            <button
+              type="button"
+              class="h-10 w-10 rounded-lg bg-card-dark text-slate-text hover:text-chrome hover:bg-bg-soft flex items-center justify-center touch-target"
+              title="Upload item"
+              aria-label="Upload item"
+              (click)="uploadRequested.emit()"
+            >
+              <span class="material-symbols-outlined" style="font-size:18px">upload_file</span>
+            </button>
+            <span
+              data-nav-tooltip
+              class="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-card-dark px-2 py-1 text-xs text-chrome opacity-0 shadow-soft transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+            >
+              Upload
+            </span>
+          </div>
         }
 
         @if (showFilterShortcut) {
           <button
             type="button"
-            class="lg:hidden h-10 w-10 rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] flex items-center justify-center touch-target"
+            class="lg:hidden h-10 w-10 rounded-lg bg-card-dark text-slate-text hover:text-chrome hover:bg-bg-soft flex items-center justify-center touch-target"
             title="Open filters"
             aria-label="Open filters"
             (click)="filtersRequested.emit()"
@@ -88,21 +96,29 @@ import { RouterLink } from '@angular/router';
         }
 
         @if (showStylistShortcut) {
-          <button
-            type="button"
-            class="h-10 w-10 rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] flex items-center justify-center touch-target"
-            title="Open stylist chat"
-            aria-label="Open stylist chat"
-            (click)="stylistRequested.emit()"
-          >
-            <span class="material-symbols-outlined" style="font-size:20px">smart_toy</span>
-          </button>
+          <div class="relative group">
+            <button
+              type="button"
+              class="h-10 w-10 rounded-lg bg-card-dark text-slate-text hover:text-chrome hover:bg-bg-soft flex items-center justify-center touch-target"
+              title="Open stylist chat"
+              aria-label="Open stylist chat"
+              (click)="stylistRequested.emit()"
+            >
+              <span class="material-symbols-outlined" style="font-size:20px">smart_toy</span>
+            </button>
+            <span
+              data-nav-tooltip
+              class="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-card-dark px-2 py-1 text-xs text-chrome opacity-0 shadow-soft transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+            >
+              Stylist
+            </span>
+          </div>
         }
 
         @if (showBackShortcut) {
           <a
             routerLink="/"
-            class="hidden md:flex h-10 w-10 items-center justify-center rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] transition-colors touch-target"
+            class="hidden md:flex h-10 w-10 items-center justify-center rounded-lg bg-card-dark text-slate-text hover:text-chrome hover:bg-bg-soft transition-colors touch-target"
             title="{{ backShortcutLabel }}"
             aria-label="{{ backShortcutLabel }}"
           >
@@ -110,78 +126,138 @@ import { RouterLink } from '@angular/router';
           </a>
         }
 
-        <a
-          routerLink="/vault"
-          class="hidden md:flex h-10 w-10 items-center justify-center rounded-lg text-sm border transition-colors touch-target"
-          [ngClass]="navButtonClass('vault')"
-          title="Digital Vault"
-          aria-label="Go to your digital vault"
-        >
-          <span class="material-symbols-outlined" style="font-size:20px">inventory_2</span>
-        </a>
+        <div class="relative group hidden md:block">
+          <a
+            routerLink="/vault"
+            class="flex h-10 w-10 items-center justify-center rounded-lg text-sm border transition-colors touch-target"
+            [ngClass]="navButtonClass('vault')"
+            title="Digital Vault"
+            aria-label="Go to your digital vault"
+          >
+            <span class="material-symbols-outlined" style="font-size:20px">inventory_2</span>
+          </a>
+          <span
+            data-nav-tooltip
+            class="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-card-dark px-2 py-1 text-xs text-chrome opacity-0 shadow-soft transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+          >
+            Vault
+          </span>
+        </div>
 
-        <a
-          routerLink="/collections"
-          class="hidden md:flex h-10 w-10 items-center justify-center rounded-lg text-sm border transition-colors touch-target"
-          [ngClass]="navButtonClass('collections')"
-          title="My Collections"
-          aria-label="Go to your collections"
-        >
-          <span class="material-symbols-outlined" style="font-size:20px">folder_special</span>
-        </a>
+        <div class="relative group hidden md:block">
+          <a
+            routerLink="/collections"
+            class="flex h-10 w-10 items-center justify-center rounded-lg text-sm border transition-colors touch-target"
+            [ngClass]="navButtonClass('collections')"
+            title="My Collections"
+            aria-label="Go to your collections"
+          >
+            <span class="material-symbols-outlined" style="font-size:20px">folder_special</span>
+          </a>
+          <span
+            data-nav-tooltip
+            class="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-card-dark px-2 py-1 text-xs text-chrome opacity-0 shadow-soft transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+          >
+            Collections
+          </span>
+        </div>
 
-        <a
-          routerLink="/discover"
-          class="hidden md:flex h-10 w-10 items-center justify-center rounded-lg text-sm border transition-colors touch-target"
-          [ngClass]="navButtonClass('discover')"
-          title="Discover"
-          aria-label="Open discover feed"
-        >
-          <span class="material-symbols-outlined" style="font-size:20px">explore</span>
-        </a>
+        <div class="relative group hidden md:block">
+          <a
+            routerLink="/discover"
+            class="flex h-10 w-10 items-center justify-center rounded-lg text-sm border transition-colors touch-target"
+            [ngClass]="navButtonClass('discover')"
+            title="Discover"
+            aria-label="Open discover feed"
+          >
+            <span class="material-symbols-outlined" style="font-size:20px">explore</span>
+          </a>
+          <span
+            data-nav-tooltip
+            class="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-card-dark px-2 py-1 text-xs text-chrome opacity-0 shadow-soft transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+          >
+            Discover
+          </span>
+        </div>
 
         @if (showDigest) {
-          <button
-            class="h-10 w-10 rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] flex items-center justify-center touch-target"
-            title="Open weekly digest"
-            aria-label="Open weekly digest"
-            (click)="digestRequested.emit()"
-          >
-            <span class="material-symbols-outlined" style="font-size:20px">tips_and_updates</span>
-          </button>
+          <div class="relative group">
+            <button
+              class="h-10 w-10 rounded-lg bg-card-dark text-slate-text hover:text-chrome hover:bg-bg-soft flex items-center justify-center touch-target"
+              title="Open weekly digest"
+              aria-label="Open weekly digest"
+              (click)="digestRequested.emit()"
+            >
+              <span class="material-symbols-outlined" style="font-size:20px">tips_and_updates</span>
+            </button>
+            <span
+              data-nav-tooltip
+              class="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-card-dark px-2 py-1 text-xs text-chrome opacity-0 shadow-soft transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+            >
+              Weekly digest
+            </span>
+          </div>
         }
 
-        <button
-          class="h-10 w-10 rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] hidden md:flex items-center justify-center touch-target"
-          title="Open notifications"
-          aria-label="Open notifications"
-          (click)="notificationsRequested.emit()"
-          type="button"
-        >
-          <span class="material-symbols-outlined" style="font-size:20px">notifications</span>
-        </button>
+        <div class="relative group hidden md:block">
+          <button
+              class="h-10 w-10 rounded-lg bg-card-dark text-slate-text hover:text-chrome hover:bg-bg-soft flex items-center justify-center touch-target"
+            title="Open notifications"
+            aria-label="Open notifications"
+            (click)="notificationsRequested.emit()"
+            type="button"
+          >
+            <span class="material-symbols-outlined" style="font-size:20px">notifications</span>
+          </button>
+          <span
+            data-nav-tooltip
+            class="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-card-dark px-2 py-1 text-xs text-chrome opacity-0 shadow-soft transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+          >
+            Notifications
+          </span>
+        </div>
+
+        <div class="relative group">
+          <button
+              class="h-10 w-10 rounded-lg bg-card-dark text-slate-text hover:text-chrome hover:bg-bg-soft flex items-center justify-center touch-target"
+            title="Open settings"
+            aria-label="Open settings"
+            (click)="settingsRequested.emit()"
+            type="button"
+          >
+            <span class="material-symbols-outlined" style="font-size:20px">settings</span>
+          </button>
+          <span
+            data-nav-tooltip
+            class="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 whitespace-nowrap rounded-md bg-card-dark px-2 py-1 text-xs text-chrome opacity-0 shadow-soft transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+          >
+            Settings
+          </span>
+        </div>
 
         <button
-          class="h-10 w-10 rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] flex items-center justify-center touch-target"
-          title="Open settings"
-          aria-label="Open settings"
-          (click)="settingsRequested.emit()"
+          class="h-10 w-10 rounded-lg bg-card-dark text-slate-text hover:text-chrome hover:bg-bg-soft flex items-center justify-center touch-target"
+          [title]="themeToggleLabel()"
+          [attr.aria-label]="themeToggleLabel()"
+          (click)="toggleTheme()"
           type="button"
         >
-          <span class="material-symbols-outlined" style="font-size:20px">settings</span>
+          <span class="material-symbols-outlined" style="font-size:20px">{{
+            themeService.theme() === 'dark' ? 'light_mode' : 'dark_mode'
+          }}</span>
         </button>
       </div>
 
       @if (searchOpen()) {
         <label class="w-full md:hidden">
           <div
-            class="mt-2 flex w-full items-center rounded-lg bg-card-dark border border-[#333] focus-within:border-primary/60 transition-colors"
+            class="mt-2 flex w-full items-center rounded-lg bg-card-dark border border-border-chrome focus-within:border-primary/60 transition-colors"
           >
             <div class="flex items-center justify-center pl-3 text-slate-text">
               <span class="material-symbols-outlined" style="font-size:20px">search</span>
             </div>
             <input
-              class="w-full bg-transparent border-none text-sm text-white placeholder-slate-text outline-none py-2.5 px-3 font-mono"
+              class="w-full bg-transparent border-none text-sm text-chrome placeholder-slate-text outline-none py-2.5 px-3"
               [ngModel]="searchValue"
               (ngModelChange)="searchValueChange.emit($event)"
               [placeholder]="searchPlaceholder"
@@ -191,7 +267,7 @@ import { RouterLink } from '@angular/router';
             />
             <button
               type="button"
-              class="pr-3 h-10 w-10 text-slate-400 hover:text-white touch-target flex items-center justify-center"
+              class="pr-3 h-10 w-10 text-slate-400 hover:text-chrome touch-target flex items-center justify-center"
               (click)="toggleSearch()"
               aria-label="Close search"
             >
@@ -204,6 +280,7 @@ import { RouterLink } from '@angular/router';
   `,
 })
 export class AppHeaderComponent {
+  protected readonly themeService = inject(ThemeService);
   @Input() section: 'dashboard' | 'vault' | 'collections' | 'discover' = 'dashboard';
   @Input() showSearch = false;
   @Input() searchValue = '';
@@ -235,11 +312,19 @@ export class AppHeaderComponent {
   protected navButtonClass(section: 'vault' | 'collections' | 'discover'): string {
     const isActive = this.section === section;
     return isActive
-      ? 'bg-primary/10 text-primary border-primary/30'
-      : 'border-[#333] bg-card-dark text-slate-text hover:text-white hover:bg-[#333] border';
+      ? 'bg-primary/10 text-primary border-primary/40'
+      : 'border-border-chrome bg-card-dark text-slate-text hover:text-chrome hover:bg-bg-soft border';
   }
 
   protected toggleSearch(): void {
     this.searchOpen.update((open) => !open);
+  }
+
+  protected toggleTheme(): void {
+    this.themeService.toggleTheme();
+  }
+
+  protected themeToggleLabel(): string {
+    return this.themeService.theme() === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
   }
 }

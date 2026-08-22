@@ -29,7 +29,7 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
   imports: [RouterLink, AppHeaderComponent, ProfilePanelComponent, CreateCollectionModalComponent],
   template: `
     <div
-      class="flex h-[100dvh] flex-col bg-black text-slate-100 font-display overflow-hidden pb-16 md:pb-0"
+      class="flex h-[100dvh] flex-col bg-background-dark text-chrome font-display overflow-hidden pb-16 md:pb-0"
     >
       <!-- Header -->
       <div class="sticky top-0 z-50">
@@ -40,13 +40,13 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
           (settingsRequested)="openSettings()"
         />
         <div
-          class="px-4 sm:px-6 h-14 border-b border-border-chrome flex items-center justify-between bg-black gap-2"
+          class="px-4 sm:px-6 h-14 border-b border-border-chrome flex items-center justify-between bg-card-dark gap-2"
         >
           <h2 class="text-lg md:text-xl font-bold tracking-tighter text-slate-100">Collections</h2>
           <div class="flex items-center gap-2">
             @if (!isDesktopLayout()) {
               <button
-                class="touch-target h-10 w-10 rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] flex items-center justify-center"
+                class="touch-target h-10 w-10 rounded-lg bg-card-dark text-slate-text hover:text-chrome hover:bg-bg-soft flex items-center justify-center"
                 type="button"
                 (click)="openCollectionsList()"
                 title="Show collection list"
@@ -55,7 +55,7 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
               </button>
             }
             <button
-              class="flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-500 transition-colors touch-target"
+              class="flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-bold text-chrome hover:bg-primary/80 transition-colors touch-target"
               (click)="showCreateModal.set(true)"
             >
               <span class="material-symbols-outlined text-sm">add</span>
@@ -96,7 +96,7 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
                 [class]="
                   activeCollection()?.id === col.id
                     ? 'border-primary bg-primary/10'
-                    : 'border-border-chrome bg-card-dark hover:border-slate-600'
+                : 'border-border-chrome bg-card-dark hover:border-primary/30'
                 "
                 (click)="selectCollection(col)"
               >
@@ -104,7 +104,7 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
                   <h4 class="text-sm font-bold text-slate-100 truncate">{{ col.name }}</h4>
                   <span
                     class="text-[10px] font-mono shrink-0"
-                    [class]="col.isPublic ? 'text-green-500' : 'text-slate-500'"
+                    [class]="col.isPublic ? 'text-success' : 'text-slate-500'"
                   >
                     {{ col.isPublic ? 'PUBLIC' : 'PRIVATE' }}
                   </span>
@@ -124,13 +124,13 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
         @if (showCollectionsList()) {
           <div class="mobile-overlay-shell md:hidden" (click)="closeCollectionsList()"></div>
           <aside
-            class="fixed inset-0 z-50 w-full border-r border-border-chrome overflow-y-auto bg-black p-4 space-y-2"
+          class="fixed inset-0 z-50 w-full border-r border-border-chrome overflow-y-auto bg-background-dark p-4 space-y-2"
           >
             <div class="mb-4 flex items-center justify-between">
               <h3 class="text-sm font-bold uppercase tracking-wider text-slate-500">Collections</h3>
               <button
                 type="button"
-                class="touch-target h-10 w-10 flex items-center justify-center rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333]"
+                class="touch-target h-10 w-10 flex items-center justify-center rounded-lg bg-card-dark text-slate-text hover:text-chrome hover:bg-bg-soft"
                 (click)="closeCollectionsList()"
                 title="Close collections list"
               >
@@ -164,7 +164,7 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
                   [class]="
                     activeCollection()?.id === col.id
                       ? 'border-primary bg-primary/10'
-                      : 'border-border-chrome bg-card-dark hover:border-slate-600'
+                      : 'border-border-chrome bg-card-dark hover:border-primary/30'
                   "
                   (click)="selectCollectionFromMobile(col)"
                 >
@@ -172,7 +172,7 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
                     <h4 class="text-sm font-bold text-slate-100 truncate">{{ col.name }}</h4>
                     <span
                       class="text-[10px] font-mono shrink-0"
-                      [class]="col.isPublic ? 'text-green-500' : 'text-slate-500'"
+                      [class]="col.isPublic ? 'text-success' : 'text-slate-500'"
                     >
                       {{ col.isPublic ? 'PUBLIC' : 'PRIVATE' }}
                     </span>
@@ -218,7 +218,7 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
                     {{ shareLabel() }}
                   </button>
                   <button
-                    class="flex items-center gap-1 rounded-lg border border-red-900/60 px-3 py-2 text-xs font-bold text-red-400 hover:bg-red-950/30 transition-colors"
+                    class="flex items-center gap-1 rounded-lg border border-primary/40 px-3 py-2 text-xs font-bold text-danger hover:bg-danger-soft transition-colors"
                     (click)="deleteCollection(col)"
                   >
                     <span class="material-symbols-outlined text-sm">delete</span>
@@ -244,14 +244,14 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
                 <div class="flex -space-x-2">
                   <!-- Owner avatar -->
                   <div
-                    class="h-8 w-8 rounded-full bg-primary/30 border-2 border-black flex items-center justify-center text-xs font-bold text-primary z-10"
+                    class="h-8 w-8 rounded-full bg-primary-soft border-2 border-background-dark flex items-center justify-center text-xs font-bold text-primary z-10"
                     [title]="'Owner'"
                   >
                     O
                   </div>
                   @for (uid of col.memberUserIds.slice(0, 7); track uid) {
                     <div
-                      class="h-8 w-8 rounded-full bg-card-dark border-2 border-black flex items-center justify-center text-xs font-bold text-slate-300"
+                      class="h-8 w-8 rounded-full bg-card-dark border-2 border-background-dark flex items-center justify-center text-xs font-bold text-slate-300"
                       [title]="uid"
                     >
                       {{ uid.charAt(0).toUpperCase() }}
@@ -259,7 +259,7 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
                   }
                   @if (col.memberUserIds.length > 7) {
                     <div
-                      class="h-8 w-8 rounded-full bg-border-chrome border-2 border-black flex items-center justify-center text-[10px] font-bold text-slate-400"
+                      class="h-8 w-8 rounded-full bg-border-chrome border-2 border-background-dark flex items-center justify-center text-[10px] font-bold text-slate-400"
                     >
                       +{{ col.memberUserIds.length - 7 }}
                     </div>
@@ -286,18 +286,17 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
                     class="group relative flex flex-col rounded-xl border border-border-chrome bg-card-dark p-3 hover:border-primary/50 transition-all"
                   >
                     <div
-                      class="relative mb-3 flex aspect-[4/5] items-center justify-center overflow-hidden rounded-lg bg-black"
+                      class="relative mb-3 flex aspect-[4/5] items-center justify-center overflow-hidden rounded-lg bg-app-elevated"
                     >
                       <img
                         [src]="item.imageUrl"
                         [alt]="item.brand || 'Item'"
-                        class="h-full w-full object-contain p-3"
-                        style="mix-blend-mode: lighten"
+                        class="item-image-blend h-full w-full object-contain p-3"
                         loading="lazy"
                       />
                       @if (isOwner(col)) {
                         <button
-                          class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 rounded bg-black/70 p-1 text-slate-400 hover:text-red-400 transition-all"
+                          class="absolute top-1 right-1 opacity-0 group-hover:opacity-100 rounded bg-background-dark/70 p-1 text-slate-400 hover:text-danger transition-all"
                           (click)="removeItemFromCollection(col, item.id)"
                           title="Remove from collection"
                         >

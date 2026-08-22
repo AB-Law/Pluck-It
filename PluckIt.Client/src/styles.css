@@ -5,19 +5,60 @@
 /* @source paths are relative to THIS file (src/styles.css), so ./app/ → src/app/ */
 
 :root {
-  --color-primary: #258df4;
-  --color-background-dark: #000000;
-  --color-card-dark: #1A1A1A;
-  --color-chrome: #E0E0E0;
-  --color-slate-text: #94a3b8;
-  --color-border-subtle: #223649;
+  --color-primary: #c4836a;
+  --color-primary-muted: rgba(196, 131, 106, 0.12);
+  --color-primary-strong: #b87b68;
+  --color-primary-hover: #d9a08a;
 
-  --font-display: Inter, sans-serif;
+  --color-background-dark: #f5eee6;
+  --color-card-dark: #faf6ef;
+  --color-chrome: #2b2218;
+  --color-slate-text: #5c4a3a;
+  --color-border-subtle: rgba(43, 34, 24, 0.11);
+  --color-border-chrome: rgba(43, 34, 24, 0.18);
+  --color-bg-deep: #ede3d4;
+  --color-bg-soft: #efe7d8;
+  --color-ink-soft: #9a8472;
+  --color-overlay: rgba(24, 18, 12, 0.45);
+  --color-elevated: #f1e9dd;
+  --color-danger: #a54f45;
+  --color-danger-muted: rgba(165, 79, 69, 0.12);
+  --color-success: #6b8b62;
+  --color-success-muted: rgba(107, 139, 98, 0.16);
+  --color-info: #6e7f99;
+  --color-info-muted: rgba(110, 127, 153, 0.16);
+
+  --font-display: "Inter Tight", Inter, sans-serif;
   --font-mono: "JetBrains Mono", monospace;
 
   --animate-scan: scan 2s linear infinite;
   --animate-blink: blink 1.5s step-start infinite;
   --animate-spin: spin 0.7s linear infinite;
+}
+
+:root[data-theme='dark'] {
+  --color-primary: #b87b68;
+  --color-primary-muted: rgba(184, 123, 104, 0.12);
+  --color-primary-strong: #c99080;
+  --color-primary-hover: #cf9b8e;
+
+  --color-background-dark: #1e1710;
+  --color-card-dark: #231b11;
+  --color-chrome: #ede5da;
+  --color-slate-text: #bfb09c;
+  --color-border-subtle: rgba(237, 229, 218, 0.1);
+  --color-border-chrome: rgba(237, 229, 218, 0.18);
+  --color-bg-deep: #261e14;
+  --color-bg-soft: #2a2118;
+  --color-ink-soft: #7a6c5c;
+  --color-overlay: rgba(0, 0, 0, 0.62);
+  --color-elevated: #1a140c;
+  --color-danger: #df8d85;
+  --color-danger-muted: rgba(223, 141, 133, 0.18);
+  --color-success: #a3c28c;
+  --color-success-muted: rgba(163, 194, 140, 0.18);
+  --color-info: #90a7c8;
+  --color-info-muted: rgba(144, 167, 200, 0.2);
 }
 
 @keyframes scan {
@@ -38,17 +79,19 @@
 /* Thin dark scrollbar */
 .custom-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: #333 transparent;
+  scrollbar-color: var(--color-border-chrome) transparent;
 }
 .custom-scrollbar::-webkit-scrollbar { width: 5px; }
 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-.custom-scrollbar::-webkit-scrollbar-thumb { background: #333; border-radius: 9999px; }
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--color-border-chrome);
+  border-radius: 9999px;
+}
 
-/* Force dark root */
 html, body {
-  background-color: #000;
-  color: #E0E0E0;
-  font-family: Inter, sans-serif;
+  background-color: var(--color-background-dark);
+  color: var(--color-chrome);
+  font-family: var(--font-display);
   overscroll-behavior: none;
   overflow-x: hidden;
 }
@@ -78,6 +121,70 @@ body {
   position: fixed;
   inset: 0;
   z-index: 45;
-  background: rgba(0, 0, 0, 0.7);
+  background: var(--color-overlay);
   backdrop-filter: blur(2px);
+}
+
+.text-app-muted { color: var(--color-slate-text); }
+.text-app-soft { color: var(--color-ink-soft); }
+.bg-app-surface { background-color: var(--color-card-dark); }
+.bg-app-elevated { background-color: var(--color-elevated); }
+.border-app { border-color: var(--color-border-chrome); }
+.border-app-soft { border-color: var(--color-border-subtle); }
+.bg-primary-soft { background-color: var(--color-primary-muted); }
+.bg-success-soft { background-color: var(--color-success-muted); }
+.text-success { color: var(--color-success); }
+.bg-info-soft { background-color: var(--color-info-muted); }
+.text-info { color: var(--color-info); }
+.bg-danger-soft { background-color: var(--color-danger-muted); }
+.text-danger { color: var(--color-danger); }
+
+.text-slate-100,
+.text-slate-200,
+.text-slate-300,
+.text-slate-400,
+.text-slate-500,
+.text-slate-600,
+.text-slate-700 {
+  color: var(--color-slate-text) !important;
+}
+.text-white { color: var(--color-chrome) !important; }
+.bg-black,
+.bg-zinc-900,
+.bg-zinc-950 {
+  background-color: var(--color-elevated) !important;
+}
+.hover\:bg-\[\#333\]:hover,
+.hover\:bg-blue-500:hover {
+  background-color: var(--color-primary-hover) !important;
+}
+.text-green-500,
+.text-emerald-300,
+.text-emerald-600 {
+  color: var(--color-success) !important;
+}
+.bg-emerald-600,
+.hover\:bg-emerald-900\/70:hover {
+  background-color: var(--color-success-muted) !important;
+}
+.text-red-400,
+.text-rose-300,
+.text-rose-600 {
+  color: var(--color-danger) !important;
+}
+.bg-rose-600,
+.hover\:bg-rose-900\/70:hover {
+  background-color: var(--color-danger-muted) !important;
+}
+
+/*
+ * Product images should not use lighten blending in light mode,
+ * otherwise cream surfaces wash garments out.
+ */
+.item-image-blend {
+  mix-blend-mode: normal;
+}
+
+:root[data-theme='dark'] .item-image-blend {
+  mix-blend-mode: lighten;
 }

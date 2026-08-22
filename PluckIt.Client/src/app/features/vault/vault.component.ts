@@ -56,7 +56,7 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
   ],
   template: `
     <div
-      class="relative flex h-[100dvh] flex-col overflow-hidden bg-black text-slate-100 pb-16 md:pb-0 font-display"
+      class="relative flex h-[100dvh] flex-col overflow-hidden bg-background-dark text-chrome pb-16 md:pb-0 font-display"
     >
       <app-shared-header
         section="vault"
@@ -99,12 +99,12 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
         <!-- Main content -->
         <main
           #mainScrollArea
-          class="min-h-0 flex-1 overflow-y-auto touch-pan-y bg-black p-4 md:p-6 outline-none"
+          class="min-h-0 flex-1 overflow-y-auto touch-pan-y bg-background-dark p-4 md:p-6 outline-none"
           tabindex="-1"
           aria-label="Vault content"
         >
           <!-- Stats row -->
-          <div class="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <div class="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <app-stat-card
               label="Total Archive Items"
               [value]="totalItems().toLocaleString()"
@@ -132,11 +132,11 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
                       <img
                         [src]="itemImage"
                         alt="Suggested item"
-                        class="mt-0.5 h-28 w-24 rounded bg-black/30 object-contain border border-primary/25 shrink-0"
+                        class="mt-0.5 h-28 w-24 rounded bg-app-elevated object-contain border border-primary/25 shrink-0"
                       />
                     } @else {
                       <div
-                        class="mt-0.5 h-28 w-24 rounded bg-black/40 border border-primary/25 flex items-center justify-center text-sm text-slate-500 shrink-0"
+                        class="mt-0.5 h-28 w-24 rounded bg-app-elevated border border-primary/25 flex items-center justify-center text-sm text-slate-500 shrink-0"
                       >
                         <span class="material-symbols-outlined text-2xl">image</span>
                       </div>
@@ -153,7 +153,7 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
                           Mark Worn
                         </button>
                         <button
-                          class="rounded border border-border-chrome px-3 py-1.5 text-sm font-bold text-slate-300 hover:text-white"
+                          class="rounded border border-border-chrome px-3 py-1.5 text-sm font-bold text-slate-300 hover:text-chrome"
                           (click)="dismissSuggestion(s)"
                         >
                           Dismiss
@@ -206,7 +206,7 @@ import { MobileNavState } from '../../shared/layout/mobile-nav.state';
           @if (hasMore()) {
             <div class="mt-8 flex justify-center">
               <button
-                class="touch-target px-6 py-2.5 rounded-lg border border-[#333] text-sm font-medium text-slate-300 hover:text-white hover:border-slate-500 transition-colors font-mono disabled:opacity-50"
+                class="touch-target px-6 py-2.5 rounded-lg border border-border-chrome text-sm font-medium text-slate-300 hover:text-chrome hover:border-primary/30 transition-colors font-mono disabled:opacity-50 bg-card-dark/60"
                 [disabled]="loadingMore()"
                 (click)="loadMore()"
               >
@@ -290,8 +290,8 @@ export class VaultComponent implements OnInit, OnDestroy {
 
   protected readonly activeFilters = signal<VaultFilters>({
     group: 'all',
-    priceRange: [0, 999_999],
-    minWears: 0,
+    priceRange: [0, 5000],
+    wearRange: [0, 200],
     brand: '',
     condition: '',
     sortField: 'dateAdded',
@@ -317,17 +317,20 @@ export class VaultComponent implements OnInit, OnDestroy {
     const params = this.route.snapshot.queryParamMap;
     const priceMin = Number(params.get('priceMin') ?? 0);
     const priceMax = Number(params.get('priceMax') ?? 999_999);
+    const minWears = Number(params.get('minWears') ?? 0);
+    const maxWears = Number(params.get('maxWears') ?? 200);
     const restored: VaultFilters = {
       group: (params.get('group') as SmartGroup) ?? 'all',
       priceRange: [priceMin, priceMax],
-      minWears: Number(params.get('minWears') ?? 0),
+      wearRange: [minWears, maxWears],
       brand: params.get('brand') ?? '',
       condition: (params.get('condition') as ItemCondition | '') ?? '',
       sortField: (params.get('sortField') as WardrobeSortField) ?? 'dateAdded',
       sortDir: (params.get('sortDir') as 'asc' | 'desc') ?? 'desc',
     };
-    this.activeFilters.set(restored);
-    this.loadItems(restored);
+    const normalized = this.normalizeFilters(restored);
+    this.activeFilters.set(normalized);
+    this.loadItems(normalized);
     this.loadWearSuggestions();
     this.loadInsights();
     this.updateViewportMode();
@@ -454,9 +457,10 @@ export class VaultComponent implements OnInit, OnDestroy {
   // ── Actions ───────────────────────────────────────────────────────────────
 
   onFiltersChange(f: VaultFilters): void {
-    this.activeFilters.set(f);
-    this.syncUrl(f);
-    this.loadItems(f);
+    const normalized = this.normalizeFilters(f);
+    this.activeFilters.set(normalized);
+    this.syncUrl(normalized);
+    this.loadItems(normalized);
   }
 
   protected onMobileFiltersChange(f: VaultFilters): void {
@@ -630,14 +634,16 @@ export class VaultComponent implements OnInit, OnDestroy {
   }
 
   private buildQuery(filters: VaultFilters, continuationToken?: string | null): WardrobeQuery {
-    const [priceMin, priceMax] = filters.priceRange;
+    const [priceMin, priceMax] = this.clampPriceRange(filters.priceRange);
+    const [minWears, maxWears] = this.clampWearRange(filters.wearRange);
     const includeWishlisted = filters.group === 'wishlist';
     return {
       brand: filters.brand || undefined,
       condition: filters.condition ? filters.condition : undefined,
       priceMin: priceMin > 0 ? priceMin : undefined,
-      priceMax: priceMax < 999_999 ? priceMax : undefined,
-      minWears: filters.minWears > 0 ? filters.minWears : undefined,
+      priceMax: priceMax < this.maxItemPrice() ? priceMax : undefined,
+      minWears: minWears > 0 ? minWears : undefined,
+      maxWears: maxWears < 200 ? maxWears : undefined,
       sortField: filters.sortField,
       sortDir: filters.sortDir,
       includeWishlisted,
@@ -647,13 +653,15 @@ export class VaultComponent implements OnInit, OnDestroy {
   }
 
   private syncUrl(f: VaultFilters): void {
-    const [priceMin, priceMax] = f.priceRange;
+    const [priceMin, priceMax] = this.clampPriceRange(f.priceRange);
+    const [minWears, maxWears] = this.clampWearRange(f.wearRange);
     this.router.navigate([], {
       queryParams: {
         group: f.group === 'all' ? null : f.group,
         priceMin: priceMin > 0 ? priceMin : null,
-        priceMax: priceMax < 999_999 ? priceMax : null,
-        minWears: f.minWears > 0 ? f.minWears : null,
+        priceMax: priceMax < this.maxItemPrice() ? priceMax : null,
+        minWears: minWears > 0 ? minWears : null,
+        maxWears: maxWears < 200 ? maxWears : null,
         brand: f.brand ? f.brand : null,
         condition: f.condition ? f.condition : null,
         sortField: f.sortField === 'dateAdded' ? null : f.sortField,
@@ -665,6 +673,30 @@ export class VaultComponent implements OnInit, OnDestroy {
 
   private matchesSearch(item: ClothingItem, q: string): boolean {
     return matchesItem(item, q);
+  }
+
+  /** Clamps price ranges to the current slider bounds and preserves ordering. */
+  private clampPriceRange(range: [number, number]): [number, number] {
+    const maxPrice = this.maxItemPrice();
+    const low = Math.max(0, Math.min(range[0], maxPrice));
+    const high = Math.max(low, Math.min(range[1], maxPrice));
+    return [low, high];
+  }
+
+  /** Clamps wear ranges to supported bounds and preserves ordering. */
+  private clampWearRange(range: [number, number]): [number, number] {
+    const low = Math.max(0, Math.min(range[0], 200));
+    const high = Math.max(low, Math.min(range[1], 200));
+    return [low, high];
+  }
+
+  /** Normalizes filter ranges before state, URL, and query sync. */
+  private normalizeFilters(filters: VaultFilters): VaultFilters {
+    return {
+      ...filters,
+      priceRange: this.clampPriceRange(filters.priceRange),
+      wearRange: this.clampWearRange(filters.wearRange),
+    };
   }
 
   private fmt(val: number): string {

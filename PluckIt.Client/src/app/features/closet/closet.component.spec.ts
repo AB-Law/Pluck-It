@@ -60,6 +60,7 @@ describe('WardrobeComponent', () => {
     confirmDelete: () => void;
     onDeleteItem: (item: ClothingItem) => void;
     triggerUpload: () => void;
+    itemOpened: { subscribe: (handler: (item: ClothingItem) => void) => void };
   };
   const asInternal = (): ClosetComponentInternals => component as unknown as ClosetComponentInternals;
 
@@ -84,6 +85,7 @@ describe('WardrobeComponent', () => {
     id: 'draft-1',
     draftStatus: 'Ready',
     category: 'Outerwear',
+    title: 'Aime Leon Dore Jacket',
   };
 
   const PROCESSING_DRAFT: ClothingItem = {
@@ -126,6 +128,13 @@ describe('WardrobeComponent', () => {
 
   it('should create', () => {
     expect(component).toBeTruthy();
+  });
+
+  it('renders the refreshed upload studio copy', () => {
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Upload Studio');
+    expect(root.textContent).toContain('Recent Uploads');
+    expect(root.textContent).not.toContain('The Extraction Hub');
   });
 
   it('loads items and drafts on init', () => {
@@ -250,6 +259,33 @@ describe('WardrobeComponent', () => {
     asInternal()._reconcileQueueWithDrafts([READY_DRAFT]);
     expect(component.uploadQueue()[0].status).toBe('ready');
     expect(component.uploadQueue()[0].category).toBe('Outerwear');
+    expect(component.uploadQueue()[0].displayName).toBe('Aime Leon Dore Jacket');
+  });
+
+  it('prefers title/name over category for upload and server draft chips', () => {
+    component.uploadQueue.set([
+      {
+        localId: 'q-display',
+        file: new File(['a'], 'fallback-file.jpg'),
+        status: 'ready',
+        draftId: 'draft-1',
+        category: 'Item Review',
+        displayName: 'Named Queue Item',
+      },
+    ]);
+    component.drafts.set([
+      { ...READY_DRAFT, id: 'srv-1', title: 'Server Draft Title', category: 'Item Review' },
+      { ...READY_DRAFT, id: 'srv-2', title: null, name: 'Server Draft Name', category: 'Item Review' },
+      { ...READY_DRAFT, id: 'srv-3', title: null, name: null, category: 'Server Category' },
+    ]);
+    fixture.detectChanges();
+
+    const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+    expect(text).toContain('Named Queue Item');
+    expect(text).toContain('Server Draft Title');
+    expect(text).toContain('Server Draft Name');
+    expect(text).toContain('Server Category');
+    expect(text).not.toContain('fallback-file.jpg');
   });
 
   it('moves queue entries to failed when draft processing fails', () => {
@@ -651,10 +687,14 @@ describe('WardrobeComponent', () => {
 
     const itemToggledSpy = vi.fn();
     component.itemToggled.subscribe(itemToggledSpy);
+    const itemOpenedSpy = vi.fn();
+    component.itemOpened.subscribe(itemOpenedSpy);
 
     const card = fixture.debugElement.query(By.css('app-clothing-card'));
     card.triggerEventHandler('selectToggled', 'item-a');
     expect(itemToggledSpy).toHaveBeenCalledWith('item-a');
+    card.triggerEventHandler('detailsRequested', { ...BASE_ITEM, id: 'item-a', category: 'Tops' });
+    expect(itemOpenedSpy).toHaveBeenCalledWith(expect.objectContaining({ id: 'item-a' }));
 
     card.triggerEventHandler('editRequested', { ...BASE_ITEM, id: 'item-b', category: 'Outerwear' });
     expect(component.editingItem()).toMatchObject({ id: 'item-b' });

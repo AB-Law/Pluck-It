@@ -7,6 +7,8 @@ import { WardrobeService } from '../../core/services/wardrobe.service';
 import { UserProfileService } from '../../core/services/user-profile.service';
 import { AuthService } from '../../core/services/auth.service';
 import { MobileNavState } from '../../shared/layout/mobile-nav.state';
+import { ClothingItem } from '../../core/models/clothing-item.model';
+import { StylistSessionService } from '../stylist/stylist-session.service';
 
 describe('DashboardComponent', () => {
   let component: DashboardComponent;
@@ -20,6 +22,7 @@ describe('DashboardComponent', () => {
   };
   let authService: { logout: ReturnType<typeof vi.fn>; user: ReturnType<typeof vi.fn> };
   let mobileNavState: MobileNavState;
+  let stylistSession: StylistSessionService;
   let queryParamMap$: BehaviorSubject<ReturnType<typeof convertToParamMap>>;
   let route: {
     snapshot: { queryParamMap: ReturnType<typeof convertToParamMap> };
@@ -41,6 +44,10 @@ describe('DashboardComponent', () => {
     digestOpen: WritableSignal<boolean>;
     stylistOpen: WritableSignal<boolean>;
     uploadOfflineNotice: WritableSignal<string | null>;
+    selectedItem: WritableSignal<ClothingItem | null>;
+    openItemDetails: (item: ClothingItem) => void;
+    closeItemDetails: () => void;
+    onWearLogged: (item: ClothingItem) => void;
   };
   const asInternal = (): DashboardComponentInternals => component as unknown as DashboardComponentInternals;
 
@@ -85,6 +92,7 @@ describe('DashboardComponent', () => {
     fixture = TestBed.createComponent(DashboardComponent);
     component = fixture.componentInstance;
     mobileNavState = TestBed.inject(MobileNavState);
+    stylistSession = TestBed.inject(StylistSessionService);
     fixture.detectChanges();
   });
 
@@ -204,6 +212,18 @@ describe('DashboardComponent', () => {
     );
   });
 
+  it('keeps existing stylist session when opening panel from mobile command', () => {
+    stylistSession.messages.set([
+      { role: 'assistant', text: 'Persist me', time: '09:15 PM' },
+      { role: 'user', text: 'What should I wear?', time: '09:16 PM' },
+    ]);
+    queryParamMap$.next(convertToParamMap({ mobilePanel: 'stylist' }));
+    fixture.detectChanges();
+
+    expect(asInternal().stylistOpen()).toBe(true);
+    expect(stylistSession.messages().some((message) => message.text === 'Persist me')).toBe(true);
+  });
+
   it('closes stylist when mobilePanel=wardrobe query param is present', () => {
     asInternal().stylistOpen.set(true);
     queryParamMap$.next(convertToParamMap({ mobilePanel: 'wardrobe' }));
@@ -258,5 +278,28 @@ describe('DashboardComponent', () => {
 
     expect(enqueueSpy).toHaveBeenCalledWith('dashboard/upload', {});
     expect(asInternal().uploadOfflineNotice()).toContain('queued');
+  });
+
+  it('opens and closes item details from wardrobe events', () => {
+    const item: ClothingItem = {
+      id: 'item-1',
+      imageUrl: 'image.jpg',
+      tags: [],
+      colours: [],
+      brand: 'Acme',
+      category: 'Tops',
+      price: null,
+      notes: null,
+      dateAdded: null,
+      wearCount: 0,
+      estimatedMarketValue: 100,
+      purchaseDate: null,
+      condition: null,
+    };
+
+    asInternal().openItemDetails(item);
+    expect(asInternal().selectedItem()).toEqual(item);
+    asInternal().closeItemDetails();
+    expect(asInternal().selectedItem()).toBeNull();
   });
 });

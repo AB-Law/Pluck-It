@@ -97,11 +97,11 @@ function sizeType(category: string | null): 'letter' | 'bottoms' | 'shoe' | 'non
         background: transparent;
       }
       .modal-scroll::-webkit-scrollbar-thumb {
-        background: #258df4;
+        background: #c4836a;
       }
       .modal-scroll {
         scrollbar-width: thin;
-        scrollbar-color: #258df4 transparent;
+        scrollbar-color: #c4836a transparent;
       }
       input[type='date']::-webkit-calendar-picker-indicator {
         filter: invert(1) opacity(0.35);
@@ -121,12 +121,12 @@ function sizeType(category: string | null): 'letter' | 'bottoms' | 'shoe' | 'non
     <!-- ── Backdrop ───────────────────────────────────────────────────────── -->
     <div
       class="backdrop-animate fixed inset-0 z-50 flex items-center justify-center p-4"
-      style="background: rgba(0,0,0,0.82); backdrop-filter: blur(8px);"
+      style="background: rgba(20,14,10,0.82); backdrop-filter: blur(8px);"
       (click)="onOverlayClick($event)"
     >
       <!-- ── Modal shell ────────────────────────────────────────────────── -->
       <div
-        class="modal-animate h-full w-full max-w-none md:max-w-4xl md:max-h-[90vh] md:h-auto bg-black border border-[#1F1F1F] shadow-2xl flex flex-col rounded-none md:rounded-lg"
+        class="modal-animate h-full w-full max-w-none md:max-w-4xl md:max-h-[90vh] md:h-auto bg-card-dark border border-border-chrome shadow-2xl flex flex-col rounded-none md:rounded-lg"
         role="dialog"
         aria-modal="true"
         aria-labelledby="enrich-modal-title"
@@ -508,7 +508,7 @@ function sizeType(category: string | null): 'letter' | 'bottoms' | 'shoe' | 'non
 
         <!-- Footer -->
         <div
-          class="px-4 py-4 md:px-6 md:py-5 border-t border-[#1F1F1F] flex items-center justify-end gap-3 md:gap-4 bg-black shrink-0"
+          class="px-4 py-4 md:px-6 md:py-5 border-t border-border-chrome flex items-center justify-end gap-3 md:gap-4 bg-background-dark shrink-0"
         >
           <button
             type="button"
@@ -519,7 +519,7 @@ function sizeType(category: string | null): 'letter' | 'bottoms' | 'shoe' | 'non
           </button>
           <button
             type="button"
-            class="touch-target bg-primary hover:bg-blue-500 transition-colors px-5 md:px-8 h-11 md:h-12 text-xs font-bold uppercase tracking-widest text-white shadow-lg shadow-primary/20"
+            class="touch-target bg-primary hover:opacity-90 transition-colors px-5 md:px-8 h-11 md:h-12 text-xs font-bold uppercase tracking-widest text-white shadow-lg shadow-primary/20"
             (click)="onSave()"
           >
             {{ isEditMode ? 'Save Changes' : 'Add to Wardrobe' }}
@@ -658,9 +658,9 @@ export class ReviewItemModalComponent implements OnChanges {
   letterSizeBtnClass(size: string, isLast: boolean): string {
     const active =
       this.draft?.size?.letter === size
-        ? 'bg-white text-black'
-        : 'text-slate-400 hover:bg-white hover:text-black';
-    const border = isLast ? '' : 'border-r border-[#1F1F1F]';
+        ? 'bg-chrome text-background-dark'
+        : 'text-slate-400 hover:bg-chrome hover:text-background-dark';
+    const border = isLast ? '' : 'border-r border-border-chrome';
     return `flex-1 py-3 text-[10px] font-bold uppercase transition-colors ${active} ${border}`.trim();
   }
 
@@ -686,7 +686,7 @@ export class ReviewItemModalComponent implements OnChanges {
       'aspect-square flex flex-col items-center justify-center gap-1 border transition-colors';
     return this.hasCare(key)
       ? `${base} border-primary bg-primary/10`
-      : `${base} border-[#1F1F1F] hover:border-slate-500`;
+      : `${base} border-border-chrome hover:border-primary/40`;
   }
 
   // ── Condition ────────────────────────────────────────────────────────────
@@ -698,9 +698,9 @@ export class ReviewItemModalComponent implements OnChanges {
   condBtnClass(cond: string, isLast: boolean): string {
     const active =
       this.draft?.condition === cond
-        ? 'bg-white text-black'
-        : 'text-slate-400 hover:bg-white hover:text-black';
-    const border = isLast ? '' : 'border-r border-[#1F1F1F]';
+        ? 'bg-chrome text-background-dark'
+        : 'text-slate-400 hover:bg-chrome hover:text-background-dark';
+    const border = isLast ? '' : 'border-r border-border-chrome';
     return `flex-1 py-3 text-[10px] font-bold uppercase transition-colors ${active} ${border}`.trim();
   }
 

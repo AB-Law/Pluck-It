@@ -7,39 +7,39 @@ import { CpwIntelPanelItem, VaultInsightsPanelData } from '../../core/models/vau
   standalone: true,
   imports: [CommonModule],
   template: `
-    <section class="mb-8 rounded-xl border border-border-chrome bg-card-dark p-4">
+    <section class="mb-8 rounded-xl border border-border-chrome bg-card-dark/95 p-4">
       <div class="mb-3 flex items-center justify-between">
-        <h4 class="text-sm font-bold text-slate-100">Smart Insights</h4>
-        <span class="text-[10px] font-mono text-slate-500">Behavioral Intelligence</span>
+        <h4 class="text-sm font-semibold text-chrome">Smart Insights</h4>
+        <span class="text-[10px] font-mono text-app-soft">Behavioral Intelligence</span>
       </div>
 
       @if (!insights() || insights()!.insufficientData) {
         <p class="text-xs text-slate-500 font-mono">Not enough data yet. Keep logging wears.</p>
       } @else {
         <div class="grid gap-2 md:grid-cols-3">
-          <div class="rounded border border-border-chrome bg-black/40 p-3 text-xs text-slate-300">
+          <div class="rounded border border-border-chrome bg-background-dark/55 p-3 text-xs text-slate-300">
             @if (topColorShare(); as topColor) {
               You wear {{ topColor.color }} {{ fmtPct(topColor.pct) }} of the time.
             } @else {
               Top color trend is not available yet. Keep logging wears.
             }
           </div>
-          <div class="rounded border border-border-chrome bg-black/40 p-3 text-xs text-slate-300">
+          <div class="rounded border border-border-chrome bg-background-dark/55 p-3 text-xs text-slate-300">
             You haven’t worn {{ fmtPct(insights()!.behavioralInsights.unworn90dPct) }} of wardrobe in 90 days.
           </div>
-          <div class="rounded border border-border-chrome bg-black/40 p-3 text-xs text-slate-300">
+          <div class="rounded border border-border-chrome bg-background-dark/55 p-3 text-xs text-slate-300">
             Your most expensive unworn item is
             {{ fmtMoney(insights()!.behavioralInsights.mostExpensiveUnworn?.amount, insights()!.behavioralInsights.mostExpensiveUnworn?.currency) }}.
           </div>
         </div>
 
         <div class="mt-4">
-          <h5 class="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-500">
+          <h5 class="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-app-soft">
             CPW Forecast
             <span class="relative inline-block">
               <button
                 type="button"
-                class="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-700/80 bg-slate-900/80 text-slate-400 hover:text-white"
+                class="inline-flex h-5 w-5 items-center justify-center rounded-full border border-border-chrome bg-background-dark/80 text-slate-400 hover:text-chrome"
                 aria-label="What is CPW Forecast?"
                 (click)="toggleCpwHelp()"
                 (mouseenter)="openCpwHelp()"
@@ -49,11 +49,11 @@ import { CpwIntelPanelItem, VaultInsightsPanelData } from '../../core/models/vau
               </button>
               @if (cpwHelpOpen()) {
               <div
-                  class="absolute left-0 top-full z-50 mt-2 w-72 rounded border border-border-chrome bg-black/95 p-3 text-[11px] text-slate-200 shadow-xl"
+                  class="absolute left-0 top-full z-50 mt-2 w-72 rounded border border-border-chrome bg-card-dark p-3 text-[11px] text-slate-200 shadow-xl"
                   (mouseenter)="openCpwHelp()"
                   (mouseleave)="closeCpwHelp()"
                 >
-                  <p class="font-semibold text-slate-100">CPW Forecast</p>
+                  <p class="font-semibold text-chrome">CPW Forecast</p>
                   <p class="mt-1 text-slate-300 leading-relaxed">
                     CPW is Cost Per Wear. This view predicts how many more wears are needed for a clothing item
                     to hit your target spend-per-wear and projects when that target could be reached based on recent usage.
@@ -64,10 +64,10 @@ import { CpwIntelPanelItem, VaultInsightsPanelData } from '../../core/models/vau
           </h5>
           <div class="space-y-2">
             @for (row of topCpwRows(); track row.itemId) {
-              <div class="rounded border border-border-chrome bg-black/40 p-3 text-sm text-slate-300">
+              <div class="rounded border border-border-chrome bg-background-dark/55 p-3 text-sm text-slate-300">
                 <div class="flex items-start gap-3">
                   <div class="min-w-0 flex-1 space-y-1.5">
-                    <p class="text-slate-100">
+                    <p class="text-chrome">
                       {{ cpwItemLabel(row) }} · badge: {{ row.badge }}
                     </p>
                     <p class="text-slate-500">Usage trend: {{ wearTrendText(row) }}.</p>
@@ -85,10 +85,10 @@ import { CpwIntelPanelItem, VaultInsightsPanelData } from '../../core/models/vau
                     <img
                       [src]="rowImage"
                       [alt]="cpwItemLabel(row)"
-                      class="h-28 w-20 rounded bg-black/30 object-contain border border-border-chrome/50 shrink-0"
+                      class="h-28 w-20 rounded bg-app-elevated object-contain border border-border-chrome/50 shrink-0"
                     />
                   } @else {
-                    <div class="h-28 w-20 rounded bg-black/40 border border-border-chrome/50 flex items-center justify-center text-slate-500 shrink-0">
+                    <div class="h-28 w-20 rounded bg-app-elevated border border-border-chrome/50 flex items-center justify-center text-slate-500 shrink-0">
                       <span class="material-symbols-outlined">image</span>
                     </div>
                   }

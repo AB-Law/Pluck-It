@@ -20,7 +20,7 @@ const CARE_ICON_MAP: Record<string, { icon: string; label: string }> = {
   template: `
     <!-- Slide-in panel — driven by CSS translate transition -->
     <aside
-      class="w-80 flex-shrink-0 flex-col border-l border-border-chrome bg-black overflow-y-auto transition-transform duration-300 ease-in-out"
+      class="w-80 flex-shrink-0 flex-col border-l border-border-chrome bg-card-dark/95 overflow-y-auto transition-transform duration-300 ease-in-out backdrop-blur-sm"
       [class.hidden]="!item()"
       [class.flex]="!!item()"
       [class.fixed]="mobileMode()"
@@ -33,23 +33,22 @@ const CARE_ICON_MAP: Record<string, { icon: string; label: string }> = {
 
           <!-- Header -->
           <div class="mb-6 flex items-center justify-between">
-            <h3 class="text-lg font-bold text-slate-100">Item Details</h3>
-            <button class="h-10 w-10 flex items-center justify-center rounded-lg text-slate-500 hover:text-white hover:bg-card-dark transition-colors touch-target" (click)="closed.emit()">
-              <span class="material-symbols-outlined">close</span>
+            <h3 class="text-lg font-semibold text-chrome">Item Details</h3>
+            <button class="group h-10 w-10 flex items-center justify-center rounded-lg text-slate-500 hover:text-chrome hover:bg-background-dark transition-all duration-200 ease-out touch-target" (click)="closed.emit()">
+              <span class="material-symbols-outlined transition-transform duration-200 ease-out group-hover:scale-110 group-hover:rotate-90">close</span>
             </button>
           </div>
 
           <!-- Image preview -->
-          <div class="mb-6 rounded-lg bg-card-dark p-4 border border-border-chrome">
-            <div class="flex items-center justify-center h-48 overflow-hidden rounded mb-4 bg-black">
+          <div class="mb-6 rounded-lg bg-background-dark p-4 border border-border-chrome">
+            <div class="flex items-center justify-center h-48 overflow-hidden rounded mb-4 bg-app-elevated">
               <img
                 [src]="itm.imageUrl"
                 [alt]="itm.brand || 'Item'"
-                class="h-full w-full object-contain p-2"
-                style="mix-blend-mode: lighten"
+                class="item-image-blend h-full w-full object-contain p-2"
               />
             </div>
-            <h4 class="text-md font-bold text-slate-100">{{ itm.brand || 'Unknown Brand' }}</h4>
+            <h4 class="text-md font-bold text-chrome">{{ itm.brand || 'Unknown Brand' }}</h4>
             <p class="text-xs text-slate-500 font-mono">Archive ID: #{{ itm.id.slice(-8).toUpperCase() }}</p>
           </div>
 
@@ -57,23 +56,23 @@ const CARE_ICON_MAP: Record<string, { icon: string; label: string }> = {
 
             <!-- Analytics -->
             <div>
-              <h5 class="mb-2 text-xs font-bold uppercase tracking-widest text-slate-500">Analytics</h5>
+                <h5 class="mb-2 text-xs font-bold uppercase tracking-widest text-app-soft">Analytics</h5>
               <div class="grid grid-cols-2 gap-4">
-                <div class="rounded bg-card-dark p-3 border border-border-chrome">
+                <div class="rounded bg-background-dark p-3 border border-border-chrome">
                   <p class="text-[10px] text-slate-500 mb-0.5">Wear Count</p>
-                  <p class="font-mono text-sm font-bold text-slate-100">{{ wearCountDisplay() }}</p>
+                  <p class="font-mono text-sm font-bold text-chrome">{{ wearCountDisplay() }}</p>
                 </div>
-                <div class="rounded bg-card-dark p-3 border border-border-chrome">
+                <div class="rounded bg-background-dark p-3 border border-border-chrome">
                   <p class="text-[10px] text-slate-500 mb-0.5">CPW</p>
                   <p class="font-mono text-sm font-bold text-primary">{{ cpwDisplay() }}</p>
                 </div>
-                <div class="rounded bg-card-dark p-3 border border-border-chrome">
+                <div class="rounded bg-background-dark p-3 border border-border-chrome">
                   <p class="text-[10px] text-slate-500 mb-0.5">Condition</p>
-                  <p class="font-mono text-sm font-bold text-slate-100">{{ itm.condition || '—' }}</p>
+                  <p class="font-mono text-sm font-bold text-chrome">{{ itm.condition || '—' }}</p>
                 </div>
-                <div class="rounded bg-card-dark p-3 border border-border-chrome">
+                <div class="rounded bg-background-dark p-3 border border-border-chrome">
                   <p class="text-[10px] text-slate-500 mb-0.5">Est. Value</p>
-                  <p class="font-mono text-sm font-bold text-slate-100">{{ valueDisplay() }}</p>
+                  <p class="font-mono text-sm font-bold text-chrome">{{ valueDisplay() }}</p>
                 </div>
               </div>
             </div>
@@ -81,7 +80,7 @@ const CARE_ICON_MAP: Record<string, { icon: string; label: string }> = {
             <!-- Care Instructions -->
             @if (itm.careInfo?.length) {
               <div>
-                <h5 class="mb-2 text-xs font-bold uppercase tracking-widest text-slate-500">Care Instructions</h5>
+                <h5 class="mb-2 text-xs font-bold uppercase tracking-widest text-app-soft">Care Instructions</h5>
                 <div class="flex flex-wrap gap-2">
                   @for (key of (itm.careInfo ?? []); track key) {
                     <span class="flex items-center gap-1 rounded-full bg-border-chrome px-2 py-1 text-[10px] text-slate-300">
@@ -96,7 +95,7 @@ const CARE_ICON_MAP: Record<string, { icon: string; label: string }> = {
             <!-- Aesthetic Tags -->
             @if (itm.aestheticTags?.length) {
               <div>
-                <h5 class="mb-2 text-xs font-bold uppercase tracking-widest text-slate-500">Style Tags</h5>
+                <h5 class="mb-2 text-xs font-bold uppercase tracking-widest text-app-soft">Style Tags</h5>
                 <div class="flex flex-wrap gap-2">
                   @for (tag of itm.aestheticTags; track tag) {
                     <span class="rounded bg-primary/10 px-2 py-1 text-[10px] font-mono font-bold text-primary">
@@ -110,14 +109,14 @@ const CARE_ICON_MAP: Record<string, { icon: string; label: string }> = {
             <!-- Notes / Activity -->
             @if (itm.notes) {
               <div>
-                <h5 class="mb-2 text-xs font-bold uppercase tracking-widest text-slate-500">Notes</h5>
+                <h5 class="mb-2 text-xs font-bold uppercase tracking-widest text-app-soft">Notes</h5>
                 <p class="text-xs text-slate-400 leading-relaxed">{{ itm.notes }}</p>
               </div>
             }
 
             <!-- Wear History Calendar -->
             <div>
-              <h5 class="mb-2 text-xs font-bold uppercase tracking-widest text-slate-500">Wear History</h5>
+                <h5 class="mb-2 text-xs font-bold uppercase tracking-widest text-app-soft">Wear History</h5>
               @if (wearHistoryLoading()) {
                 <p class="text-[11px] text-slate-500 font-mono">Loading timeline…</p>
               } @else {
@@ -144,7 +143,7 @@ const CARE_ICON_MAP: Record<string, { icon: string; label: string }> = {
 
               <!-- Share to Collection -->
               <button
-                class="touch-target w-full rounded-lg bg-primary py-3 text-sm font-bold text-white hover:bg-blue-500 transition-colors"
+                class="touch-target w-full rounded-lg bg-primary py-3 text-sm font-bold text-chrome hover:bg-primary/80 transition-colors"
                 (click)="shareToCollection.emit(itm)"
               >
                 Share to Collection

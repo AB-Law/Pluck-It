@@ -92,8 +92,8 @@ describe('VaultComponent', () => {
   };
   const QUERY_FILTER: VaultFilters = {
     group: 'all' as SmartGroup,
-    priceRange: [0, 999999],
-    minWears: 0,
+    priceRange: [0, 5000],
+    wearRange: [0, 200],
     brand: '',
     condition: '',
     sortField: 'dateAdded',
@@ -206,7 +206,7 @@ describe('VaultComponent', () => {
       brand: 'UNQ',
       sortField: 'wearCount',
       sortDir: 'asc',
-      minWears: 2,
+      wearRange: [2, 30],
       priceRange: [10, 40],
     });
     expect(wardrobeService.getAll).toHaveBeenCalledTimes(2);
@@ -217,8 +217,9 @@ describe('VaultComponent', () => {
     route.snapshot.queryParamMap = convertToParamMap({
       group: 'favorites',
       priceMin: '10',
-      priceMax: '250',
+      priceMax: '999999',
       minWears: '2',
+      maxWears: '220',
       brand: 'UNQ',
       condition: 'New',
       sortField: 'wearCount',
@@ -236,8 +237,8 @@ describe('VaultComponent', () => {
     expect(wardrobeService.getAll).toHaveBeenCalledTimes(1);
     expect(asInternal().activeFilters()).toEqual(expect.objectContaining({
       group: 'favorites',
-      priceRange: [10, 250],
-      minWears: 2,
+      priceRange: [10, 5000],
+      wearRange: [2, 200],
       brand: 'UNQ',
       condition: 'New',
       sortField: 'wearCount',
@@ -469,13 +470,14 @@ describe('VaultComponent', () => {
   });
 
   it('buildQuery and syncUrl include expected defaults and overrides', () => {
-    const custom = { ...QUERY_FILTER, brand: 'UNQ', condition: 'New' as ItemCondition, priceRange: [20, 500] as [number, number], minWears: 2 };
+    const custom = { ...QUERY_FILTER, brand: 'UNQ', condition: 'New' as ItemCondition, priceRange: [20, 500] as [number, number], wearRange: [2, 10] as [number, number] };
     expect(asInternal().buildQuery(custom)).toEqual(expect.objectContaining({
       brand: 'UNQ',
       condition: 'New',
       priceMin: 20,
       priceMax: 500,
       minWears: 2,
+      maxWears: 10,
       includeWishlisted: false,
       pageSize: 24,
       sortField: 'dateAdded',
@@ -487,6 +489,7 @@ describe('VaultComponent', () => {
       priceMin: undefined,
       priceMax: undefined,
       minWears: undefined,
+      maxWears: undefined,
       includeWishlisted: false,
       pageSize: 24,
     }));
@@ -498,6 +501,7 @@ describe('VaultComponent', () => {
         priceMin: 20,
         priceMax: 500,
         minWears: 2,
+        maxWears: 10,
         brand: 'UNQ',
         condition: 'New',
         sortField: null,
@@ -596,7 +600,7 @@ describe('VaultComponent', () => {
       brand: 'Acme',
       condition: 'New' as ItemCondition,
       priceRange: [12, 420] as [number, number],
-      minWears: 3,
+      wearRange: [3, 8],
       sortField: 'wearCount' as const,
       sortDir: 'asc' as const,
     } as VaultFilters;
@@ -607,6 +611,7 @@ describe('VaultComponent', () => {
       priceMin: 12,
       priceMax: 420,
       minWears: 3,
+      maxWears: 8,
       sortField: 'wearCount',
       sortDir: 'asc',
       continuationToken: undefined,
@@ -620,6 +625,7 @@ describe('VaultComponent', () => {
         priceMin: 12,
         priceMax: 420,
         minWears: 3,
+        maxWears: 8,
         brand: 'Acme',
         condition: 'New',
         sortField: 'wearCount',

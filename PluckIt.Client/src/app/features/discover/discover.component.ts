@@ -35,7 +35,7 @@ import { NetworkService } from '../../core/services/network.service';
   ],
   template: `
     <div
-      class="relative flex h-[100dvh] flex-col overflow-hidden bg-black text-slate-100 pb-16 md:pb-0"
+      class="relative flex h-[100dvh] flex-col overflow-hidden bg-background-dark text-chrome pb-16 md:pb-0"
     >
       <!-- Top bar -->
       <app-shared-header
@@ -49,7 +49,7 @@ import { NetworkService } from '../../core/services/network.service';
       />
 
       <header
-        class="flex flex-wrap items-center gap-3 border-b border-border-chrome px-4 sm:px-6 py-3 flex-shrink-0"
+        class="flex flex-wrap items-center gap-3 border-b border-border-chrome px-4 sm:px-6 py-3 flex-shrink-0 bg-card-dark/70"
       >
         <div class="flex items-center gap-2">
           <span class="material-symbols-outlined text-primary">explore</span>
@@ -58,7 +58,7 @@ import { NetworkService } from '../../core/services/network.service';
 
         @if (!isDesktopLayout()) {
           <button
-            class="touch-target h-10 w-10 rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] flex items-center justify-center"
+            class="touch-target h-10 w-10 rounded-lg bg-card-dark text-slate-text hover:text-chrome hover:bg-bg-soft flex items-center justify-center"
             aria-label="Open sources"
             (click)="openSources()"
             title="Show sources"
@@ -151,7 +151,7 @@ import { NetworkService } from '../../core/services/network.service';
             <div class="columns-2 md:columns-3 lg:columns-4 xl:columns-5 gap-4 space-y-4">
               @for (n of skeletons; track n) {
                 <div
-                  class="break-inside-avoid mb-4 rounded-xl bg-zinc-900 animate-pulse"
+                  class="break-inside-avoid mb-4 rounded-xl bg-app-elevated animate-pulse"
                   [style.height.px]="200 + (n % 3) * 60"
                 ></div>
               }
@@ -207,15 +207,15 @@ import { NetworkService } from '../../core/services/network.service';
       @if (selectedItem()) {
         <div
           class="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
-          style="background: rgba(0,0,0,0.75); backdrop-filter: blur(6px);"
+          style="background: var(--color-overlay); backdrop-filter: blur(6px);"
           (click)="selectedItem.set(null); galleryIndex.set(0)"
         >
           <div
-            class="relative w-full max-w-md rounded-2xl border border-border-chrome bg-zinc-950 shadow-2xl mx-4 overflow-hidden max-h-[90vh] flex flex-col"
+            class="relative w-full max-w-md rounded-2xl border border-border-chrome bg-app-surface shadow-2xl mx-4 overflow-hidden max-h-[90vh] flex flex-col"
             (click)="$event.stopPropagation()"
           >
             <button
-              class="absolute top-3 right-3 z-10 text-slate-500 hover:text-slate-200 bg-zinc-950/80 rounded-full p-1"
+              class="absolute top-3 right-3 z-10 text-app-soft hover:text-chrome bg-app-surface/80 rounded-full p-1"
               (click)="selectedItem.set(null); galleryIndex.set(0)"
             >
               <span class="material-symbols-outlined">close</span>
@@ -223,7 +223,7 @@ import { NetworkService } from '../../core/services/network.service';
 
             <!-- Gallery slideshow -->
             @if ((selectedItem()!.galleryImages?.length ?? 0) > 1) {
-              <div class="relative w-full bg-zinc-900 flex-shrink-0">
+              <div class="relative w-full bg-app-elevated flex-shrink-0">
                 <img
                   [src]="selectedItem()!.galleryImages![galleryIndex()]"
                   [alt]="selectedItem()!.title"
@@ -231,13 +231,13 @@ import { NetworkService } from '../../core/services/network.service';
                 />
                 <!-- Prev/Next -->
                 <button
-                  class="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-black/60 p-1 text-white hover:bg-black/80"
+                  class="absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-background-dark/60 p-1 text-chrome hover:bg-background-dark/80"
                   (click)="onPrevImage()"
                 >
                   <span class="material-symbols-outlined text-base">chevron_left</span>
                 </button>
                 <button
-                  class="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-black/60 p-1 text-white hover:bg-black/80"
+                  class="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-background-dark/60 p-1 text-chrome hover:bg-background-dark/80"
                   (click)="onNextImage()"
                 >
                   <span class="material-symbols-outlined text-base">chevron_right</span>
@@ -247,14 +247,14 @@ import { NetworkService } from '../../core/services/network.service';
                   @for (img of selectedItem()!.galleryImages!; track $index) {
                     <button
                       class="h-1.5 rounded-full transition-all"
-                      [class]="$index === galleryIndex() ? 'w-4 bg-white' : 'w-1.5 bg-white/40'"
+                      [class]="$index === galleryIndex() ? 'w-4 bg-chrome' : 'w-1.5 bg-chrome/40'"
                       (click)="onJumpToImage($index)"
                     ></button>
                   }
                 </div>
                 <!-- Counter -->
                 <span
-                  class="absolute top-2 left-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] text-slate-300"
+                  class="absolute top-2 left-2 rounded-full bg-background-dark/60 px-2 py-0.5 text-[10px] text-slate-text"
                 >
                   {{ galleryIndex() + 1 }} / {{ selectedItem()!.galleryImages!.length }}
                 </span>
@@ -265,8 +265,8 @@ import { NetworkService } from '../../core/services/network.service';
                     class="flex items-center justify-center h-7 w-7 rounded-full transition-all active:scale-90"
                     [class]="
                       modalVoted() === 'down'
-                        ? 'bg-rose-600 text-white'
-                        : 'bg-black/60 text-slate-300 hover:bg-rose-900/70 hover:text-rose-300'
+                        ? 'bg-danger-soft text-danger'
+                        : 'bg-background-dark/60 text-slate-text hover:bg-danger-soft hover:text-danger'
                     "
                     title="Not for me"
                     (click)="onModalFeedback('down')"
@@ -277,8 +277,8 @@ import { NetworkService } from '../../core/services/network.service';
                     class="flex items-center justify-center h-7 w-7 rounded-full transition-all active:scale-90"
                     [class]="
                       modalVoted() === 'up'
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-black/60 text-slate-300 hover:bg-emerald-900/70 hover:text-emerald-300'
+                        ? 'bg-success-soft text-success'
+                        : 'bg-background-dark/60 text-slate-text hover:bg-success-soft hover:text-success'
                     "
                     title="Love it"
                     (click)="onModalFeedback('up')"
@@ -289,7 +289,7 @@ import { NetworkService } from '../../core/services/network.service';
               </div>
             } @else {
               <!-- Single image with like/dislike overlay -->
-              <div class="relative w-full bg-zinc-900 flex-shrink-0">
+              <div class="relative w-full bg-app-elevated flex-shrink-0">
                 <img
                   [src]="selectedItem()!.imageUrl"
                   [alt]="selectedItem()!.title"
@@ -300,8 +300,8 @@ import { NetworkService } from '../../core/services/network.service';
                     class="flex items-center justify-center h-7 w-7 rounded-full transition-all active:scale-90"
                     [class]="
                       modalVoted() === 'down'
-                        ? 'bg-rose-600 text-white'
-                        : 'bg-black/60 text-slate-300 hover:bg-rose-900/70 hover:text-rose-300'
+                        ? 'bg-danger-soft text-danger'
+                        : 'bg-background-dark/60 text-slate-text hover:bg-danger-soft hover:text-danger'
                     "
                     title="Not for me"
                     (click)="onModalFeedback('down')"
@@ -312,8 +312,8 @@ import { NetworkService } from '../../core/services/network.service';
                     class="flex items-center justify-center h-7 w-7 rounded-full transition-all active:scale-90"
                     [class]="
                       modalVoted() === 'up'
-                        ? 'bg-emerald-600 text-white'
-                        : 'bg-black/60 text-slate-300 hover:bg-emerald-900/70 hover:text-emerald-300'
+                        ? 'bg-success-soft text-success'
+                        : 'bg-background-dark/60 text-slate-text hover:bg-success-soft hover:text-success'
                     "
                     title="Love it"
                     (click)="onModalFeedback('up')"
@@ -334,7 +334,7 @@ import { NetworkService } from '../../core/services/network.service';
 
               <div class="flex flex-wrap gap-1">
                 @for (tag of selectedItem()!.tags; track tag) {
-                  <span class="rounded bg-zinc-800 px-2 py-0.5 text-[10px] text-slate-400">{{
+                  <span class="rounded bg-app-elevated px-2 py-0.5 text-[10px] text-slate-400">{{
                     tag
                   }}</span>
                 }
@@ -345,7 +345,7 @@ import { NetworkService } from '../../core/services/network.service';
                 [class]="
                   selectedItem()!.wishlisted
                     ? 'border-rose-500/40 bg-rose-500/10 text-rose-300'
-                    : 'border-border-chrome bg-zinc-900 text-slate-200 hover:border-rose-400/40 hover:text-rose-300'
+                    : 'border-border-chrome bg-app-elevated text-slate-text hover:border-primary/40 hover:text-primary'
                 "
                 (click)="onWishlistRequested(selectedItem()!)"
               >
@@ -365,7 +365,7 @@ import { NetworkService } from '../../core/services/network.service';
                       [href]="link.url"
                       target="_blank"
                       rel="noopener noreferrer"
-                      class="flex items-center justify-between rounded-lg border border-border-chrome bg-zinc-900
+                      class="flex items-center justify-between rounded-lg border border-border-chrome bg-app-elevated
                              px-3 py-2 text-xs text-slate-300 hover:border-primary/50 hover:text-primary transition-colors"
                     >
                       <span class="flex items-center gap-2">
@@ -534,19 +534,28 @@ export class DiscoverComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit() {
+    this.updateLayoutMode();
     if (this.networkService.isCurrentlyOnline()) {
-      this.loadSources();
-      this.loadFeed();
+      this.initializeFeed();
     } else {
       this.loading.set(false);
     }
-    this.updateLayoutMode();
   }
 
-  private loadSources() {
+  /** Loads source metadata first, then fetches the feed to avoid first-load races. */
+  private initializeFeed(): void {
+    this.loading.set(true);
+    this.loadSources(() => this.loadFeed());
+  }
+
+  private loadSources(onLoaded?: () => void) {
     if (!this.networkService.isCurrentlyOnline()) return;
     this.discoverService.getSources().subscribe({
-      next: (sources) => this.sources.set(sources),
+      next: (sources) => {
+        this.sources.set(sources);
+        onLoaded?.();
+      },
+      error: () => onLoaded?.(),
     });
   }
 
@@ -583,8 +592,10 @@ export class DiscoverComponent implements OnInit, OnDestroy {
         this.loading.set(false);
         this.loadingMore.set(false);
 
-        // Start hybrid scraping logic
-        this.checkForClientScrape();
+        // Only evaluate client-side scrape leases on top-level reload.
+        if (!append) {
+          this.checkForClientScrape();
+        }
       },
       error: () => {
         this.loading.set(false);

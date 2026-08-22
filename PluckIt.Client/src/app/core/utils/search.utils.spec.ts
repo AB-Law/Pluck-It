@@ -43,6 +43,14 @@ describe('matchesItem – empty / trivial', () => {
 // ── Single-word queries ───────────────────────────────────────────────────────
 
 describe('matchesItem – single word', () => {
+  it('matches by item title', () => {
+    expect(matchesItem(item({ title: 'Aime Leon Dore Tee' }), 'aime')).toBe(true);
+  });
+
+  it('matches by item name alias', () => {
+    expect(matchesItem(item({ name: 'Essential White Tee' }), 'essential')).toBe(true);
+  });
+
   it('matches by brand (exact, case-insensitive)', () => {
     expect(matchesItem(item({ brand: 'Corteiz' }), 'corteiz')).toBe(true);
     expect(matchesItem(item({ brand: 'Corteiz' }), 'CORTEIZ')).toBe(true);

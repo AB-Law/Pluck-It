@@ -66,7 +66,7 @@ describe('UserProfileService', () => {
 
   it('getOrDefault() returns default when profile is null', () => {
     const defaults = service.getOrDefault();
-    expect(defaults.currencyCode).toBe('USD');
+    expect(defaults.currencyCode).toBe('INR');
     expect(defaults.stylePreferences).toEqual([]);
     expect(defaults.wishlistStyleKeywords).toEqual([]);
   });

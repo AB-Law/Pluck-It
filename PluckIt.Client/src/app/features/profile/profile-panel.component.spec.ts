@@ -188,7 +188,7 @@ describe('ProfilePanelComponent', () => {
 });
 
 const USER_PROFILE_DEFAULT = {
-  currencyCode: 'USD',
+  currencyCode: 'INR',
   preferredSizeSystem: 'US',
   stylePreferences: [],
   favoriteBrands: [],

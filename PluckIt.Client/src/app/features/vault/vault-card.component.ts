@@ -12,7 +12,7 @@ import { CpwBadgeLevel } from '../../core/models/vault-insights.model';
       class="group relative flex flex-col rounded-xl border bg-card-dark p-4 cursor-pointer transition-all"
       [class]="
         isSelected()
-          ? 'border-primary shadow-[0_0_15px_rgba(37,141,244,0.15)]'
+          ? 'border-primary shadow-[0_0_18px_rgba(196,131,106,0.25)]'
           : 'border-border-chrome hover:border-primary/50'
       "
       (click)="selectToggled.emit(item().id)"
@@ -21,13 +21,12 @@ import { CpwBadgeLevel } from '../../core/models/vault-insights.model';
     >
       <!-- Image area -->
       <div
-        class="relative mb-4 flex aspect-[4/5] items-center justify-center overflow-hidden rounded-lg bg-black"
+        class="relative mb-4 flex aspect-[4/5] items-center justify-center overflow-hidden rounded-lg bg-app-elevated"
       >
         <img
           [src]="item().imageUrl"
           [alt]="item().brand || item().category || 'Clothing item'"
-          class="h-full w-full object-contain p-4"
-          style="mix-blend-mode: lighten"
+          class="item-image-blend h-full w-full object-contain p-4"
           [attr.loading]="priority() ? 'eager' : 'lazy'"
           [attr.fetchpriority]="priority() ? 'high' : 'auto'"
         />
@@ -35,7 +34,7 @@ import { CpwBadgeLevel } from '../../core/models/vault-insights.model';
         <!-- CPW Badge or SELECTED badge -->
         @if (isSelected()) {
           <div
-            class="absolute left-2 top-2 rounded bg-primary px-2 py-1 text-[10px] font-bold text-white"
+            class="absolute left-2 top-2 rounded bg-primary px-2 py-1 text-[10px] font-bold text-chrome"
           >
             SELECTED
           </div>
@@ -49,7 +48,7 @@ import { CpwBadgeLevel } from '../../core/models/vault-insights.model';
         }
 
         <button
-          class="absolute right-2 top-2 rounded border border-primary/40 bg-black/70 px-2 py-1 text-[10px] font-bold text-primary hover:bg-primary/10"
+          class="absolute right-2 top-2 rounded border border-primary/40 bg-background-dark/70 px-2 py-1 text-[10px] font-bold text-primary hover:bg-primary-soft"
           (click)="onQuickWear($event)"
           aria-label="Log wear"
           title="Log wear (+1)"
@@ -60,7 +59,7 @@ import { CpwBadgeLevel } from '../../core/models/vault-insights.model';
 
       <!-- Metadata -->
       <div class="flex justify-between items-start mb-2">
-        <h5 class="text-sm font-bold text-slate-100 truncate mr-2">
+        <h5 class="text-sm font-bold text-chrome truncate mr-2">
           {{ item().brand || 'Unknown Brand' }}
         </h5>
         @if (aestheticTag()) {
@@ -75,7 +74,7 @@ import { CpwBadgeLevel } from '../../core/models/vault-insights.model';
       </div>
       @if (breakEvenReached()) {
         <div
-          class="mt-2 rounded bg-emerald-900/40 px-2 py-1 text-[10px] font-mono text-emerald-300 border border-emerald-700/50"
+          class="mt-2 rounded bg-success-soft px-2 py-1 text-[10px] font-mono text-success border border-success/50"
         >
           You’ve broken even on this item
         </div>
@@ -119,13 +118,13 @@ export class VaultCardComponent {
   readonly cpwBadgeClass = computed(() => {
     switch (this.cpwBadge()) {
       case 'low':
-        return 'bg-emerald-900/40 text-emerald-300 border-emerald-700/60';
+        return 'bg-success-soft text-success border-success/60';
       case 'medium':
-        return 'bg-amber-900/40 text-amber-300 border-amber-700/60';
+        return 'bg-info-soft text-info border-info/60';
       case 'high':
-        return 'bg-red-900/40 text-red-300 border-red-700/60';
+        return 'bg-danger-soft text-danger border-danger/60';
       case 'unworn':
-        return 'bg-slate-800/80 text-slate-300 border-slate-600';
+        return 'bg-background-dark/80 text-slate-300 border-border-chrome';
       default:
         return 'bg-primary/20 text-primary border-primary/40';
     }

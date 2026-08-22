@@ -15,12 +15,13 @@ import { ClothingItem } from '../../core/models/clothing-item.model';
       [class.hover:ring-opacity-50]="!selected"
       draggable="true"
       (dragstart)="onDragStart($event)"
+      (click)="onOpenDetails()"
     >
       <!-- Image -->
       <div class="relative aspect-[4/5] bg-[#111] p-6 flex items-center justify-center overflow-hidden">
         <img
           [src]="item.imageUrl"
-          [alt]="item.category ?? 'Clothing item'"
+          [alt]="getDisplayLabel()"
           class="object-contain h-full w-full drop-shadow-2xl group-hover:scale-105 transition-transform duration-500"
           [attr.loading]="priority() ? 'eager' : 'lazy'"
           [attr.fetchpriority]="priority() ? 'high' : 'auto'"
@@ -40,11 +41,18 @@ import { ClothingItem } from '../../core/models/clothing-item.model';
           [class.group-hover:opacity-100]="!selected"
           [class.opacity-0]="!selected"
           (click)="onToggleSelect($event)"
-          [attr.aria-label]="selected ? 'Remove from styling' : 'Add to styling'"
-          title="Add to styling"
+          [attr.aria-label]="selected ? 'Remove from current styling' : 'Add to current styling'"
+          [attr.title]="selected ? 'Remove from current styling' : 'Add to current styling'"
         >
           <span class="material-symbols-outlined text-white" style="font-size:14px">add</span>
         </button>
+        @if (!selected) {
+          <span
+            class="pointer-events-none absolute left-11 top-3 rounded bg-black/70 px-2 py-1 text-[10px] font-mono text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+          >
+            Add to current styling
+          </span>
+        }
 
         <button
           class="absolute top-3 right-3 p-2 bg-black/50 backdrop-blur rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
@@ -84,7 +92,7 @@ import { ClothingItem } from '../../core/models/clothing-item.model';
       <div class="p-4 border-t border-border-subtle flex flex-col gap-2">
         <div class="flex justify-between items-start gap-2">
           <h3 class="text-chrome font-medium truncate text-sm leading-tight">
-            {{ item.category ?? 'Unknown' }}
+            {{ getDisplayLabel() }}
           </h3>
           @if (item.brand) {
             <span class="text-[11px] font-mono text-slate-400 shrink-0">{{ item.brand }}</span>
@@ -133,8 +141,16 @@ export class ClothingCardComponent {
   @Output() editRequested   = new EventEmitter<ClothingItem>();
   @Output() deleteRequested = new EventEmitter<ClothingItem>();
   @Output() selectToggled   = new EventEmitter<string>();
+  @Output() detailsRequested = new EventEmitter<ClothingItem>();
 
   readonly menuOpen = signal(false);
+  /** Prefer explicit item title/name before falling back to category label. */
+  getDisplayLabel(): string {
+    const title = this.item.title?.trim();
+    const name = this.item.name?.trim();
+    const category = this.item.category?.trim();
+    return title || name || category || 'Unknown';
+  }
 
   onDragStart(event: DragEvent): void {
     event.dataTransfer?.setData('text/plain', this.item.id);
@@ -144,6 +160,10 @@ export class ClothingCardComponent {
   onToggleSelect(event: MouseEvent): void {
     event.stopPropagation();
     this.selectToggled.emit(this.item.id);
+  }
+
+  onOpenDetails(): void {
+    this.detailsRequested.emit(this.item);
   }
 
   toggleMenu(event: MouseEvent): void {

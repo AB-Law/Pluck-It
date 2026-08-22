@@ -129,6 +129,15 @@ export interface ClothingItem {
   imageUrl: string;
   tags: string[];
   colours: ClothingColour[];
+  /**
+   * Optional human-readable item title from enrichment/manual review.
+   * Present only when backend/source provides it.
+   */
+  title?: string | null;
+  /**
+   * Legacy/alternate item name key returned by some payloads.
+   */
+  name?: string | null;
   brand: string | null;
   category: string | null;
 

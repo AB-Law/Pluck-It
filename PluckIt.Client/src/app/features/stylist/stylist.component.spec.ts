@@ -1,6 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { StylistPanelComponent } from './stylist.component';
 import { ChatService } from '../../core/services/chat.service';
+import { StylistSessionService } from './stylist-session.service';
 import { WritableSignal } from '@angular/core';
 import { of, throwError } from 'rxjs';
 
@@ -15,6 +16,7 @@ describe('StylistPanelComponent', () => {
   let component: StylistPanelComponent;
   let fixture: ComponentFixture<StylistPanelComponent>;
   let chatService: MockChatService;
+  let sessionService: StylistSessionService;
   type StylistComponentInternals = {
     inputText: string;
     sendMessage: () => void;
@@ -38,7 +40,6 @@ describe('StylistPanelComponent', () => {
       },
       userText: string,
     ) => void;
-    chatHistory: { role: string; content: string }[];
   };
   const asInternal = (): StylistComponentInternals => component as unknown as StylistComponentInternals;
 
@@ -52,6 +53,7 @@ describe('StylistPanelComponent', () => {
     fixture = TestBed.createComponent(StylistPanelComponent);
     component = fixture.componentInstance;
     chatService = TestBed.inject(ChatService) as unknown as MockChatService;
+    sessionService = TestBed.inject(StylistSessionService);
     fixture.detectChanges();
   });
 
@@ -69,6 +71,18 @@ describe('StylistPanelComponent', () => {
     component.sendMessage();
     expect(component.messages().some(m => m.text === 'Hello')).toBeTruthy();
     expect(component.thinking()).toBeFalsy();
+  });
+
+  it('preserves conversation across component recreate in the same session', () => {
+    component.inputText = 'Keep this context';
+    component.sendMessage();
+    expect(sessionService.messages().some((message) => message.text === 'Keep this context')).toBe(true);
+
+    fixture.destroy();
+    const recreatedFixture = TestBed.createComponent(StylistPanelComponent);
+    const recreated = recreatedFixture.componentInstance;
+    recreatedFixture.detectChanges();
+    expect(recreated.messages().some((message) => message.text === 'Keep this context')).toBe(true);
   });
 
   it('should handle memory save', () => {
@@ -107,6 +121,7 @@ describe('StylistPanelComponent', () => {
   });
 
   it('should render streaming content and tool status events', () => {
+    sessionService.chatHistory.set([]);
     chatService.streamMessage.mockReturnValueOnce(
       of(
         { type: 'tool_use', name: 'search_wardrobe' },
@@ -244,12 +259,13 @@ describe('StylistPanelComponent', () => {
   });
 
   it('finalises stream on done and captures chat history', () => {
+    sessionService.chatHistory.set([]);
     asInternal().handleEvent({ type: 'token', content: 'hello' }, 'How do I dress?');
     asInternal().handleEvent({ type: 'done' }, 'How do I dress?');
 
     expect(component.thinking()).toBe(false);
     expect(component.messages().some(m => m.text.includes('hello'))).toBe(true);
-    expect(asInternal().chatHistory).toEqual([
+    expect(sessionService.chatHistory()).toEqual([
       { role: 'user', content: 'How do I dress?' },
       { role: 'assistant', content: 'hello' },
     ]);
