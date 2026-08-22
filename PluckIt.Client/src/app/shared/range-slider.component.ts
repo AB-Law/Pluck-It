@@ -18,13 +18,13 @@ import {
   imports: [],
   template: `
     <div
-      class="relative h-10 flex items-center select-none touch-none"
+      class="relative h-6 flex items-center select-none touch-none"
       #track
       (pointerdown)="onTrackDown($event)"
     >
       <!-- Background rail -->
       <div class="absolute inset-y-0 flex items-center w-full">
-        <div class="relative h-1 w-full rounded-full bg-border-chrome">
+        <div class="relative h-0.5 w-full rounded-full bg-border-chrome">
           <!-- Active fill -->
           <div
             class="absolute h-full rounded-full bg-primary transition-all"
@@ -33,14 +33,14 @@ import {
           ></div>
           <!-- Low thumb -->
           <div
-            class="absolute touch-target top-1/2 -translate-y-1/2 h-6 w-6 rounded-full border-2 border-primary bg-black cursor-pointer z-10"
+            class="absolute top-1/2 -translate-y-1/2 h-3.5 w-3.5 rounded-full border border-primary bg-background-dark cursor-pointer z-10"
             [style.left.%]="lowPct"
             style="transform: translate(-50%, -50%)"
             (pointerdown)="startDrag($event, 'low')"
           ></div>
           <!-- High thumb -->
           <div
-            class="absolute touch-target top-1/2 -translate-y-1/2 h-6 w-6 rounded-full border-2 border-primary bg-black cursor-pointer z-10"
+            class="absolute top-1/2 -translate-y-1/2 h-3.5 w-3.5 rounded-full border border-primary bg-background-dark cursor-pointer z-10"
             [style.left.%]="highPct"
             style="transform: translate(-50%, -50%)"
             (pointerdown)="startDrag($event, 'high')"

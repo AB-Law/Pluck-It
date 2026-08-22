@@ -39,6 +39,8 @@ interface UploadQueueItem {
   draftId?: string;
   /** AI-extracted category, populated after processing completes. */
   category?: string;
+  /** Human-readable item name from enrichment when available. */
+  displayName?: string;
   /** Human-readable error for failed items. */
   error?: string;
 }
@@ -58,16 +60,16 @@ interface OfflineUploadQueuePayload {
   standalone: true,
   imports: [UploadItemComponent, ClothingCardComponent, ReviewItemModalComponent],
   template: `
-    <!-- ─── Extraction Hub ──────────────────────────────────────────── -->
+    <!-- ─── Upload Studio ───────────────────────────────────────────── -->
     <section
-      class="p-4 sm:p-6 border-b border-border-subtle bg-gradient-to-b from-[#0a0a0a] to-background-dark"
+      class="p-4 sm:p-6 border-b border-border-subtle bg-gradient-to-b from-bg-deep to-background-dark"
     >
       <div class="flex items-center justify-between mb-4">
-        <h1 class="text-2xl font-bold text-white tracking-tight">The Extraction Hub</h1>
+        <h1 class="text-2xl font-semibold text-chrome tracking-tight">Upload Studio</h1>
         <span
-          class="text-[10px] font-mono text-primary bg-primary/10 px-2 py-1 rounded border border-primary/20 tracking-wider"
+          class="text-[10px] text-primary bg-primary/10 px-2 py-1 rounded border border-primary/25 tracking-wider"
         >
-          SYSTEM ACTIVE
+          READY TO PROCESS
         </span>
       </div>
 
@@ -96,9 +98,9 @@ interface OfflineUploadQueuePayload {
 
     <!-- ─── Upload Pipeline Strip ──────────────────────────────────────── -->
     @if (uploadQueue().length > 0 || serverOnlyDrafts().length > 0) {
-      <section class="px-4 sm:px-6 md:px-8 py-4 border-b border-border-subtle bg-black/30">
-        <h3 class="text-[10px] font-mono text-slate-500 uppercase tracking-widest mb-3">
-          Upload Pipeline
+      <section class="px-4 sm:px-6 md:px-8 py-4 border-b border-border-subtle bg-card-dark/40">
+        <h3 class="text-[10px] text-slate-500 uppercase tracking-widest mb-3">
+          Recent Uploads
         </h3>
         <div class="flex flex-wrap gap-2">
           <!-- Current-session queue items -->
@@ -132,7 +134,7 @@ interface OfflineUploadQueuePayload {
               } @else {
                 <span class="material-symbols-outlined" style="font-size:11px">error</span>
               }
-              <span class="max-w-[100px] truncate">{{ qi.category ?? qi.file.name }}</span>
+              <span class="max-w-[100px] truncate">{{ getUploadChipLabel(qi) }}</span>
               @if (qi.status === 'ready' && qi.draftId) {
                 <button
                   class="ml-1 underline text-green-400 hover:text-green-200 touch-target"
@@ -182,7 +184,7 @@ interface OfflineUploadQueuePayload {
               } @else {
                 <span class="material-symbols-outlined" style="font-size:11px">error</span>
               }
-              <span class="max-w-[100px] truncate">{{ draft.category ?? 'Item' }}</span>
+              <span class="max-w-[100px] truncate">{{ getDraftChipLabel(draft) }}</span>
               @if (draft.draftStatus === 'Ready') {
                 <button
                   class="ml-1 underline text-green-400 hover:text-green-200 touch-target"
@@ -323,6 +325,7 @@ interface OfflineUploadQueuePayload {
               [priority]="i < 8"
               [selected]="selectedIds().includes(item.id)"
               (selectToggled)="itemToggled.emit($event)"
+              (detailsRequested)="itemOpened.emit($event)"
               (editRequested)="onEditItem($event)"
               (deleteRequested)="onDeleteItem($event)"
             />
@@ -413,6 +416,7 @@ export class WardrobeComponent implements OnInit {
   readonly selectedIds = input<string[]>([]);
 
   @Output() itemToggled = new EventEmitter<string>();
+  @Output() itemOpened = new EventEmitter<ClothingItem>();
 
   @ViewChild('uploadRef') private readonly uploadRef!: UploadItemComponent;
 
@@ -881,7 +885,12 @@ export class WardrobeComponent implements OnInit {
         const draft = draftMap.get(qi.draftId);
         if (!draft) return qi;
         if (draft.draftStatus === 'Ready') {
-          return { ...qi, status: 'ready' as const, category: draft.category ?? undefined };
+          return {
+            ...qi,
+            status: 'ready' as const,
+            category: draft.category ?? undefined,
+            displayName: draft.title ?? draft.name ?? undefined,
+          };
         }
         if (draft.draftStatus === 'Failed') {
           return {
@@ -1028,6 +1037,16 @@ export class WardrobeComponent implements OnInit {
 
   dismissQueueItem(localId: string): void {
     this.uploadQueue.update((curr) => curr.filter((q) => q.localId !== localId));
+  }
+
+  /** Returns the user-facing label shown in the upload queue chip. */
+  protected getUploadChipLabel(item: UploadQueueItem): string {
+    return item.displayName ?? item.file.name ?? item.category ?? 'Item';
+  }
+
+  /** Returns the user-facing label shown for persisted draft chips. */
+  protected getDraftChipLabel(draft: ClothingItem): string {
+    return draft.title ?? draft.name ?? draft.category ?? 'Item';
   }
 
   // ── Server-only draft actions ─────────────────────────────────────────

@@ -9,7 +9,7 @@
     "lint": "ng lint",
     "lint:fix": "ng lint --fix",
     "watch": "ng build --watch --configuration development",
-    "test": "ng test",
+    "test": "node ./scripts/ng-test.mjs",
     "test:e2e": "playwright test",
     "test:e2e:report": "playwright show-report"
   },

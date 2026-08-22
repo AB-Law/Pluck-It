@@ -20,6 +20,9 @@ import { WardrobeComponent } from '../closet/closet.component';
 import { StylistPanelComponent } from '../stylist/stylist.component';
 import { ProfilePanelComponent } from '../profile/profile-panel.component';
 import { DigestPanelComponent } from '../digest/digest-panel.component';
+import { ItemDetailDrawerComponent } from '../vault/item-detail-drawer.component';
+import { AddToCollectionModalComponent } from '../collections/add-to-collection-modal.component';
+import { ClothingItem } from '../../core/models/clothing-item.model';
 import { AppHeaderComponent } from '../../shared/app-header.component';
 import { MobileNavState } from '../../shared/layout/mobile-nav.state';
 import { showOfflineBlockMessage } from '../../shared/offline-message';
@@ -33,6 +36,8 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
     StylistPanelComponent,
     ProfilePanelComponent,
     DigestPanelComponent,
+    ItemDetailDrawerComponent,
+    AddToCollectionModalComponent,
     AppHeaderComponent,
   ],
   template: `
@@ -56,7 +61,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
       />
       @if (uploadOfflineNotice()) {
         <div
-          class="mx-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300"
+          class="mx-3 rounded-md border border-primary/40 bg-primary-soft px-3 py-2 text-[11px] text-primary"
         >
           {{ uploadOfflineNotice() }}
         </div>
@@ -76,12 +81,25 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
             [searchQuery]="searchQuery()"
             [selectedIds]="selectedIds()"
             (itemToggled)="toggleItemSelection($event)"
+            (itemOpened)="openItemDetails($event)"
           />
         </main>
 
+        @if (selectedItem() && isMobile()) {
+          <div class="mobile-overlay-shell md:hidden" (click)="closeItemDetails()"></div>
+        }
+        <app-item-detail-drawer
+          [mobileMode]="isMobile()"
+          [item]="selectedItem()"
+          (closed)="closeItemDetails()"
+          (editRequested)="openItemEdit($event)"
+          (shareToCollection)="openShareModal($event)"
+          (wearLogged)="onWearLogged($event)"
+        />
+
         <!-- Stylist sidebar — always visible lg+, overlay on mobile -->
         <div
-          class="hidden lg:flex w-96 shrink-0 border-l border-border-subtle flex-col relative"
+          class="hidden lg:flex w-96 shrink-0 border-l border-border-chrome flex-col relative bg-card-dark/40"
           [class.!flex]="stylistOpen()"
           [class.fixed]="stylistOpen()"
           [class.inset-y-0]="stylistOpen() && !isMobile()"
@@ -128,6 +146,10 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
       @if (digestOpen()) {
         <app-digest-panel (closed)="closeDigestPanel()" />
       }
+
+      @if (sharingItem()) {
+        <app-add-to-collection-modal [item]="sharingItem()!" (closed)="sharingItem.set(null)" />
+      }
     </div>
   `,
 })
@@ -150,6 +172,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   protected readonly dragOver = signal(false);
   protected readonly isMobile = signal(false);
   protected readonly uploadOfflineNotice = signal<string | null>(null);
+  protected readonly selectedItem = signal<ClothingItem | null>(null);
+  protected readonly sharingItem = signal<ClothingItem | null>(null);
   protected readonly mobileNavState = inject(MobileNavState);
   private readonly destroyRef = inject(DestroyRef);
   private readonly networkService = inject(NetworkService);
@@ -249,7 +273,34 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   protected openStylist(): void {
+    this.closeItemDetails();
     this.stylistOpen.set(true);
+  }
+
+  protected openItemDetails(item: ClothingItem): void {
+    this.selectedItem.set(item);
+    if (this.isMobile()) {
+      this.stylistOpen.set(false);
+    }
+  }
+
+  protected closeItemDetails(): void {
+    this.selectedItem.set(null);
+  }
+
+  protected openItemEdit(item: ClothingItem): void {
+    this.wardrobeRef?.onEditItem(item);
+  }
+
+  protected openShareModal(item: ClothingItem): void {
+    this.sharingItem.set(item);
+  }
+
+  protected onWearLogged(updated: ClothingItem): void {
+    this.selectedItem.set(updated);
+    this.wardrobeRef?.allItems.update((items) =>
+      items.map((item) => (item.id === updated.id ? updated : item)),
+    );
   }
 
   private applyMobilePanelCommand(panel: string | null): void {
@@ -320,7 +371,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       if (typeof windowCrypto?.getRandomValues === 'function' && windowCrypto) {
         try {
           const values = new Uint32Array(1);
-          windowCrypto.getRandomValues.call(windowCrypto, values);
+          windowCrypto.getRandomValues(values);
           randomSuffix = values[0].toString(16);
         } catch {
           randomSuffix = undefined;
@@ -329,7 +380,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       if (randomSuffix === undefined && windowMsCrypto?.getRandomValues) {
         try {
           const values = new Uint32Array(1);
-          windowMsCrypto.getRandomValues.call(windowMsCrypto, values);
+          windowMsCrypto.getRandomValues(values);
           randomSuffix = values[0].toString(16);
         } catch {
           randomSuffix = undefined;

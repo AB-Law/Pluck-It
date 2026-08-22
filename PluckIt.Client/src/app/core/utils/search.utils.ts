@@ -4,7 +4,7 @@ import { ClothingItem } from '../models/clothing-item.model';
  * Returns true if every whitespace-separated word in `query` appears (as a
  * case-insensitive substring) in at least one searchable field of `item`.
  *
- * Searchable fields: brand, category, notes, tags, aestheticTags, colour names.
+ * Searchable fields: title/name, brand, category, notes, tags, aestheticTags, colour names.
  *
  * Examples:
  *   matchesItem(item, 'black')          → true if any colour is "Black"
@@ -16,6 +16,8 @@ export function matchesItem(item: ClothingItem, query: string): boolean {
   if (!trimmed) return true;
 
   const fields: string[] = [
+    item.title        ?? '',
+    item.name         ?? '',
     item.brand        ?? '',
     item.category     ?? '',
     item.notes        ?? '',

@@ -6,7 +6,7 @@ import { Component, ElementRef, EventEmitter, Input, Output, ViewChild } from '@
   imports: [],
   template: `
     <div
-      class="relative group rounded-xl border-2 border-dashed border-[#333] hover:border-white hover:shadow-[0_0_15px_rgba(255,255,255,0.12)] transition-all duration-300 bg-card-dark/50 p-10 flex flex-col items-center justify-center gap-4 text-center cursor-pointer overflow-hidden"
+      class="relative group rounded-xl border border-border-chrome/80 hover:border-primary hover:shadow-[0_0_20px_rgba(196,131,106,0.2)] transition-all duration-300 bg-card-dark/60 p-10 flex flex-col items-center justify-center gap-4 text-center cursor-pointer overflow-hidden"
       [class.border-primary]="dragging"
       (dragover)="onDragOver($event)"
       (dragleave)="dragging = false"
@@ -26,10 +26,10 @@ import { Component, ElementRef, EventEmitter, Input, Output, ViewChild } from '@
       <div class="absolute top-4 right-4 flex items-center gap-2 z-20">
         @if (uploading) {
           <div class="h-1.5 w-1.5 rounded-full bg-green-500 animate-blink"></div>
-          <span class="text-[10px] font-mono text-green-500 tracking-wider">SYSTEM: SEGMENTING SILHOUETTE...</span>
+          <span class="text-[10px] text-green-500 tracking-wider">Processing images...</span>
         } @else {
-          <div class="h-1.5 w-1.5 rounded-full bg-[#444]"></div>
-          <span class="text-[10px] font-mono text-[#555] tracking-wider">SYSTEM: READY</span>
+          <div class="h-1.5 w-1.5 rounded-full bg-border-chrome"></div>
+          <span class="text-[10px] text-slate-500 tracking-wider">Upload ready</span>
         }
       </div>
 
@@ -39,25 +39,25 @@ import { Component, ElementRef, EventEmitter, Input, Output, ViewChild } from '@
       }
 
       <!-- Dark overlay -->
-      <div class="absolute inset-0 bg-black/30 z-0 pointer-events-none"></div>
+      <div class="absolute inset-0 bg-[radial-gradient(circle_at_20%_15%,rgba(196,131,106,0.1),transparent_45%)] z-0 pointer-events-none"></div>
 
       <!-- Icon -->
-      <div class="bg-[#223649] p-4 rounded-full group-hover:bg-[#2e3f55] transition-colors z-10 relative">
-        <span class="material-symbols-outlined text-white" style="font-size:36px">cloud_upload</span>
+      <div class="bg-primary/20 p-4 rounded-full group-hover:bg-primary/30 transition-colors z-10 relative">
+        <span class="material-symbols-outlined text-chrome" style="font-size:36px">cloud_upload</span>
       </div>
 
       <!-- Text -->
       <div class="z-10 relative">
-        <p class="text-lg font-semibold text-white">Drop clothing images to scan</p>
-        <p class="text-slate-text text-sm mt-1">Select multiple photos — AI removes backgrounds and tags attributes.</p>
+        <p class="text-lg font-semibold text-chrome">Drop clothing images to scan</p>
+        <p class="text-slate-text text-sm mt-1">Select multiple photos - AI removes backgrounds and tags attributes.</p>
       </div>
 
       <!-- Supported formats -->
       <div class="flex gap-2 mt-1 z-10 relative">
         @for (fmt of ['JPG', 'PNG', 'HEIC']; track fmt) {
-          <span class="text-[10px] font-mono uppercase text-slate-500 bg-black/60 border border-[#333] px-2 py-1 rounded">{{ fmt }}</span>
+          <span class="text-[10px] uppercase text-slate-500 bg-app-elevated border border-border-chrome px-2 py-1 rounded">{{ fmt }}</span>
         }
-        <span class="text-[10px] font-mono uppercase text-slate-500 bg-black/60 border border-[#333] px-2 py-1 rounded">MULTI-SELECT</span>
+        <span class="text-[10px] uppercase text-slate-500 bg-app-elevated border border-border-chrome px-2 py-1 rounded">MULTI-SELECT</span>
       </div>
     </div>
   `,

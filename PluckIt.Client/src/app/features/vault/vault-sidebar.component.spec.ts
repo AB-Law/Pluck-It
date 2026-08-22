@@ -16,14 +16,6 @@ describe('VaultSidebarComponent', () => {
       ],
     }).compileComponents();
 
-    if (!('elementFromPoint' in document)) {
-      Object.defineProperty(document, 'elementFromPoint', {
-        value: vi.fn(),
-        configurable: true,
-        writable: true,
-      });
-    }
-
     fixture = TestBed.createComponent(VaultSidebarComponent);
     component = fixture.componentInstance;
     component.filtersChange.subscribe(value => { emitted = value; });
@@ -42,7 +34,7 @@ describe('VaultSidebarComponent', () => {
     fixture.componentRef.setInput('initialFilters', {
       group: 'favorites',
       priceRange: [200, 400],
-      minWears: 3,
+      wearRange: [3, 40],
       brand: 'Nike',
       condition: 'Good',
       sortField: 'wearCount',
@@ -52,7 +44,7 @@ describe('VaultSidebarComponent', () => {
 
     expect(component.activeGroup()).toBe('favorites');
     expect(component.priceRange()).toEqual([200, 400]);
-    expect(component.minWears()).toBe(3);
+    expect(component.wearRange()).toEqual([3, 40]);
     expect(component.brandFilter()).toBe('Nike');
     expect(component.activeCondition()).toBe('Good');
     expect(component.sortField()).toBe('wearCount');
@@ -76,6 +68,9 @@ describe('VaultSidebarComponent', () => {
 
     component.toggleCondition('Good');
     expect(emitted?.condition).toBe('Good');
+
+    component.onWearsChange([5, 20]);
+    expect(emitted?.wearRange).toEqual([5, 20]);
   });
 
   it('clears all filters and restores defaults', () => {
@@ -84,7 +79,7 @@ describe('VaultSidebarComponent', () => {
     fixture.componentRef.setInput('initialFilters', {
       group: 'favorites',
       priceRange: [10, 200],
-      minWears: 5,
+      wearRange: [5, 22],
       brand: 'COS',
       condition: 'Good',
       sortField: 'wearCount',
@@ -94,7 +89,7 @@ describe('VaultSidebarComponent', () => {
     component.clearAll();
 
     expect(component.priceRange()).toEqual([0, 1000]);
-    expect(component.minWears()).toBe(0);
+    expect(component.wearRange()).toEqual([0, 200]);
     expect(component.brandFilter()).toBe('');
     expect(component.activeCondition()).toBe('');
     expect(component.sortField()).toBe('dateAdded');
@@ -102,36 +97,10 @@ describe('VaultSidebarComponent', () => {
     expect(emitted?.brand).toBe('');
   });
 
-  it('tracks wear slider drag only when dragging and rounds to nearest integer', () => {
-    const track = document.createElement('div');
-    track.className = 'relative';
-    vi.spyOn(track, 'getBoundingClientRect').mockReturnValue({
-      left: 0,
-      width: 200,
-      top: 0,
-      right: 200,
-      bottom: 0,
-      x: 0,
-      y: 0,
-      height: 0,
-      toJSON: () => ({}),
-    } as DOMRect);
-    const thumb = { closest: vi.fn().mockReturnValue(track) } as unknown as Element;
-    const spy = vi.spyOn(document, 'elementFromPoint').mockReturnValue(thumb);
-    component.startWearDrag(new PointerEvent('pointerdown', { clientX: 0, clientY: 0 }) );
-    spy.mockReturnValue(track);
-    component.onWearDrag(new PointerEvent('pointermove', { clientX: 200, clientY: 0 }) );
-    expect(component.minWears()).toBe(200);
-    component.stopWearDrag();
-    component.onWearDrag(new PointerEvent('pointermove', { clientX: 20, clientY: 0 }) );
-    expect(component.minWears()).toBe(200);
-  });
-
   it('detects active filters and computed percentage label', () => {
     expect(component.hasActiveFilters()).toBe(false);
     component.onBrandChange('Ralph');
     expect(component.hasActiveFilters()).toBe(true);
-    expect(component.wearPct()).toBe(0);
     expect(component.priceLabel()).toContain('$');
     expect(component.sortOptions.length).toBeGreaterThan(2);
   });

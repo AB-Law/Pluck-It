@@ -6,6 +6,7 @@ import { routes } from './app.routes';
 import { AuthService } from './core/services/auth.service';
 import { AuthInterceptor } from './core/interceptors/auth.interceptor';
 import { OfflineQueueService } from './core/services/offline-queue.service';
+import { ThemeService } from './shared/theme.service';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -19,5 +20,6 @@ export const appConfig: ApplicationConfig = {
     },
     provideAppInitializer(() => inject(AuthService).initialize()),
     provideAppInitializer(() => inject(OfflineQueueService).initialize()),
+    provideAppInitializer(() => inject(ThemeService).initialize()),
   ]
 };

@@ -371,7 +371,7 @@ export class ProfilePanelComponent implements OnInit {
   readonly saveError = signal<string | null>(null);
 
   draft: UserProfile = {
-    currencyCode: 'USD',
+    currencyCode: 'INR',
     preferredSizeSystem: 'US',
     stylePreferences: [],
     favoriteBrands: [],

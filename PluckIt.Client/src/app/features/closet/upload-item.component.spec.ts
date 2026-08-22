@@ -30,6 +30,12 @@ describe('UploadItemComponent', () => {
     expect(component).toBeTruthy();
   });
 
+  it('shows refreshed upload status copy', () => {
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('Upload ready');
+    expect(root.textContent).not.toContain('SYSTEM: READY');
+  });
+
   it('opens file selector when asked', () => {
     const input = fixture.nativeElement.querySelector('input[type="file"]') as HTMLInputElement;
     const clickSpy = vi.spyOn(input, 'click');

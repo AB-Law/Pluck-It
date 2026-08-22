@@ -11,7 +11,7 @@ export type SmartGroup = 'all' | 'favorites' | 'recent' | 'collections' | 'wishl
 export interface VaultFilters {
   group: SmartGroup;
   priceRange: [number, number];
-  minWears: number;
+  wearRange: [number, number];
   brand?: string;
   condition?: ItemCondition | '';
   sortField: WardrobeSortField;
@@ -56,20 +56,20 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
   imports: [FormsModule, RouterLink, RangeSliderComponent],
   template: `
     <aside
-      class="w-64 flex-shrink-0 flex-col border-r border-border-chrome bg-black p-6 overflow-y-auto"
+      class="w-64 flex-shrink-0 flex-col border-r border-border-chrome bg-card-dark/85 p-6 overflow-y-auto backdrop-blur-sm"
       [class.fixed]="mobileMode()"
       [class.inset-0]="mobileMode()"
       [class.z-50]="mobileMode()"
       [class.right-0]="mobileMode()"
-      [class.bg-black]="mobileMode()"
+      [class.bg-card-dark]="mobileMode()"
       [class.w-full]="mobileMode()"
     >
       @if (mobileMode()) {
         <div class="mb-4 flex items-center justify-between">
-          <h3 class="text-sm font-bold uppercase tracking-wider text-slate-500">Filters</h3>
+          <h3 class="text-sm font-bold uppercase tracking-wider text-app-soft">Filters</h3>
           <button
             type="button"
-            class="h-10 w-10 flex items-center justify-center rounded-lg bg-card-dark text-slate-text hover:text-white hover:bg-[#333] touch-target"
+            class="h-10 w-10 flex items-center justify-center rounded-lg bg-background-dark text-slate-text hover:text-chrome hover:bg-bg-soft touch-target"
             title="Close filters"
             aria-label="Close filters"
             (click)="closed.emit()"
@@ -81,7 +81,7 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
 
       <!-- Smart Groups -->
       <div class="mb-8">
-        <h3 class="mb-4 text-xs font-bold uppercase tracking-widest text-slate-500">
+        <h3 class="mb-4 text-xs font-bold uppercase tracking-widest text-app-soft">
           Smart Groups
         </h3>
         <nav class="space-y-1">
@@ -91,7 +91,7 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
               [class]="
                 g.id === activeGroup()
                   ? 'bg-primary/10 text-primary'
-                  : 'text-slate-400 hover:bg-card-dark hover:text-slate-100'
+                  : 'text-slate-400 hover:bg-background-dark hover:text-chrome'
               "
               (click)="selectGroup(g.id)"
             >
@@ -101,7 +101,7 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
           }
           <a
             routerLink="/collections"
-            class="touch-target w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-400 hover:bg-card-dark hover:text-slate-100 transition-colors"
+            class="touch-target w-full flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-400 hover:bg-background-dark hover:text-chrome transition-colors"
           >
             <span class="material-symbols-outlined text-lg">folder_special</span>
             Collections
@@ -111,9 +111,9 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
 
       <!-- Sort -->
       <div class="mb-8">
-        <h3 class="mb-4 text-xs font-bold uppercase tracking-widest text-slate-500">Sort By</h3>
+        <h3 class="mb-4 text-xs font-bold uppercase tracking-widest text-app-soft">Sort By</h3>
         <select
-          class="w-full rounded-lg bg-card-dark border border-[#333] text-sm text-slate-200 px-3 py-2 outline-none focus:border-primary/60 transition-colors font-mono"
+          class="w-full rounded-lg bg-background-dark border border-border-chrome text-sm text-slate-200 px-3 py-2 outline-none focus:border-primary/60 transition-colors font-mono"
           [ngModel]="sortKey()"
           (ngModelChange)="onSortChange($event)"
         >
@@ -124,15 +124,15 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
       </div>
 
       <!-- Range Matrix -->
-      <div class="mb-8">
-        <h3 class="mb-4 text-xs font-bold uppercase tracking-widest text-slate-500">
+      <div class="mb-6">
+        <h3 class="mb-3 text-[10px] font-bold uppercase tracking-[0.16em] text-app-soft">
           The Range Matrix
         </h3>
-        <div class="space-y-6 px-1">
+        <div class="space-y-4 px-0.5">
           <!-- Price Range -->
           <div>
-            <div class="mb-3 flex justify-between text-xs font-medium font-mono">
-              <span class="text-slate-400">Price Range</span>
+            <div class="mb-2 flex justify-between text-[10px] font-medium font-mono">
+              <span class="text-slate-400 uppercase tracking-wide">Price Range</span>
               <span class="text-primary">{{ priceLabel() }}</span>
             </div>
             <app-range-slider
@@ -144,49 +144,41 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
             />
           </div>
 
-          <!-- Min Wears -->
+          <!-- Wear Range -->
           <div>
-            <div class="mb-3 flex justify-between text-xs font-medium font-mono">
-              <span class="text-slate-400">Min. Wears</span>
-              <span class="text-primary">{{ minWears() }}+ Wear</span>
+            <div class="mb-2 flex justify-between text-[10px] font-medium font-mono">
+              <span class="text-slate-400 uppercase tracking-wide">Wear Range</span>
+              <span class="text-primary">{{ wearRange()[0] }} - {{ wearRange()[1] }} wears</span>
             </div>
-            <div class="relative h-1 w-full rounded-full bg-border-chrome">
-              <div
-                class="absolute h-full rounded-full bg-primary"
-                [style.width.%]="wearPct()"
-              ></div>
-              <div
-                class="absolute top-1/2 h-3 w-3 rounded-full border-2 border-primary bg-black cursor-pointer"
-                [style.left.%]="wearPct()"
-                style="transform: translate(-50%, -50%)"
-                class="touch-target cursor-pointer"
-                (pointerdown)="startWearDrag($event)"
-                (document:pointermove)="onWearDrag($event)"
-                (document:pointerup)="stopWearDrag()"
-              ></div>
-            </div>
+            <app-range-slider
+              [min]="0"
+              [max]="maxWears"
+              [step]="1"
+              [(value)]="wearRange"
+              (valueChange)="onWearsChange($event)"
+            />
           </div>
         </div>
       </div>
 
       <!-- Brand Filter -->
       <div class="mb-8">
-        <h3 class="mb-4 text-xs font-bold uppercase tracking-widest text-slate-500">Brand</h3>
+        <h3 class="mb-4 text-xs font-bold uppercase tracking-widest text-app-soft">Brand</h3>
         <div
-          class="flex items-center rounded-lg bg-card-dark border border-[#333] focus-within:border-primary/60 transition-colors"
+          class="flex items-center rounded-lg bg-background-dark border border-border-chrome focus-within:border-primary/60 transition-colors"
         >
           <span class="pl-3 text-slate-500 material-symbols-outlined" style="font-size:16px"
             >search</span
           >
           <input
-            class="w-full bg-transparent text-sm text-white placeholder-slate-500 outline-none py-2 px-2 font-mono"
+            class="w-full bg-transparent text-sm text-chrome placeholder-slate-500 outline-none py-2 px-2 font-mono"
             placeholder="e.g. Nike, Zara..."
             [ngModel]="brandFilter()"
             (ngModelChange)="onBrandChange($event)"
           />
           @if (brandFilter()) {
             <button
-              class="touch-target pr-3 text-slate-500 hover:text-white"
+              class="touch-target pr-3 text-slate-500 hover:text-chrome"
               (click)="onBrandChange('')"
             >
               <span class="material-symbols-outlined" style="font-size:14px">close</span>
@@ -197,7 +189,7 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
 
       <!-- Condition Filter -->
       <div class="mb-8">
-        <h3 class="mb-4 text-xs font-bold uppercase tracking-widest text-slate-500">Condition</h3>
+        <h3 class="mb-4 text-xs font-bold uppercase tracking-widest text-app-soft">Condition</h3>
         <div class="flex flex-wrap gap-2">
           @for (c of conditions; track c.value) {
             <button
@@ -205,7 +197,7 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
               [class]="
                 activeCondition() === c.value
                   ? 'bg-primary/15 border-primary/50 text-primary'
-                  : 'bg-card-dark border-[#333] text-slate-400 hover:border-slate-500 hover:text-white'
+                  : 'bg-background-dark border-border-chrome text-slate-400 hover:border-primary/40 hover:text-chrome'
               "
               (click)="toggleCondition(c.value)"
             >
@@ -218,7 +210,7 @@ const CONDITIONS: Array<{ label: string; value: ItemCondition }> = [
       <!-- Clear All -->
       @if (hasActiveFilters()) {
         <button
-          class="touch-target w-full text-xs font-bold uppercase tracking-widest py-2 rounded-lg border border-[#333] text-slate-500 hover:text-white hover:border-slate-500 transition-colors"
+          class="touch-target w-full text-xs font-bold uppercase tracking-widest py-2 rounded-lg border border-border-chrome text-slate-500 hover:text-chrome hover:border-primary/40 transition-colors"
           (click)="clearAll()"
         >
           Clear All Filters
@@ -241,14 +233,13 @@ export class VaultSidebarComponent implements OnInit {
 
   activeGroup = signal<SmartGroup>('all');
   priceRange = signal<[number, number]>([0, 5000]);
-  minWears = signal<number>(0);
+  wearRange = signal<[number, number]>([0, 200]);
   brandFilter = signal<string>('');
   activeCondition = signal<ItemCondition | ''>('');
   sortField = signal<WardrobeSortField>('dateAdded');
   sortDir = signal<'asc' | 'desc'>('desc');
 
-  private wearDragging = false;
-  private readonly maxWears = 200;
+  readonly maxWears = 200;
 
   readonly sortOptions = SORT_OPTIONS;
   readonly conditions = CONDITIONS;
@@ -268,15 +259,14 @@ export class VaultSidebarComponent implements OnInit {
     return `${sym}${lo.toLocaleString()} - ${sym}${hi.toLocaleString()}`;
   });
 
-  readonly wearPct = computed(() => (this.minWears() / this.maxWears) * 100);
-
   readonly hasActiveFilters = computed(
     () =>
       !!this.brandFilter() ||
       !!this.activeCondition() ||
       this.priceRange()[0] > 0 ||
       this.priceRange()[1] < this.maxPrice() ||
-      this.minWears() > 0 ||
+      this.wearRange()[0] > 0 ||
+      this.wearRange()[1] < this.maxWears ||
       this.sortField() !== 'dateAdded' ||
       this.sortDir() !== 'desc',
   );
@@ -285,7 +275,7 @@ export class VaultSidebarComponent implements OnInit {
     const init = this.initialFilters();
     if (init.group) this.activeGroup.set(init.group);
     if (init.priceRange) this.priceRange.set(init.priceRange);
-    if (init.minWears) this.minWears.set(init.minWears);
+    if (init.wearRange) this.wearRange.set(init.wearRange);
     if (init.brand) this.brandFilter.set(init.brand);
     if (init.condition) this.activeCondition.set(init.condition);
     if (init.sortField) this.sortField.set(init.sortField);
@@ -321,7 +311,7 @@ export class VaultSidebarComponent implements OnInit {
 
   clearAll(): void {
     this.priceRange.set([0, this.maxPrice()]);
-    this.minWears.set(0);
+    this.wearRange.set([0, this.maxWears]);
     this.brandFilter.set('');
     this.activeCondition.set('');
     this.sortField.set('dateAdded');
@@ -329,23 +319,8 @@ export class VaultSidebarComponent implements OnInit {
     this.emit();
   }
 
-  startWearDrag(e: PointerEvent): void {
-    e.preventDefault();
-    this.wearDragging = true;
-    (e.currentTarget as HTMLElement | null)?.setPointerCapture?.(e.pointerId);
-  }
-  stopWearDrag(): void {
-    this.wearDragging = false;
-  }
-
-  onWearDrag(e: PointerEvent): void {
-    if (!this.wearDragging) return;
-    const thumb = document.elementFromPoint(e.clientX, e.clientY);
-    const track = thumb?.closest('.relative') as HTMLElement | null;
-    if (!track) return;
-    const rect = track.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    this.minWears.set(Math.round(ratio * this.maxWears));
+  onWearsChange(range: [number, number]): void {
+    this.wearRange.set(range);
     this.emit();
   }
 
@@ -353,7 +328,7 @@ export class VaultSidebarComponent implements OnInit {
     this.filtersChange.emit({
       group: this.activeGroup(),
       priceRange: this.priceRange(),
-      minWears: this.minWears(),
+      wearRange: this.wearRange(),
       brand: this.brandFilter(),
       condition: this.activeCondition(),
       sortField: this.sortField(),

@@ -49,7 +49,7 @@ describe('VaultCardComponent', () => {
 
     fixture.componentRef.setInput('cpwBadge', 'low');
     fixture.detectChanges();
-    expect(component.cpwBadgeClass()).toContain('bg-emerald-900/40');
+    expect(component.cpwBadgeClass()).toContain('bg-success-soft');
   });
 
   it('falls back to N/A for cpw when wear count is zero', () => {

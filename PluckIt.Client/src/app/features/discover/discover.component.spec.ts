@@ -158,6 +158,24 @@ describe('DiscoverComponent', () => {
     expect(query.pageSize).toBe(50);
   });
 
+  it('waits for sources to load before fetching initial feed', () => {
+    let emitSources: ((value: ScraperSource[]) => void) | undefined;
+    discoverService.getSources = vi.fn().mockReturnValue(
+      new Observable((observer: { next: (value: ScraperSource[]) => void }) => {
+        emitSources = observer.next.bind(observer);
+      }),
+    );
+    discoverService.getFeed.mockClear();
+
+    fixture = TestBed.createComponent(DiscoverComponent);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+
+    expect(discoverService.getFeed).not.toHaveBeenCalled();
+    emitSources?.(SOURCES);
+    expect(discoverService.getFeed).toHaveBeenCalledTimes(1);
+  });
+
   it('switches sort and time filters by reloading feed', () => {
     component.setSortBy('recent');
     component.setTimeRange('7d');
@@ -448,7 +466,7 @@ describe('DiscoverComponent', () => {
     component.onCardClick({ ...ITEM, galleryImages: ['/1.jpg', '/2.jpg', '/3.jpg'] });
     fixture.detectChanges();
 
-    const modalElement = fixture.debugElement.query(By.css('div[style*="background: rgba(0,0,0,0.75)"]'));
+    const modalElement = fixture.debugElement.query(By.css('div[style*="--color-overlay"]'));
     const likeButtons = fixture.debugElement.queryAll(By.css('[title="Not for me"], [title="Love it"]'));
     expect(likeButtons.length).toBeGreaterThan(0);
     const priorSendCalls = discoverService.sendFeedback.mock.calls.length;
@@ -486,7 +504,7 @@ describe('DiscoverComponent', () => {
 
     component.onCardClick({ ...ITEM, galleryImages: [] });
     fixture.detectChanges();
-    const singleModal = fixture.debugElement.query(By.css('div[style*="background: rgba(0,0,0,0.75)"]'));
+    const singleModal = fixture.debugElement.query(By.css('div[style*="--color-overlay"]'));
     singleModal.triggerEventHandler('click', {});
     fixture.detectChanges();
     expect(asInternal().selectedItem()).toBeNull();

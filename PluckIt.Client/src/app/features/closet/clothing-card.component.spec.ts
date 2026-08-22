@@ -114,11 +114,43 @@ describe('ClothingCardComponent', () => {
     expect(component.menuOpen()).toBe(false);
   });
 
-  it('emits select on UI button click', () => {
+  it('uses explicit add-to-current-styling copy and emits select on click', () => {
     const selectToggled = vi.fn();
     component.selectToggled.subscribe(selectToggled);
-    const button = fixture.nativeElement.querySelector('[aria-label="Add to styling"]') as HTMLButtonElement;
+    const button = fixture.nativeElement.querySelector(
+      '[aria-label="Add to current styling"]',
+    ) as HTMLButtonElement;
+    expect(button.title).toBe('Add to current styling');
     button.click();
     expect(selectToggled).toHaveBeenCalledWith('item-1');
+  });
+
+  it('emits details request when card is clicked', () => {
+    const detailsRequested = vi.fn();
+    component.detailsRequested.subscribe(detailsRequested);
+    const card = fixture.nativeElement.querySelector('.group') as HTMLDivElement;
+    card.click();
+    expect(detailsRequested).toHaveBeenCalledWith(ITEM);
+  });
+
+  it('prefers explicit item title over category for card heading', () => {
+    fixture = TestBed.createComponent(ClothingCardComponent);
+    component = fixture.componentInstance;
+    component.item = { ...ITEM, title: 'Aime Leon Dore Tee', category: 'Tops' };
+    fixture.detectChanges();
+
+    const heading = fixture.nativeElement.querySelector('h3') as HTMLHeadingElement;
+    expect(heading.textContent).toContain('Aime Leon Dore Tee');
+    expect(heading.textContent).not.toContain('Tops');
+  });
+
+  it('falls back to category when title and name are missing', () => {
+    fixture = TestBed.createComponent(ClothingCardComponent);
+    component = fixture.componentInstance;
+    component.item = { ...ITEM, title: null, name: null, category: 'Outerwear' };
+    fixture.detectChanges();
+
+    const heading = fixture.nativeElement.querySelector('h3') as HTMLHeadingElement;
+    expect(heading.textContent).toContain('Outerwear');
   });
 });

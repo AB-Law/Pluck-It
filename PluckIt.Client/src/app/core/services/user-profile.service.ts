@@ -30,7 +30,7 @@ export interface UserProfile {
 }
 
 const DEFAULT_PROFILE: UserProfile = {
-  currencyCode: 'USD',
+  currencyCode: 'INR',
   preferredSizeSystem: 'US',
   stylePreferences: [],
   favoriteBrands: [],

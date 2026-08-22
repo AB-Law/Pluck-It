@@ -2,6 +2,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { ActivatedRoute, Router, convertToParamMap } from '@angular/router';
 import { of } from 'rxjs';
 import { AppHeaderComponent } from './app-header.component';
+import { ThemeService } from './theme.service';
 
 describe('AppHeaderComponent', () => {
   let fixture: ComponentFixture<AppHeaderComponent>;
@@ -15,6 +16,10 @@ describe('AppHeaderComponent', () => {
   const route = {
     snapshot: { queryParamMap: convertToParamMap({}) },
     queryParamMap: of(convertToParamMap({})),
+  };
+  const themeService = {
+    theme: vi.fn(() => 'dark' as const),
+    toggleTheme: vi.fn(),
   };
 
   beforeEach(async () => {
@@ -57,6 +62,7 @@ describe('AppHeaderComponent', () => {
       providers: [
         { provide: Router, useValue: router },
         { provide: ActivatedRoute, useValue: route },
+        { provide: ThemeService, useValue: themeService },
       ],
     }).compileComponents();
 
@@ -139,5 +145,40 @@ describe('AppHeaderComponent', () => {
     for (const el of actions) {
       expect(el.getAttribute('title') ?? el.getAttribute('aria-label')).toBeTruthy();
     }
+  });
+
+  it('renders visible hover tooltip labels for top-right icon actions', () => {
+    fixture.componentRef.setInput('showUpload', true);
+    fixture.componentRef.setInput('showStylistShortcut', true);
+    fixture.componentRef.setInput('showDigest', true);
+    fixture.detectChanges();
+
+    const labels = Array.from(
+      fixture.nativeElement.querySelectorAll('[data-nav-tooltip]') as NodeListOf<HTMLElement>,
+      (element) => element.textContent?.trim() ?? '',
+    );
+
+    expect(labels).toEqual(
+      expect.arrayContaining([
+        'Upload',
+        'Stylist',
+        'Vault',
+        'Collections',
+        'Discover',
+        'Weekly digest',
+        'Notifications',
+        'Settings',
+      ]),
+    );
+  });
+
+  it('renders and toggles theme when icon button is clicked', () => {
+    fixture.detectChanges();
+    const buttons: HTMLButtonElement[] = Array.from(fixture.nativeElement.querySelectorAll('button'));
+    const toggleButton = buttons.find((btn) => btn.ariaLabel === 'Switch to light mode');
+    expect(toggleButton).toBeTruthy();
+
+    toggleButton?.click();
+    expect(themeService.toggleTheme).toHaveBeenCalledTimes(1);
   });
 });
